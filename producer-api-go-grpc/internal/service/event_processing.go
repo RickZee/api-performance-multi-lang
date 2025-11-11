@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"go.uber.org/zap"
+	"producer-api-go-grpc/internal/constants"
 )
 
 type EventProcessingService struct {
@@ -29,12 +30,12 @@ func NewEventProcessingService(repo *repository.CarEntityRepository, logger *zap
 func (s *EventProcessingService) logPersistedEventCount() {
 	count := s.persistedEventCount.Add(1)
 	if count%10 == 0 {
-		s.logger.Info("*** Persisted events count", zap.Uint64("count", count))
+		s.logger.Info(fmt.Sprintf("%s *** Persisted events count", constants.APIName()), zap.Uint64("count", count))
 	}
 }
 
 func (s *EventProcessingService) ProcessEntityUpdate(ctx context.Context, entityType, entityID string, updatedAttributes map[string]string) error {
-	s.logger.Info("Processing entity creation",
+	s.logger.Info(fmt.Sprintf("%s Processing entity creation", constants.APIName()),
 		zap.String("entity_type", entityType),
 		zap.String("entity_id", entityID),
 	)
@@ -45,13 +46,13 @@ func (s *EventProcessingService) ProcessEntityUpdate(ctx context.Context, entity
 	}
 
 	if exists {
-		s.logger.Warn("Entity already exists, updating", zap.String("entity_id", entityID))
+		s.logger.Warn(fmt.Sprintf("%s Entity already exists, updating", constants.APIName()), zap.String("entity_id", entityID))
 		if err := s.UpdateExistingEntity(ctx, entityType, entityID, updatedAttributes); err != nil {
 			return fmt.Errorf("failed to update existing entity: %w", err)
 		}
 		s.logPersistedEventCount()
 	} else {
-		s.logger.Info("Entity does not exist, creating new", zap.String("entity_id", entityID))
+		s.logger.Info(fmt.Sprintf("%s Entity does not exist, creating new", constants.APIName()), zap.String("entity_id", entityID))
 		if err := s.CreateNewEntity(ctx, entityType, entityID, updatedAttributes); err != nil {
 			return fmt.Errorf("failed to create new entity: %w", err)
 		}
@@ -78,7 +79,7 @@ func (s *EventProcessingService) CreateNewEntity(ctx context.Context, entityType
 		return fmt.Errorf("failed to insert entity into database: %w", err)
 	}
 
-	s.logger.Info("Successfully created entity", zap.String("entity_id", entity.ID))
+	s.logger.Info(fmt.Sprintf("%s Successfully created entity", constants.APIName()), zap.String("entity_id", entity.ID))
 	return nil
 }
 
@@ -117,7 +118,7 @@ func (s *EventProcessingService) UpdateExistingEntity(ctx context.Context, entit
 		return fmt.Errorf("failed to update entity in database: %w", err)
 	}
 
-	s.logger.Info("Successfully updated entity", zap.String("entity_id", existingEntity.ID))
+	s.logger.Info(fmt.Sprintf("%s Successfully updated entity", constants.APIName()), zap.String("entity_id", existingEntity.ID))
 	return nil
 }
 

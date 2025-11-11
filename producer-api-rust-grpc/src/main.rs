@@ -1,10 +1,12 @@
 mod config;
+mod constants;
 mod error;
 mod repository;
 mod service;
 
 use anyhow::Context;
 use config::Config;
+use constants::API_NAME;
 use repository::CarEntityRepository;
 use service::event_service::create_service;
 use sqlx::postgres::PgPoolOptions;
@@ -30,7 +32,8 @@ async fn main() -> anyhow::Result<()> {
         .init();
 
     tracing::info!(
-        "Starting Producer API Rust gRPC server on port {}",
+        "{} Starting Producer API Rust gRPC server on port {}",
+        API_NAME,
         config.server_port
     );
 
@@ -41,7 +44,7 @@ async fn main() -> anyhow::Result<()> {
         .await
         .context("Failed to connect to database")?;
 
-    tracing::info!("Connected to database");
+    tracing::info!("{} Connected to database", API_NAME);
 
     // Run migrations
     sqlx::migrate!("./migrations")
@@ -49,7 +52,7 @@ async fn main() -> anyhow::Result<()> {
         .await
         .context("Failed to run migrations")?;
 
-    tracing::info!("Database migrations completed");
+    tracing::info!("{} Database migrations completed", API_NAME);
 
     // Initialize repository and service
     let repository = CarEntityRepository::new(pool);
@@ -57,7 +60,7 @@ async fn main() -> anyhow::Result<()> {
 
     // Start gRPC server
     let addr = SocketAddr::from(([0, 0, 0, 0], config.server_port));
-    tracing::info!("gRPC server listening on {}", addr);
+    tracing::info!("{} gRPC server listening on {}", API_NAME, addr);
 
     Server::builder()
         .add_service(event_service)

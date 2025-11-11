@@ -1,6 +1,7 @@
 package com.example;
 
 import ch.qos.logback.classic.Logger;
+import com.example.constants.ApiConstants;
 import ch.qos.logback.classic.spi.ILoggingEvent;
 import ch.qos.logback.core.read.ListAppender;
 import com.example.grpc.*;
@@ -80,6 +81,7 @@ class EventLoggingIntegrationTest {
 
         assertThat(receivedLogs).isNotEmpty();
         assertThat(receivedLogs.get(0).getFormattedMessage())
+                .contains(ApiConstants.API_NAME)
                 .contains("Received gRPC event: LoanPaymentSubmitted");
     }
 
@@ -106,6 +108,7 @@ class EventLoggingIntegrationTest {
 
         assertThat(processingLogs).isNotEmpty();
         assertThat(processingLogs.get(0).getFormattedMessage())
+                .contains(ApiConstants.API_NAME)
                 .contains("Processing event:");
     }
 
@@ -132,6 +135,7 @@ class EventLoggingIntegrationTest {
 
         assertThat(createLogs).isNotEmpty();
         assertThat(createLogs.get(0).getFormattedMessage())
+                .contains(ApiConstants.API_NAME)
                 .contains("Creating new entity with ID: loan-grpc-log-003");
     }
 
@@ -158,6 +162,7 @@ class EventLoggingIntegrationTest {
 
         assertThat(successLogs).isNotEmpty();
         assertThat(successLogs.get(0).getFormattedMessage())
+                .contains(ApiConstants.API_NAME)
                 .contains("Successfully created entity: loan-grpc-log-004");
     }
 
@@ -184,11 +189,13 @@ class EventLoggingIntegrationTest {
 
         assertThat(countLogs.size()).isGreaterThanOrEqualTo(2);
         
-        // Verify log format
+        // Verify log format with API name
         boolean found10 = countLogs.stream()
-                .anyMatch(log -> log.getFormattedMessage().contains("Persisted events count: 10"));
+                .anyMatch(log -> log.getFormattedMessage().contains("[producer-api-java-grpc]")
+                        && log.getFormattedMessage().contains("Persisted events count: 10"));
         boolean found20 = countLogs.stream()
-                .anyMatch(log -> log.getFormattedMessage().contains("Persisted events count: 20"));
+                .anyMatch(log -> log.getFormattedMessage().contains("[producer-api-java-grpc]")
+                        && log.getFormattedMessage().contains("Persisted events count: 20"));
 
         assertThat(found10).isTrue();
         assertThat(found20).isTrue();
@@ -217,6 +224,7 @@ class EventLoggingIntegrationTest {
 
         String allLogs = String.join("\n", logMessages);
 
+        assertThat(allLogs).contains("[producer-api-java-grpc]");
         assertThat(allLogs).contains("Received gRPC event:");
         assertThat(allLogs).contains("Processing event:");
         assertThat(allLogs).contains("Creating new entity with ID:");

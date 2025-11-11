@@ -13,6 +13,8 @@ use proto::{
     EventRequest, EventResponse, HealthRequest, HealthResponse,
 };
 
+use crate::constants::API_NAME;
+
 pub struct EventServiceImpl {
     event_processing_service: EventProcessingService,
 }
@@ -37,7 +39,7 @@ impl EventService for EventServiceImpl {
         let event_name = req.event_header.as_ref()
             .map(|h| h.event_name.as_str())
             .unwrap_or("unknown");
-        tracing::info!("Received gRPC event: {}", event_name);
+        tracing::info!("{} Received gRPC event: {}", API_NAME, event_name);
 
         // Validate request
         let event_header = req.event_header.ok_or_else(|| {
@@ -91,7 +93,7 @@ impl EventService for EventServiceImpl {
         &self,
         _request: Request<HealthRequest>,
     ) -> Result<Response<HealthResponse>, Status> {
-        tracing::info!("Health check requested");
+        tracing::info!("{} Health check requested", API_NAME);
 
         Ok(Response::new(HealthResponse {
             healthy: true,

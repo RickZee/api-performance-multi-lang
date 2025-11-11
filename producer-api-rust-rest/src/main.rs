@@ -1,4 +1,5 @@
 mod config;
+mod constants;
 mod error;
 mod handlers;
 mod models;
@@ -8,6 +9,7 @@ mod service;
 use anyhow::Context;
 use axum::Router;
 use config::Config;
+use constants::API_NAME;
 use handlers::{event, health};
 use repository::CarEntityRepository;
 use service::EventProcessingService;
@@ -33,7 +35,7 @@ async fn main() -> anyhow::Result<()> {
         .with(tracing_subscriber::fmt::layer())
         .init();
 
-    tracing::info!("Starting Producer API Rust server on port {}", config.server_port);
+    tracing::info!("{} Starting Producer API Rust server on port {}", API_NAME, config.server_port);
 
     // Create database connection pool
     let pool = PgPoolOptions::new()
@@ -42,7 +44,7 @@ async fn main() -> anyhow::Result<()> {
         .await
         .context("Failed to connect to database")?;
 
-    tracing::info!("Connected to database");
+    tracing::info!("{} Connected to database", API_NAME);
 
     // Run migrations
     sqlx::migrate!("./migrations")
@@ -50,7 +52,7 @@ async fn main() -> anyhow::Result<()> {
         .await
         .context("Failed to run migrations")?;
 
-    tracing::info!("Database migrations completed");
+    tracing::info!("{} Database migrations completed", API_NAME);
 
     // Initialize repository and service
     let repository = CarEntityRepository::new(pool);
@@ -65,7 +67,7 @@ async fn main() -> anyhow::Result<()> {
 
     // Start server
     let addr = SocketAddr::from(([0, 0, 0, 0], config.server_port));
-    tracing::info!("Server listening on {}", addr);
+    tracing::info!("{} Server listening on {}", API_NAME, addr);
 
     let listener = tokio::net::TcpListener::bind(addr).await?;
     axum::serve(listener, app).await?;

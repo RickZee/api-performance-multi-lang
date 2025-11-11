@@ -10,6 +10,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"go.uber.org/zap"
+	"producer-api-go/internal/constants"
 )
 
 type EventHandler struct {
@@ -27,7 +28,7 @@ func NewEventHandler(service *service.EventProcessingService, logger *zap.Logger
 func (h *EventHandler) ProcessEvent(c *gin.Context) {
 	var event models.Event
 	if err := c.ShouldBindJSON(&event); err != nil {
-		h.logger.Warn("Invalid JSON", zap.Error(err))
+		h.logger.Warn(fmt.Sprintf("%s Invalid JSON", constants.APIName()), zap.Error(err))
 		c.JSON(http.StatusBadRequest, gin.H{
 			"error":  "Invalid JSON",
 			"status": http.StatusBadRequest,
@@ -70,10 +71,10 @@ func (h *EventHandler) ProcessEvent(c *gin.Context) {
 		}
 	}
 
-	h.logger.Info("Received event", zap.String("event_name", event.EventHeader.EventName))
+	h.logger.Info(fmt.Sprintf("%s Received event", constants.APIName()), zap.String("event_name", event.EventHeader.EventName))
 
 	if err := h.service.ProcessEvent(c.Request.Context(), &event); err != nil {
-		h.logger.Error("Error processing event", zap.Error(err))
+		h.logger.Error(fmt.Sprintf("%s Error processing event", constants.APIName()), zap.Error(err))
 		appErr := errors.NewInternalError(err)
 		c.JSON(appErr.StatusCode, gin.H{
 			"error":  appErr.Message,
@@ -91,7 +92,7 @@ func (h *EventHandler) ProcessEvent(c *gin.Context) {
 func (h *EventHandler) ProcessBulkEvents(c *gin.Context) {
 	var events []models.Event
 	if err := c.ShouldBindJSON(&events); err != nil {
-		h.logger.Warn("Invalid JSON", zap.Error(err))
+		h.logger.Warn(fmt.Sprintf("%s Invalid JSON", constants.APIName()), zap.Error(err))
 		c.JSON(http.StatusBadRequest, gin.H{
 			"error":  "Invalid JSON",
 			"status": http.StatusBadRequest,
@@ -107,7 +108,7 @@ func (h *EventHandler) ProcessBulkEvents(c *gin.Context) {
 		return
 	}
 
-	h.logger.Info("Received bulk request", zap.Int("event_count", len(events)))
+	h.logger.Info(fmt.Sprintf("%s Received bulk request", constants.APIName()), zap.Int("event_count", len(events)))
 
 	processedCount := 0
 	failedCount := 0
@@ -139,7 +140,7 @@ func (h *EventHandler) ProcessBulkEvents(c *gin.Context) {
 		}
 
 		if err := h.service.ProcessEvent(c.Request.Context(), &event); err != nil {
-			h.logger.Error("Error processing event in bulk", zap.Error(err))
+			h.logger.Error(fmt.Sprintf("%s Error processing event in bulk", constants.APIName()), zap.Error(err))
 			failedCount++
 			continue
 		}

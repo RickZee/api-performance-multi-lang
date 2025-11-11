@@ -1,5 +1,6 @@
 package com.example.service;
 
+import com.example.constants.ApiConstants;
 import com.example.dto.Event;
 import com.example.dto.EntityUpdate;
 import com.example.entity.CarEntity;
@@ -19,7 +20,7 @@ import java.util.concurrent.atomic.AtomicLong;
 @RequiredArgsConstructor
 @Slf4j
 public class EventProcessingService {
-
+    
     private final CarEntityRepository carEntityRepository;
     private final ObjectMapper objectMapper;
     private final DatabaseClient databaseClient;
@@ -55,7 +56,7 @@ public class EventProcessingService {
             }
         }
         
-        log.info("Processing event: {}", eventName);
+        log.info("{} Processing event: {}", ApiConstants.API_NAME, eventName);
         
         return Flux.fromIterable(entities)
                 .flatMap(this::processEntityCreation)
@@ -63,21 +64,21 @@ public class EventProcessingService {
     }
 
     private Mono<CarEntity> processEntityCreation(EntityUpdate entityUpdate) {
-        log.info("Processing entity creation for type: {} and id: {}", entityUpdate.getEntityType(), entityUpdate.getEntityId());
+        log.info("{} Processing entity creation for type: {} and id: {}", ApiConstants.API_NAME, entityUpdate.getEntityType(), entityUpdate.getEntityId());
         
         return carEntityRepository.existsByEntityTypeAndId(entityUpdate.getEntityType(), entityUpdate.getEntityId())
                 .flatMap(exists -> {
                     if (exists) {
-                        log.warn("Entity already exists, skipping creation: {}", entityUpdate.getEntityId());
+                        log.warn("{} Entity already exists, skipping creation: {}", ApiConstants.API_NAME, entityUpdate.getEntityId());
                         // Try to read the existing entity, but handle conversion errors gracefully
                         // (e.g., H2 database compatibility issues with OffsetDateTime)
                         return carEntityRepository.findByEntityTypeAndId(entityUpdate.getEntityType(), entityUpdate.getEntityId())
                                 .doOnNext(existingEntity -> {
-                                    log.info("Returning existing entity: {}", existingEntity.getId());
+                                    log.info("{} Returning existing entity: {}", ApiConstants.API_NAME, existingEntity.getId());
                                     logPersistedEventCount();
                                 })
                                 .onErrorResume(error -> {
-                                    log.warn("Could not read existing entity (likely due to database compatibility): {}, continuing anyway", error.getMessage());
+                                    log.warn("{} Could not read existing entity (likely due to database compatibility): {}, continuing anyway", ApiConstants.API_NAME, error.getMessage());
                                     // Return a placeholder entity to indicate success
                                     logPersistedEventCount();
                                     return Mono.just(new CarEntity(
@@ -86,10 +87,10 @@ public class EventProcessingService {
                                             null, null, null));
                                 });
                     } else {
-                        log.info("Entity does not exist, creating new: {}", entityUpdate.getEntityId());
+                        log.info("{} Entity does not exist, creating new: {}", ApiConstants.API_NAME, entityUpdate.getEntityId());
                         return createNewEntity(entityUpdate)
                                 .doOnNext(newEntity -> {
-                                    log.info("Created new entity: {}", newEntity.getId());
+                                    log.info("{} Created new entity: {}", ApiConstants.API_NAME, newEntity.getId());
                                     logPersistedEventCount();
                                 });
                     }
@@ -99,7 +100,7 @@ public class EventProcessingService {
     private void logPersistedEventCount() {
         long count = persistedEventCount.incrementAndGet();
         if (count % 10 == 0) {
-            log.info("*** Persisted events count: {} ***", count);
+            log.info("{} *** Persisted events count: {} ***", ApiConstants.API_NAME, count);
         }
     }
 
@@ -112,7 +113,7 @@ public class EventProcessingService {
             Object data = entityUpdate.getUpdatedAttributes();
             String dataJson = objectMapper.writeValueAsString(data);
             
-            log.info("Creating new entity with ID: {}", entityId);
+            log.info("{} Creating new entity with ID: {}", ApiConstants.API_NAME, entityId);
             
             return databaseClient.sql("INSERT INTO car_entities (id, entity_type, created_at, updated_at, data) VALUES (:id, :entityType, :createdAt, :updatedAt, :data)")
                     .bind("id", entityId)
@@ -123,10 +124,10 @@ public class EventProcessingService {
                     .fetch()
                     .rowsUpdated()
                     .then(Mono.just(new CarEntity(entityId, entityType, now, now, dataJson)))
-                    .doOnNext(savedEntity -> log.info("Successfully created entity: {}", savedEntity.getId()))
-                    .doOnError(error -> log.error("Failed to create entity: {}", error.getMessage()));
+                    .doOnNext(savedEntity -> log.info("{} Successfully created entity: {}", ApiConstants.API_NAME, savedEntity.getId()))
+                    .doOnError(error -> log.error("{} Failed to create entity: {}", ApiConstants.API_NAME, error.getMessage()));
         } catch (Exception e) {
-            log.error("Error creating new entity", e);
+            log.error("{} Error creating new entity", ApiConstants.API_NAME, e);
             return Mono.error(new RuntimeException("Error creating new entity", e));
         }
     }

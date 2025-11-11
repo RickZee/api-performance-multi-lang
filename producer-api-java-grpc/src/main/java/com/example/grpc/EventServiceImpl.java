@@ -1,5 +1,6 @@
 package com.example.grpc;
 
+import com.example.constants.ApiConstants;
 import com.example.service.EventProcessingService;
 import io.grpc.stub.StreamObserver;
 import lombok.RequiredArgsConstructor;
@@ -13,12 +14,12 @@ import java.util.Map;
 @RequiredArgsConstructor
 @Slf4j
 public class EventServiceImpl extends EventServiceGrpc.EventServiceImplBase {
-
+    
     private final EventProcessingService eventProcessingService;
 
     @Override
     public void processEvent(EventRequest request, StreamObserver<EventResponse> responseObserver) {
-        log.info("Received gRPC event: {}", request.getEventHeader().getEventName());
+        log.info("{} Received gRPC event: {}", ApiConstants.API_NAME, request.getEventHeader().getEventName());
         
         try {
             // Validate request - proto3 returns default instances, not null
@@ -75,7 +76,7 @@ public class EventServiceImpl extends EventServiceGrpc.EventServiceImplBase {
             responseObserver.onCompleted();
             
         } catch (Exception e) {
-            log.error("Error processing gRPC event", e);
+            log.error("{} Error processing gRPC event", ApiConstants.API_NAME, e);
             
             EventResponse errorResponse = EventResponse.newBuilder()
                     .setSuccess(false)
@@ -89,7 +90,7 @@ public class EventServiceImpl extends EventServiceGrpc.EventServiceImplBase {
 
     @Override
     public void healthCheck(HealthRequest request, StreamObserver<HealthResponse> responseObserver) {
-        log.info("Health check requested for service: {}", request.getService());
+        log.info("{} Health check requested for service: {}", ApiConstants.API_NAME, request.getService());
         
         HealthResponse response = HealthResponse.newBuilder()
                 .setHealthy(true)
