@@ -95,13 +95,32 @@ start_metrics_collection() {
     local container_name=$1
     local metrics_file=$2
     local duration=${3:-300}  # Default 5 minutes
+    local test_mode=${4:-""}  # Optional: test mode (full, saturation, smoke)
+    local api_name=${5:-""}   # Optional: API name for metadata
     
     # Export variables for background process
     export METRICS_INTERVAL
     
-    # Create CSV header if file doesn't exist
+    # Create CSV header with metadata if file doesn't exist
     if [ ! -f "$metrics_file" ]; then
-        echo "timestamp,datetime,container,cpu_percent,memory_percent,memory_used_mb,memory_limit_mb,network_io,block_io" > "$metrics_file"
+        local start_timestamp=$(date +%s)
+        local start_datetime=$(date '+%Y-%m-%d %H:%M:%S')
+        
+        # Write metadata as comments (lines starting with #)
+        echo "# Metrics collection metadata" >> "$metrics_file"
+        echo "# Start timestamp: $start_timestamp" >> "$metrics_file"
+        echo "# Start datetime: $start_datetime" >> "$metrics_file"
+        if [ -n "$test_mode" ]; then
+            echo "# Test mode: $test_mode" >> "$metrics_file"
+        fi
+        if [ -n "$api_name" ]; then
+            echo "# API name: $api_name" >> "$metrics_file"
+        fi
+        echo "# Container: $container_name" >> "$metrics_file"
+        echo "# Collection duration: ${duration}s" >> "$metrics_file"
+        echo "# Collection interval: ${METRICS_INTERVAL}s" >> "$metrics_file"
+        echo "#" >> "$metrics_file"
+        echo "timestamp,datetime,container,cpu_percent,memory_percent,memory_used_mb,memory_limit_mb,network_io,block_io" >> "$metrics_file"
     fi
     
     # Verify container exists before starting collection
