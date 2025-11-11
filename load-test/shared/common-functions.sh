@@ -177,3 +177,117 @@ show_script_footer() {
     print_status "Finished at: $(get_timestamp)"
     print_separator
 }
+
+# Function to parse JTL file and extract metrics
+# Usage: parse_jtl_file <jtl_file>
+# Returns: key:value pairs for total, success, failed, success_rate, error_rate, avg_time, min_time, max_time, p90, p95, p99, throughput, total_bytes, total_sent_bytes
+parse_jtl_file() {
+    local jtl_file=$1
+    
+    if [ ! -f "$jtl_file" ]; then
+        echo "ERROR: File not found: $jtl_file" >&2
+        return 1
+    fi
+    
+    # Check if file has data (more than just header)
+    local line_count=$(wc -l < "$jtl_file" | tr -d ' ')
+    if [ "$line_count" -le 1 ]; then
+        echo "ERROR: No data found in JTL file" >&2
+        return 1
+    fi
+    
+    # Parse JTL file (CSV format) - extract times first, then sort externally for BSD awk compatibility
+    local temp_times=$(mktemp)
+    
+    awk -F',' '
+    BEGIN {
+        total=0
+        success=0
+        failed=0
+        total_time=0
+        min_time=999999
+        max_time=0
+        total_bytes=0
+        total_sent_bytes=0
+    }
+    NR > 1 {  # Skip header
+        elapsed=$2
+        success_flag=$8
+        bytes=$10
+        sent_bytes=$11
+        
+        total++
+        if (success_flag == "true") {
+            success++
+        } else {
+            failed++
+        }
+        
+        total_time += elapsed
+        if (elapsed < min_time) min_time = elapsed
+        if (elapsed > max_time) max_time = elapsed
+        
+        total_bytes += bytes
+        total_sent_bytes += sent_bytes
+        
+        # Store response times for percentile calculation
+        print elapsed > "'"$temp_times"'"
+    }
+    END {
+        if (total > 0) {
+            avg_time = total_time / total
+            success_rate = (success / total) * 100
+            error_rate = (failed / total) * 100
+            
+            # Throughput calculation (simplified)
+            if (total_time > 0) {
+                throughput = (total * 1000) / total_time
+            } else {
+                throughput = 0
+            }
+            
+            printf "total:%d\n", total
+            printf "success:%d\n", success
+            printf "failed:%d\n", failed
+            printf "success_rate:%.2f\n", success_rate
+            printf "error_rate:%.2f\n", error_rate
+            printf "avg_time:%.2f\n", avg_time
+            printf "min_time:%.2f\n", min_time
+            printf "max_time:%.2f\n", max_time
+            printf "throughput:%.2f\n", throughput
+            printf "total_bytes:%d\n", total_bytes
+            printf "total_sent_bytes:%d\n", total_sent_bytes
+        }
+    }
+    ' "$jtl_file"
+    
+    # Calculate percentiles using sorted times
+    if [ -f "$temp_times" ] && [ -s "$temp_times" ]; then
+        local sorted_times=$(sort -n "$temp_times")
+        local count=$(echo "$sorted_times" | wc -l | tr -d ' ')
+        if [ "$count" -gt 0 ]; then
+            local p90_idx=$(awk "BEGIN {printf \"%.0f\", ($count * 0.90)}")
+            local p95_idx=$(awk "BEGIN {printf \"%.0f\", ($count * 0.95)}")
+            local p99_idx=$(awk "BEGIN {printf \"%.0f\", ($count * 0.99)}")
+            
+            # Get percentile values (1-indexed, so add 1)
+            local p90=$(echo "$sorted_times" | sed -n "${p90_idx}p")
+            local p95=$(echo "$sorted_times" | sed -n "${p95_idx}p")
+            local p99=$(echo "$sorted_times" | sed -n "${p99_idx}p")
+            
+            printf "p90:%.2f\n" "$p90"
+            printf "p95:%.2f\n" "$p95"
+            printf "p99:%.2f\n" "$p99"
+        else
+            printf "p90:0.00\n"
+            printf "p95:0.00\n"
+            printf "p99:0.00\n"
+        fi
+        rm -f "$temp_times"
+    else
+        printf "p90:0.00\n"
+        printf "p95:0.00\n"
+        printf "p99:0.00\n"
+        rm -f "$temp_times"
+    fi
+}

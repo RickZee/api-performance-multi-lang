@@ -26,10 +26,6 @@ load-test/
 │   ├── config.js               # k6 configuration
 │   └── shared/
 │       └── helpers.js          # Shared helper functions
-├── producer-throughput/         # k6 throughput test configs (Spring Boot REST)
-├── producer-grpc-throughput/    # k6 throughput test configs (Java gRPC)
-├── producer-rust-throughput/    # k6 throughput test configs (Rust REST)
-├── producer-rust-grpc-throughput/ # k6 throughput test configs (Rust gRPC)
 ├── shared/                      # Test execution scripts
 │   ├── run-throughput-tests.sh              # Parallel throughput tests
 │   ├── run-sequential-throughput-tests.sh   # Sequential throughput tests
@@ -110,9 +106,9 @@ Each test generates:
 
 The tests cover all 4 producer API implementations:
 
-1. **producer-api** - Spring Boot REST (port 8081)
+1. **producer-api** - Spring Boot REST (port 9081)
 2. **producer-api-grpc** - Java gRPC (port 9090)
-3. **producer-api-rust** - Rust REST (port 8082)
+3. **producer-api-rust** - Rust REST (port 9082)
 4. **producer-api-rust-grpc** - Rust gRPC (port 9091)
 
 ## Prerequisites

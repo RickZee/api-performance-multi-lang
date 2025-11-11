@@ -7,26 +7,8 @@ set -e
 
 # Source common functions
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-
-# Colors for output
-RED='\033[0;31m'
-GREEN='\033[0;32m'
-YELLOW='\033[1;33m'
-BLUE='\033[0;34m'
-NC='\033[0m' # No Color
-
-# Function to print colored output
-print_status() {
-    echo -e "${BLUE}[INFO]${NC} $1"
-}
-
-print_success() {
-    echo -e "${GREEN}[SUCCESS]${NC} $1"
-}
-
-print_error() {
-    echo -e "${RED}[ERROR]${NC} $1"
-}
+source "$SCRIPT_DIR/color-output.sh" 2>/dev/null || true
+source "$SCRIPT_DIR/common-functions.sh" 2>/dev/null || true
 
 # Configuration
 BASE_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
@@ -34,94 +16,6 @@ RESULTS_BASE_DIR="$BASE_DIR/results/comparison"
 
 # API names
 APIS=("producer-api" "producer-api-grpc" "producer-api-rust" "producer-api-rust-grpc")
-
-# Function to parse JTL file and extract metrics
-parse_jtl_file() {
-    local jtl_file=$1
-    
-    if [ ! -f "$jtl_file" ]; then
-        echo "ERROR: File not found: $jtl_file" >&2
-        return 1
-    fi
-    
-    # Parse JTL file (CSV format)
-    # Columns: timeStamp,elapsed,label,responseCode,responseMessage,threadName,dataType,success,failureMessage,bytes,sentBytes,grpThreads,allThreads,URL,Latency,IdleTime,Connect
-    
-    # Calculate metrics using awk
-    awk -F',' '
-    BEGIN {
-        total=0
-        success=0
-        failed=0
-        total_time=0
-        min_time=999999
-        max_time=0
-        total_bytes=0
-        total_sent_bytes=0
-    }
-    NR > 1 {  # Skip header
-        elapsed=$2
-        success_flag=$8
-        bytes=$10
-        sent_bytes=$11
-        
-        total++
-        if (success_flag == "true") {
-            success++
-        } else {
-            failed++
-        }
-        
-        total_time += elapsed
-        if (elapsed < min_time) min_time = elapsed
-        if (elapsed > max_time) max_time = elapsed
-        
-        total_bytes += bytes
-        total_sent_bytes += sent_bytes
-        
-        # Store response times for percentile calculation
-        times[total] = elapsed
-    }
-    END {
-        if (total > 0) {
-            avg_time = total_time / total
-            success_rate = (success / total) * 100
-            error_rate = (failed / total) * 100
-            
-            # Calculate percentiles (simple approach)
-            n = asort(times)
-            p90_idx = int(n * 0.90)
-            p95_idx = int(n * 0.95)
-            p99_idx = int(n * 0.99)
-            
-            p90 = times[p90_idx]
-            p95 = times[p95_idx]
-            p99 = times[p99_idx]
-            
-            # Throughput (requests per second) - approximate
-            # This is a simplified calculation
-            throughput = total / (total_time / 1000)  # rough estimate
-            
-            printf "total:%d\n", total
-            printf "success:%d\n", success
-            printf "failed:%d\n", failed
-            printf "success_rate:%.2f\n", success_rate
-            printf "error_rate:%.2f\n", error_rate
-            printf "avg_time:%.2f\n", avg_time
-            printf "min_time:%.2f\n", min_time
-            printf "max_time:%.2f\n", max_time
-            printf "p90:%.2f\n", p90
-            printf "p95:%.2f\n", p95
-            printf "p99:%.2f\n", p99
-            printf "throughput:%.2f\n", throughput
-            printf "total_bytes:%d\n", total_bytes
-            printf "total_sent_bytes:%d\n", total_sent_bytes
-        } else {
-            print "ERROR: No data found in JTL file" | "cat >&2"
-        }
-    }
-    ' "$jtl_file"
-}
 
 # Function to get latest JTL file for an API
 get_latest_jtl_file() {

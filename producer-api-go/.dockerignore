@@ -1,0 +1,14 @@
+.git
+.gitignore
+*.md
+.vscode
+.idea
+*.swp
+*.swo
+*~
+.DS_Store
+bin/
+build/
+target/
+*.log
+

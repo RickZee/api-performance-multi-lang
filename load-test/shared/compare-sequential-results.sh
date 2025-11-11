@@ -7,26 +7,8 @@ set -e
 
 # Source common functions
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-
-# Colors for output
-RED='\033[0;31m'
-GREEN='\033[0;32m'
-YELLOW='\033[1;33m'
-BLUE='\033[0;34m'
-NC='\033[0m' # No Color
-
-# Function to print colored output
-print_status() {
-    echo -e "${BLUE}[INFO]${NC} $1"
-}
-
-print_success() {
-    echo -e "${GREEN}[SUCCESS]${NC} $1"
-}
-
-print_error() {
-    echo -e "${RED}[ERROR]${NC} $1"
-}
+source "$SCRIPT_DIR/color-output.sh" 2>/dev/null || true
+source "$SCRIPT_DIR/common-functions.sh" 2>/dev/null || true
 
 # Configuration
 BASE_DIR="$(cd "$SCRIPT_DIR/../.." && pwd)"
@@ -35,116 +17,6 @@ RESULTS_BASE_DIR="$BASE_DIR/load-test/results/sequential"
 # API names and test types
 APIS=("producer-api" "producer-api-grpc" "producer-api-rust" "producer-api-rust-grpc")
 TEST_TYPES=("smoke" "light" "spike" "heavy")
-
-# Function to parse JTL file and extract metrics
-parse_jtl_file() {
-    local jtl_file=$1
-    
-    if [ ! -f "$jtl_file" ]; then
-        return 1
-    fi
-    
-    # Check if file has data (more than just header)
-    local line_count=$(wc -l < "$jtl_file" | tr -d ' ')
-    if [ "$line_count" -le 1 ]; then
-        return 1
-    fi
-    
-    # Parse JTL file (CSV format) - extract times first, then sort externally for BSD awk compatibility
-    local temp_times=$(mktemp)
-    
-    awk -F',' '
-    BEGIN {
-        total=0
-        success=0
-        failed=0
-        total_time=0
-        min_time=999999
-        max_time=0
-        total_bytes=0
-        total_sent_bytes=0
-    }
-    NR > 1 {  # Skip header
-        elapsed=$2
-        success_flag=$8
-        bytes=$10
-        sent_bytes=$11
-        
-        total++
-        if (success_flag == "true") {
-            success++
-        } else {
-            failed++
-        }
-        
-        total_time += elapsed
-        if (elapsed < min_time) min_time = elapsed
-        if (elapsed > max_time) max_time = elapsed
-        
-        total_bytes += bytes
-        total_sent_bytes += sent_bytes
-        
-        # Store response times for percentile calculation
-        print elapsed > "'"$temp_times"'"
-    }
-    END {
-        if (total > 0) {
-            avg_time = total_time / total
-            success_rate = (success / total) * 100
-            error_rate = (failed / total) * 100
-            
-            # Throughput calculation (simplified)
-            if (total_time > 0) {
-                throughput = (total * 1000) / total_time
-            } else {
-                throughput = 0
-            }
-            
-            printf "total:%d\n", total
-            printf "success:%d\n", success
-            printf "failed:%d\n", failed
-            printf "success_rate:%.2f\n", success_rate
-            printf "error_rate:%.2f\n", error_rate
-            printf "avg_time:%.2f\n", avg_time
-            printf "min_time:%.2f\n", min_time
-            printf "max_time:%.2f\n", max_time
-            printf "throughput:%.2f\n", throughput
-            printf "total_bytes:%d\n", total_bytes
-            printf "total_sent_bytes:%d\n", total_sent_bytes
-        }
-    }
-    ' "$jtl_file"
-    
-    # Calculate percentiles using sorted times
-    if [ -f "$temp_times" ] && [ -s "$temp_times" ]; then
-        local sorted_times=$(sort -n "$temp_times")
-        local count=$(echo "$sorted_times" | wc -l | tr -d ' ')
-        if [ "$count" -gt 0 ]; then
-            local p90_idx=$(awk "BEGIN {printf \"%.0f\", ($count * 0.90)}")
-            local p95_idx=$(awk "BEGIN {printf \"%.0f\", ($count * 0.95)}")
-            local p99_idx=$(awk "BEGIN {printf \"%.0f\", ($count * 0.99)}")
-            
-            # Get percentile values (1-indexed, so add 1)
-            local p90=$(echo "$sorted_times" | sed -n "${p90_idx}p")
-            local p95=$(echo "$sorted_times" | sed -n "${p95_idx}p")
-            local p99=$(echo "$sorted_times" | sed -n "${p99_idx}p")
-            
-            printf "p90:%.2f\n" "$p90"
-            printf "p95:%.2f\n" "$p95"
-            printf "p99:%.2f\n" "$p99"
-        else
-            printf "p90:0.00\n"
-            printf "p95:0.00\n"
-            printf "p99:0.00\n"
-        fi
-        rm -f "$temp_times"
-    else
-        printf "p90:0.00\n"
-        printf "p95:0.00\n"
-        printf "p99:0.00\n"
-        rm -f "$temp_times"
-    fi
-}
 
 # Function to get latest JTL file for an API and test type
 get_latest_jtl_file() {

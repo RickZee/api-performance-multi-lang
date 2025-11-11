@@ -1,0 +1,42 @@
+{
+  "car": {
+    "id": "CAR-2025-002",
+    "make": "Toyota",
+    "model": "Camry",
+    "year": 2024,
+    "vin": "4T1BF1AK5CU123789",
+    "licensePlate": "TOY-002",
+    "color": "Pearl White",
+    "bodyType": "Sedan",
+    "transmission": "Automatic",
+    "fuelType": "Hybrid",
+    "horsepower": 208,
+    "owner": {
+      "id": "OWNER-002",
+      "firstName": "Jane",
+      "lastName": "Smith",
+      "email": "jane.smith@example.com",
+      "address": {
+        "city": "Portland",
+        "state": "OR"
+      }
+    },
+    "insurance": {
+      "provider": "State Farm",
+      "policyNumber": "POL-2025-789012"
+    },
+    "maintenance": {
+      "lastServiceDate": "2025-03-15",
+      "mileage": 25000
+    },
+    "features": [
+      "Adaptive Cruise Control",
+      "Heated Seats",
+      "Blind Spot Monitoring"
+    ],
+    "metadata": {
+      "createdAt": "2025-03-15T10:20:00Z",
+      "dataVersion": "1.0"
+    }
+  }
+}
