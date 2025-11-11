@@ -1,0 +1,5 @@
+testId,testName,testType,dataSize
+smoke-001,Smoke Test,smoke,small
+light-001,Light Load Test,light,medium
+spike-001,Spike Test,spike,large
+heavy-001,Heavy Load Test,heavy,large

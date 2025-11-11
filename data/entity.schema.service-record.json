@@ -1,0 +1,60 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.com/schemas/entity.schema.service-record.json",
+  "title": "ServiceRecord Entity Schema",
+  "description": "JSON schema for ServiceRecord entity in the event-based processing system",
+  "type": "object",
+  "properties": {
+    "entity": {
+      "$ref": "entity.schema.header.json"
+    },
+    "id": {
+      "type": "string",
+      "description": "Unique identifier for the service record"
+    },
+    "carId": {
+      "type": "string",
+      "description": "Identifier of the car this service was performed on"
+    },
+    "serviceDate": {
+      "type": "string",
+      "format": "date-time",
+      "description": "Date and time when the service was performed"
+    },
+    "amountPaid": {
+      "type": "number",
+      "minimum": 0,
+      "multipleOf": 0.01,
+      "description": "Amount paid for the service"
+    },
+    "dealerId": {
+      "type": "string",
+      "description": "Unique identifier for the dealer"
+    },
+    "dealerName": {
+      "type": "string",
+      "description": "Name of the dealer"
+    },
+    "mileageAtService": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Vehicle mileage at the time of service"
+    },
+    "description": {
+      "type": "string",
+      "description": "Description of the service performed"
+    },
+    "createdAt": {
+      "type": "string",
+      "format": "date-time",
+      "description": "ISO 8601 timestamp when the service record was created"
+    },
+    "updatedAt": {
+      "type": "string",
+      "format": "date-time",
+      "description": "ISO 8601 timestamp when the service record was last updated"
+    }
+  },
+  "required": ["entity", "id", "carId", "serviceDate", "amountPaid", "dealerId", "dealerName", "mileageAtService", "description", "createdAt", "updatedAt"],
+  "additionalProperties": false
+}

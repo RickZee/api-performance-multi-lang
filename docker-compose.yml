@@ -1,0 +1,187 @@
+version: '3.8'
+
+services:
+  # PostgreSQL Database
+  postgres-large:
+    image: postgres:15-alpine
+    container_name: car_entities_postgres_large
+    environment:
+      POSTGRES_DB: car_entities
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: password
+      POSTGRES_INITDB_ARGS: "-E UTF8 --locale=C"
+    command: >
+      postgres
+      -c shared_buffers=1GB
+      -c effective_cache_size=3GB
+      -c maintenance_work_mem=128MB
+      -c checkpoint_completion_target=0.9
+      -c wal_buffers=16MB
+      -c default_statistics_target=100
+      -c random_page_cost=1.1
+      -c effective_io_concurrency=200
+      -c work_mem=8MB
+      -c min_wal_size=512MB
+      -c max_wal_size=2GB
+      -c max_connections=100
+      -c max_worker_processes=2
+      -c max_parallel_workers_per_gather=1
+      -c max_parallel_workers=2
+      -c max_parallel_maintenance_workers=1
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data_large:/var/lib/postgresql/data
+      - ./postgres/init-small.sql:/docker-entrypoint-initdb.d/init-small.sql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d car_entities"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - car_network
+    deploy:
+      resources:
+        limits:
+          memory: 2G
+          cpus: '2.0'
+        reservations:
+          memory: 1G
+          cpus: '1.0'
+
+  # Producer API - Spring Boot REST
+  producer-api:
+    build: ./producer-api
+    container_name: producer-api
+    ports:
+      - "9081:8081"
+    environment:
+      SPRING_R2DBC_URL: r2dbc:postgresql://postgres-large:5432/car_entities
+      SPRING_R2DBC_USERNAME: postgres
+      SPRING_R2DBC_PASSWORD: password
+      JAVA_OPTS: "-Xmx1536m -Xms768m -XX:MaxMetaspaceSize=256m"
+    depends_on:
+      postgres-large:
+        condition: service_healthy
+    restart: unless-stopped
+    networks:
+      - car_network
+    deploy:
+      resources:
+        limits:
+          memory: 2G
+          cpus: '2.0'
+        reservations:
+          memory: 1G
+          cpus: '1.0'
+
+  # Producer API - Java gRPC
+  producer-api-grpc:
+    build: ./producer-api-grpc
+    container_name: producer-api-grpc
+    ports:
+      - "9090:9090"
+    environment:
+      SPRING_R2DBC_URL: r2dbc:postgresql://postgres-large:5432/car_entities
+      SPRING_R2DBC_USERNAME: postgres
+      SPRING_R2DBC_PASSWORD: password
+      JAVA_OPTS: "-Xmx1536m -Xms768m -XX:MaxMetaspaceSize=256m"
+    depends_on:
+      postgres-large:
+        condition: service_healthy
+    restart: unless-stopped
+    networks:
+      - car_network
+    deploy:
+      resources:
+        limits:
+          memory: 2G
+          cpus: '2.0'
+        reservations:
+          memory: 1G
+          cpus: '1.0'
+
+  # Producer API - Rust REST
+  producer-api-rust:
+    build: ./producer-api-rust
+    container_name: producer-api-rust
+    ports:
+      - "9082:8081"
+    environment:
+      DATABASE_URL: postgresql://postgres:password@postgres-large:5432/car_entities
+      SERVER_PORT: 8081
+      RUST_LOG: info
+    depends_on:
+      postgres-large:
+        condition: service_healthy
+    restart: unless-stopped
+    networks:
+      - car_network
+    deploy:
+      resources:
+        limits:
+          memory: 2G
+          cpus: '2.0'
+        reservations:
+          memory: 1G
+          cpus: '1.0'
+
+  # Producer API - Rust gRPC
+  producer-api-rust-grpc:
+    build: ./producer-api-rust-grpc
+    container_name: producer-api-rust-grpc
+    ports:
+      - "9091:9090"
+    environment:
+      DATABASE_URL: postgresql://postgres:password@postgres-large:5432/car_entities
+      GRPC_SERVER_PORT: 9090
+      RUST_LOG: info
+    depends_on:
+      postgres-large:
+        condition: service_healthy
+    restart: unless-stopped
+    networks:
+      - car_network
+    deploy:
+      resources:
+        limits:
+          memory: 2G
+          cpus: '2.0'
+        reservations:
+          memory: 1G
+          cpus: '1.0'
+
+  # k6 Throughput Test Runner
+  k6-throughput:
+    build:
+      context: ./load-test/shared
+      dockerfile: Dockerfile
+    container_name: k6-throughput
+    environment:
+      - K6_OUT=json=/k6/results/k6-results.json
+    volumes:
+      - ./load-test/k6:/k6/scripts:ro
+      - ./load-test/results:/k6/results
+      - ./producer-api-grpc/src/main/proto:/k6/proto/java-grpc:ro
+      - ./producer-api-rust-grpc/proto:/k6/proto/rust-grpc:ro
+    networks:
+      - car_network
+    restart: "no"
+    deploy:
+      resources:
+        limits:
+          memory: 2G
+          cpus: '2.0'
+        reservations:
+          memory: 512M
+          cpus: '0.5'
+    # Default command - will be overridden by docker-compose run
+    command: ["/bin/sh", "-c", "echo 'k6 throughput test container ready. Use docker-compose run to execute tests.'"]
+
+volumes:
+  postgres_data_large:
+
+networks:
+  car_network:
+    driver: bridge
+

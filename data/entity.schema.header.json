@@ -1,0 +1,30 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.com/schemas/entity.schema.header.json",
+  "title": "Entity Header Schema",
+  "description": "Common entity header/metadata structure for all entities in the event-based processing system",
+  "type": "object",
+  "properties": {
+    "entityId": {
+      "type": "string",
+      "description": "Unique identifier for the entity"
+    },
+    "entityType": {
+      "type": "string",
+      "enum": ["Car", "Loan", "LoanPayment", "ServiceRecord", "PartUsed", "ServiceDetails"],
+      "description": "Type of the entity"
+    },
+    "createdAt": {
+      "type": "string",
+      "format": "date-time",
+      "description": "ISO 8601 timestamp when the entity was created"
+    },
+    "updatedAt": {
+      "type": "string",
+      "format": "date-time",
+      "description": "ISO 8601 timestamp when the entity was last updated"
+    }
+  },
+  "required": ["entityId", "entityType", "createdAt", "updatedAt"],
+  "additionalProperties": false
+}

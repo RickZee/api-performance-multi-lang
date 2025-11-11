@@ -1,0 +1,99 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.com/schemas/entity.schema.loan.json",
+  "title": "Loan Entity Schema",
+  "description": "JSON schema for Loan entity in the event-based processing system",
+  "type": "object",
+  "properties": {
+    "entity": {
+      "$ref": "entity.schema.header.json"
+    },
+    "id": {
+      "type": "string",
+      "description": "Unique identifier for the loan"
+    },
+    "carId": {
+      "type": "string",
+      "description": "Identifier of the car associated with this loan"
+    },
+    "financialInstitution": {
+      "type": "string",
+      "description": "Name of the financial institution providing the loan"
+    },
+    "balance": {
+      "type": "number",
+      "minimum": 0,
+      "multipleOf": 0.01,
+      "description": "Current outstanding balance"
+    },
+    "lastPaidDate": {
+      "type": "string",
+      "format": "date-time",
+      "description": "Date of the last payment made"
+    },
+    "loanAmount": {
+      "type": "number",
+      "minimum": 0,
+      "multipleOf": 0.01,
+      "description": "Original loan amount"
+    },
+    "interestRate": {
+      "type": "number",
+      "minimum": 0,
+      "maximum": 1,
+      "description": "Annual interest rate as a decimal (e.g., 0.045 for 4.5%)"
+    },
+    "termMonths": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 480,
+      "description": "Loan term in months (1-40 years)"
+    },
+    "startDate": {
+      "type": "string",
+      "format": "date-time",
+      "description": "Date when the loan started"
+    },
+    "status": {
+      "type": "string",
+      "enum": ["active", "paid_off", "defaulted", "cancelled"],
+      "description": "Current status of the loan"
+    },
+    "monthlyPayment": {
+      "type": "number",
+      "minimum": 0,
+      "multipleOf": 0.01,
+      "description": "Monthly payment amount"
+    },
+    "createdAt": {
+      "type": "string",
+      "format": "date-time",
+      "description": "ISO 8601 timestamp when the loan was created"
+    },
+    "updatedAt": {
+      "type": "string",
+      "format": "date-time",
+      "description": "ISO 8601 timestamp when the loan was last updated"
+    },
+    "downPayment": {
+      "type": "number",
+      "minimum": 0,
+      "multipleOf": 0.01,
+      "description": "Down payment amount"
+    },
+    "downPaymentDate": {
+      "type": "string",
+      "format": "date-time",
+      "description": "Date when the down payment was made"
+    },
+    "payments": {
+      "type": "array",
+      "items": {
+        "$ref": "entity.schema.loan-payment.json"
+      },
+      "description": "Array of payment records for this loan"
+    }
+  },
+  "required": ["entity", "id", "carId", "financialInstitution", "balance", "lastPaidDate", "loanAmount", "interestRate", "termMonths", "startDate", "status", "monthlyPayment", "createdAt", "updatedAt"],
+  "additionalProperties": false
+}

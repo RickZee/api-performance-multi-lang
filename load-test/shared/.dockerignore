@@ -1,0 +1,25 @@
+# Results directories
+results/
+results-light/
+results-heavy/
+
+# Documentation
+README.md
+
+# Docker files
+docker-compose.yml
+.dockerignore
+
+# Git files
+.git/
+.gitignore
+
+# IDE files
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS files
+.DS_Store
+Thumbs.db
