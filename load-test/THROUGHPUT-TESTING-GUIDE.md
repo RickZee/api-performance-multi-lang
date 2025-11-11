@@ -21,7 +21,7 @@ Each test includes multiple phases with increasing virtual user (VU) counts:
 **Smoke Test**:
 - 10 VUs, 30 seconds (quick validation)
 
-**Full Test** (3 phases):
+**Full Test** (4 phases):
 1. **Phase 1: Baseline** (10 VUs, 2 minutes)
    - Establishes baseline performance
    - Verifies system is healthy
@@ -33,6 +33,10 @@ Each test includes multiple phases with increasing virtual user (VU) counts:
 3. **Phase 3: High-load** (100 VUs, 2 minutes)
    - Tests high load capacity
    - Identifies breaking points
+
+4. **Phase 4: Higher-load** (200 VUs, 5 minutes)
+   - Tests very high load capacity
+   - Extended duration for sustained performance analysis
 
 **Saturation Test** (7 phases - finds absolute maximum throughput):
 1. **Phase 1: Baseline** (10 VUs, 2 minutes)
@@ -48,10 +52,10 @@ Each phase runs for a fixed duration to measure sustained performance at that pa
 ### Test Duration
 
 - **Smoke Test**: ~30 seconds per API
-- **Full Test**: ~6 minutes per API
+- **Full Test**: ~11 minutes per API
 - **Saturation Test**: ~14 minutes per API
 - **Total Test Time**: 
-  - ~24 minutes for all 4 APIs (full tests)
+  - ~44 minutes for all 4 APIs (full tests)
   - ~56 minutes for all 4 APIs (saturation tests)
 
 ## Producer API Implementations
@@ -204,7 +208,7 @@ Test configuration is managed through:
 
 2. **config.js**: Test phases and thresholds
    - Smoke test: 10 VUs, 30 seconds
-   - Full test: 3 phases (10 → 50 → 100 VUs)
+   - Full test: 4 phases (10 → 50 → 100 → 200 VUs)
    - Saturation test: 7 phases (10 → 50 → 100 → 200 → 500 → 1000 → 2000 VUs)
 
 ### Customization

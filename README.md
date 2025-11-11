@@ -44,21 +44,21 @@ docker-compose --profile producer-java-rest --profile producer-rust-rest up -d p
 docker-compose --profile producer-java-rest --profile producer-java-grpc --profile producer-rust-rest --profile producer-rust-grpc --profile producer-go-rest --profile producer-go-grpc up -d
 ```
 
-**Note:** See the [Architecture](#-architecture) section above for a complete list of available profiles and ports.
+**Note:** See the [Docker Services](#-docker-services) section below for a complete list of available profiles and ports.
 
 ### Run Performance Tests
 
 ```bash
 cd load-test/shared
 
-# Run sequential throughput tests (recommended)
+# Run smoke tests only
+./run-sequential-throughput-tests.sh smoke
+
+# Run sequential throughput tests
 ./run-sequential-throughput-tests.sh full
 
 # Run saturation tests to find maximum throughput
 ./run-sequential-throughput-tests.sh saturation
-
-# Run smoke tests only
-./run-sequential-throughput-tests.sh smoke
 ```
 
 ## 📊 Performance Testing
@@ -75,7 +75,7 @@ This repository uses **k6** as the primary performance testing tool. k6 is a mod
 ### Test Types
 
 1. **Smoke Tests**: Quick validation (10 VUs, 30 seconds)
-2. **Full Tests**: Baseline performance (10 → 50 → 100 VUs, ~6 minutes)
+2. **Full Tests**: Baseline performance (10 → 50 → 100 → 200 VUs, ~11 minutes)
 3. **Saturation Tests**: Maximum throughput (10 → 50 → 100 → 200 → 500 → 1000 → 2000 VUs, ~14 minutes)
 
 ### Test Execution
@@ -98,9 +98,11 @@ Test results are saved to `load-test/results/throughput-sequential/<api_name>/` 
 
 For detailed testing information, see [load-test/THROUGHPUT-TESTING-GUIDE.md](load-test/THROUGHPUT-TESTING-GUIDE.md).
 
+**k6 Test Scenarios Documentation**: See [load-test/k6/K6-SCENARIOS-DOCUMENTATION.md](load-test/k6/K6-SCENARIOS-DOCUMENTATION.md) for comprehensive documentation of all k6 test scenarios, test modes, phases, API configurations, and metrics.
+
 ## 📁 Project Structure
 
-```
+```text
 producer-api-performance/
 ├── producer-api-java-rest/    # Spring Boot REST API
 ├── producer-api-java-grpc/    # Java gRPC API
@@ -126,6 +128,7 @@ producer-api-performance/
 - [producer-api-go-rest/README.md](producer-api-go-rest/README.md) - Go REST API
 - [producer-api-go-grpc/README.md](producer-api-go-grpc/README.md) - Go gRPC API
 - [load-test/README.md](load-test/README.md) - Performance testing framework
+- [load-test/k6/K6-SCENARIOS-DOCUMENTATION.md](load-test/k6/K6-SCENARIOS-DOCUMENTATION.md) - Complete k6 test scenarios, modes, and configurations documentation
 
 ## 📈 Performance Metrics
 
