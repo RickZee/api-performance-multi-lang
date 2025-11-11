@@ -80,17 +80,7 @@ Health check endpoint.
 
 ## Database Schema
 
-The API uses the same database schema as the Java version:
-
-```sql
-CREATE TABLE car_entities (
-    id VARCHAR(255) PRIMARY KEY,
-    entity_type VARCHAR(255) NOT NULL,
-    created_at TIMESTAMP WITH TIME ZONE,
-    updated_at TIMESTAMP WITH TIME ZONE,
-    data TEXT NOT NULL
-);
-```
+The API uses the same database schema as all other producer APIs. See the main [README.md](../README.md) for schema details.
 
 ## Prerequisites
 
@@ -134,19 +124,10 @@ docker run -p 8081:8081 \
 
 ### Docker Compose
 
-The service can be integrated into the existing docker-compose.yml:
+The service is already configured in the main `docker-compose.yml`. Start it with:
 
-```yaml
-producer-api-rust:
-  build: ./producer-api-rust
-  ports:
-    - "8081:8081"
-  environment:
-    - DATABASE_URL=postgresql://postgres:password@postgres:5432/car_entities
-    - SERVER_PORT=8081
-    - RUST_LOG=info
-  depends_on:
-    - postgres
+```bash
+docker-compose --profile producer-rust-rest up -d postgres-large producer-api-rust-rest
 ```
 
 ## Configuration
@@ -169,11 +150,7 @@ The application can be configured via environment variables:
 
 ## Event Processing Logic
 
-1. **Validation**: Validates event structure and required fields
-2. **Entity Check**: Determines if entities exist or need to be created
-3. **Update/Create**: Updates existing entities or creates new ones
-4. **JSON Processing**: Handles JSON data storage and updates
-5. **Error Handling**: Comprehensive error handling and logging
+The API follows the same event processing workflow as all other producer APIs. See [producer-api-java-rest/README.md](../producer-api-java-rest/README.md#event-processing-logic) for details.
 
 ## Testing
 
@@ -193,11 +170,11 @@ Rust's zero-cost abstractions and async runtime provide:
 - Higher throughput for concurrent requests
 - Better resource utilization
 
-## Comparison with Java Version
+## Comparison with Other Implementations
 
-This Rust implementation provides the same functionality as the Java Spring Boot version with:
-- Similar API endpoints and behavior
+This Rust implementation provides the same functionality as all other producer API implementations with:
+- Same API endpoints and behavior
 - Same database schema and operations
 - Equivalent error handling and validation
-- Better performance characteristics
+- Better performance characteristics due to Rust's zero-cost abstractions
 

@@ -134,6 +134,14 @@ docker run -p 7081:7081 \
   producer-api-go
 ```
 
+### Docker Compose
+
+The service is already configured in the main `docker-compose.yml`. Start it with:
+
+```bash
+docker-compose --profile producer-go-rest up -d postgres-large producer-api-go-rest
+```
+
 ## Testing
 
 ### Integration Tests

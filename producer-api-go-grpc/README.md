@@ -105,6 +105,14 @@ docker run -p 7090:7090 \
   producer-api-go-grpc
 ```
 
+### Docker Compose
+
+The service is already configured in the main `docker-compose.yml`. Start it with:
+
+```bash
+docker-compose --profile producer-go-grpc up -d postgres-large producer-api-go-grpc
+```
+
 ## Testing
 
 ### Integration Tests

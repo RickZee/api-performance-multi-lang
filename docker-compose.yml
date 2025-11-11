@@ -24,10 +24,10 @@ services:
       -c min_wal_size=512MB
       -c max_wal_size=2GB
       -c max_connections=100
-      -c max_worker_processes=2
-      -c max_parallel_workers_per_gather=1
-      -c max_parallel_workers=2
-      -c max_parallel_maintenance_workers=1
+      -c max_worker_processes=4
+      -c max_parallel_workers_per_gather=2
+      -c max_parallel_workers=4
+      -c max_parallel_maintenance_workers=2
     ports:
       - "5432:5432"
     volumes:
@@ -66,6 +66,8 @@ services:
     restart: unless-stopped
     networks:
       - car_network
+    profiles:
+      - producer-java-rest
     deploy:
       resources:
         limits:
@@ -92,6 +94,8 @@ services:
     restart: unless-stopped
     networks:
       - car_network
+    profiles:
+      - producer-java-grpc
     deploy:
       resources:
         limits:
@@ -117,6 +121,8 @@ services:
     restart: unless-stopped
     networks:
       - car_network
+    profiles:
+      - producer-rust-rest
     deploy:
       resources:
         limits:
@@ -142,6 +148,8 @@ services:
     restart: unless-stopped
     networks:
       - car_network
+    profiles:
+      - producer-rust-grpc
     deploy:
       resources:
         limits:
@@ -168,7 +176,7 @@ services:
     networks:
       - car_network
     profiles:
-      - producer-go
+      - producer-go-rest
     deploy:
       resources:
         limits:
@@ -222,6 +230,8 @@ services:
     networks:
       - car_network
     restart: "no"
+    profiles:
+      - k6-test
     deploy:
       resources:
         limits:
