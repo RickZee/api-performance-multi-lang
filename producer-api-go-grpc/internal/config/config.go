@@ -20,7 +20,7 @@ func Load() (*Config, error) {
 
 	grpcPortStr := os.Getenv("GRPC_SERVER_PORT")
 	if grpcPortStr == "" {
-		grpcPortStr = "7090"
+		grpcPortStr = "9092"
 	}
 	grpcPort, err := strconv.Atoi(grpcPortStr)
 	if err != nil {

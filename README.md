@@ -154,8 +154,8 @@ The `docker-compose.yml` includes:
 - **producer-api-java-grpc**: Java gRPC API (port 9090, profile: `producer-java-grpc`)
 - **producer-api-rust-rest**: Rust REST API (port 9082, profile: `producer-rust-rest`)
 - **producer-api-rust-grpc**: Rust gRPC API (port 9091, profile: `producer-rust-grpc`)
-- **producer-api-go-rest**: Go REST API (port 7081, profile: `producer-go-rest`)
-- **producer-api-go-grpc**: Go gRPC API (port 7090, profile: `producer-go-grpc`)
+- **producer-api-go-rest**: Go REST API (port 9083, profile: `producer-go-rest`)
+- **producer-api-go-grpc**: Go gRPC API (port 9092, profile: `producer-go-grpc`)
 - **k6-throughput**: k6 test runner container (profile: `k6-test`)
 
 **Note:** All producer APIs use profiles, so they won't start by default. Use `--profile <profile-name>` to start specific services. This allows you to run only the APIs you need, reducing resource usage.

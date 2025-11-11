@@ -57,7 +57,7 @@ message HealthResponse {
 The application uses environment variables for configuration:
 
 - `DATABASE_URL`: PostgreSQL connection string (default: `postgresql://postgres:password@localhost:5432/car_entities`)
-- `GRPC_SERVER_PORT`: gRPC server port (default: `7090`)
+- `GRPC_SERVER_PORT`: gRPC server port (default: `9092`)
 - `LOG_LEVEL`: Logging level - `debug`, `info`, `warn`, `error` (default: `info`)
 
 ## Running Locally
@@ -98,9 +98,9 @@ docker build -t producer-api-go-grpc .
 Run the container:
 
 ```bash
-docker run -p 7090:7090 \
+docker run -p 9092:9092 \
   -e DATABASE_URL=postgresql://postgres:password@host.docker.internal:5432/car_entities \
-  -e GRPC_SERVER_PORT=7090 \
+  -e GRPC_SERVER_PORT=9092 \
   -e LOG_LEVEL=info \
   producer-api-go-grpc
 ```

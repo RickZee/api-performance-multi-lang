@@ -8,7 +8,7 @@ Create Go implementations of the producer APIs (REST and gRPC) with the same fun
 
 - **REST API**: Gin framework with `database/sql` + `pgx` driver
 - **gRPC API**: Standard Go gRPC with `database/sql` + `pgx` driver
-- **Ports**: 7081 (REST), 7090 (gRPC) - starting with "7" as requested
+- **Ports**: 9083 (REST), 9092 (gRPC) - starting with "9" as requested
 - **Testing**: Unit tests, integration tests, and k6 throughput tests
 
 ## Implementation Tasks
@@ -55,7 +55,7 @@ Create Go implementations of the producer APIs (REST and gRPC) with the same fun
 - Run migrations
 - Set up Gin router with CORS
 - Register handlers
-- Start HTTP server on port 7081
+- Start HTTP server on port 9083
 
 #### 1.4 Database Migrations
 
@@ -109,7 +109,7 @@ Create Go implementations of the producer APIs (REST and gRPC) with the same fun
 - Run migrations
 - Create gRPC server
 - Register EventService
-- Start gRPC server on port 7090
+- Start gRPC server on port 9092
 
 #### 2.5 Testing
 
@@ -130,8 +130,8 @@ Create Go implementations of the producer APIs (REST and gRPC) with the same fun
 #### 3.1 Update Configuration
 
 - Update `load-test/k6/config.js`:
-                - Add `producer-api-go-rest` configuration (port 7081)
-                - Add `producer-api-go-grpc` configuration (port 7090, proto file path)
+                - Add `producer-api-go-rest` configuration (port 9083)
+                - Add `producer-api-go-grpc` configuration (port 9092, proto file path)
 
 #### 3.2 Proto File Setup
 
@@ -153,10 +153,10 @@ producer-api-go-rest:
   build: ./producer-api-go
   container_name: producer-api-go
   ports:
-  - "7081:7081"
+  - "9083:9083"
   environment:
     DATABASE_URL: postgresql://postgres:password@postgres-large:5432/car_entities
-    SERVER_PORT: 7081
+    SERVER_PORT: 9083
     LOG_LEVEL: info
   profiles:
   - producer-go
@@ -169,10 +169,10 @@ producer-api-go-grpc:
   build: ./producer-api-go-grpc
   container_name: producer-api-go-grpc
   ports:
-  - "7090:7090"
+  - "9092:9092"
   environment:
     DATABASE_URL: postgresql://postgres:password@postgres-large:5432/car_entities
-    GRPC_SERVER_PORT: 7090
+    GRPC_SERVER_PORT: 9092
     LOG_LEVEL: info
   profiles:
   - producer-go-grpc

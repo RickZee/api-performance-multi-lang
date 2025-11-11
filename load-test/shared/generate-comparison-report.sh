@@ -27,8 +27,8 @@ API_PORTS[producer-api-java-rest]="9081"
 API_PORTS[producer-api-java-grpc]="9090"
 API_PORTS[producer-api-rust-rest]="9082"
 API_PORTS[producer-api-rust-grpc]="9091"
-API_PORTS[producer-api-go-rest]="7081"
-API_PORTS[producer-api-go-grpc]="7090"
+API_PORTS[producer-api-go-rest]="9083"
+API_PORTS[producer-api-go-grpc]="9092"
 
 # Function to extract metrics from k6 JSON file
 extract_metrics() {

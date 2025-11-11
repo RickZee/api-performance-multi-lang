@@ -94,9 +94,17 @@ def extract_metrics(json_file):
                     elif metric_name == 'grpc_req_duration' and obj_type == 'Point':
                         grpc_durations.append(data.get('value', 0))
                     elif metric_name == 'http_req_failed' and obj_type == 'Point':
-                        http_failed.append(data.get('value', 0))
+                        # http_req_failed value is 0 (success) or 1 (failed) for each request
+                        # Only count as failed if value is 1
+                        failed_value = data.get('value', 0)
+                        if failed_value > 0:
+                            http_failed.append(1)
                     elif metric_name == 'grpc_req_failed' and obj_type == 'Point':
-                        grpc_failed.append(data.get('value', 0))
+                        # grpc_req_failed value is 0 (success) or 1 (failed) for each request
+                        # Only count as failed if value is 1
+                        failed_value = data.get('value', 0)
+                        if failed_value > 0:
+                            grpc_failed.append(1)
                     elif metric_name == 'iterations' and obj_type == 'Point':
                         iterations.append(data.get('value', 0))
                     elif metric_name == 'iteration_duration' and obj_type == 'Point':
@@ -125,8 +133,9 @@ def extract_metrics(json_file):
             sys.exit(1)
         
         total_samples = len(reqs)
-        success_samples = total_samples - sum(failed) if failed else total_samples
+        # failed list now only contains 1s for actual failures, so sum gives count of failures
         error_samples = sum(failed) if failed else 0
+        success_samples = total_samples - error_samples
         
         # Calculate duration - prefer actual time range, fall back to iteration durations
         if start_time and end_time and (end_time - start_time).total_seconds() > 0.01:

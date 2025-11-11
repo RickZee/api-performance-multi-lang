@@ -15,8 +15,8 @@ API_INFO[producer-api-java-rest]="Java REST (Spring Boot)|REST|Java|9081"
 API_INFO[producer-api-java-grpc]="Java gRPC|gRPC|Java|9090"
 API_INFO[producer-api-rust-rest]="Rust REST|REST|Rust|9082"
 API_INFO[producer-api-rust-grpc]="Rust gRPC|gRPC|Rust|9091"
-API_INFO[producer-api-go-rest]="Go REST|REST|Go|7081"
-API_INFO[producer-api-go-grpc]="Go gRPC|gRPC|Go|7090"
+API_INFO[producer-api-go-rest]="Go REST|REST|Go|9083"
+API_INFO[producer-api-go-grpc]="Go gRPC|gRPC|Go|9092"
 
 # Find latest JSON for each API
 find_latest_json() {

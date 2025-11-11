@@ -23,7 +23,7 @@ export const API_CONFIG = {
     'producer-api-go-rest': {
         protocol: 'http',
         host: __ENV.HOST || 'producer-api-go-rest',
-        port: __ENV.PORT || 7081,
+        port: __ENV.PORT || 9083,
         path: '/api/v1/events',
     },
     'producer-api-java-grpc': {
@@ -45,7 +45,7 @@ export const API_CONFIG = {
     'producer-api-go-grpc': {
         protocol: 'grpc',
         host: __ENV.HOST || 'producer-api-go-grpc',
-        port: __ENV.PORT || 7090,
+        port: __ENV.PORT || 9092,
         service: 'com.example.grpc.EventService',
         method: 'ProcessEvent',
         protoFile: '/k6/proto/go-grpc/event_service.proto',
