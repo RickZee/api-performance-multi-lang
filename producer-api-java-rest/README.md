@@ -53,17 +53,7 @@ Health check endpoint.
 
 ## Database Schema
 
-The API uses the same database schema as the Consumer API:
-
-```sql
-CREATE TABLE car_entities (
-    id VARCHAR(255) PRIMARY KEY,
-    entity_type VARCHAR(255) NOT NULL,
-    created_at TIMESTAMP WITH TIME ZONE,
-    updated_at TIMESTAMP WITH TIME ZONE,
-    data JSONB NOT NULL
-);
-```
+The API uses the same database schema as all other producer APIs. See the main [README.md](../README.md) for schema details.
 
 ## Running the Application
 
@@ -85,7 +75,7 @@ docker run -p 8081:8081 producer-api
 
 ### Docker Compose
 ```bash
-docker-compose --profile producer up
+docker-compose --profile producer-java-rest up -d postgres-large producer-api-java-rest
 ```
 
 ## Testing
@@ -129,11 +119,14 @@ server:
 
 ## Event Processing Logic
 
+The API follows a standard event processing workflow:
 1. **Validation**: Validates event structure and required fields
 2. **Entity Check**: Determines if entities exist or need to be created
 3. **Update/Create**: Updates existing entities or creates new ones
 4. **JSON Processing**: Handles JSONB data storage and updates
 5. **Error Handling**: Comprehensive error handling and logging
+
+This logic is consistent across all producer API implementations.
 
 ## Event Model
 
@@ -192,15 +185,6 @@ Events follow a standardized structure with header and body sections:
 cd ../load-test/shared
 ./run-sequential-throughput-tests.sh smoke
 ```
-
-## Testing
-
-### Integration Tests
-The integration tests verify:
-- Event processing with new entities
-- Event processing with existing entities
-- Multiple entity processing
-- Error handling scenarios
 
 ## Related Documentation
 

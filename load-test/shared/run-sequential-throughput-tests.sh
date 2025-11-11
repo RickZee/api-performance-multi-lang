@@ -240,14 +240,14 @@ ensure_database_running() {
     # Check if container exists
     if ! docker-compose ps postgres-large 2>/dev/null | grep -q "postgres-large"; then
         print_status "PostgreSQL container not found. Starting..."
-        docker-compose --profile large up -d postgres-large
+        docker-compose up -d postgres-large
         sleep 5
     fi
     
     # Check if container is running
     if ! docker-compose ps postgres-large 2>/dev/null | grep -q "Up"; then
         print_status "PostgreSQL container is not running. Starting..."
-        docker-compose --profile large up -d postgres-large
+        docker-compose up -d postgres-large
         sleep 5
     fi
     
@@ -919,9 +919,9 @@ stop_all_apis() {
     
     # First, try docker-compose stop (graceful)
     docker-compose stop producer-api-java-rest producer-api-java-grpc producer-api-rust-rest producer-api-rust-grpc 2>/dev/null || true
-    docker-compose --profile producer stop producer-api-java-rest 2>/dev/null || true
-    docker-compose --profile producer-grpc stop producer-api-java-grpc 2>/dev/null || true
-    docker-compose --profile producer-rust stop producer-api-rust-rest 2>/dev/null || true
+    docker-compose --profile producer-java-rest stop producer-api-java-rest 2>/dev/null || true
+    docker-compose --profile producer-java-grpc stop producer-api-java-grpc 2>/dev/null || true
+    docker-compose --profile producer-rust-rest stop producer-api-rust-rest 2>/dev/null || true
     docker-compose --profile producer-rust-grpc stop producer-api-rust-grpc 2>/dev/null || true
     
     # Then, forcefully stop using docker stop (more reliable)
@@ -1004,22 +1004,22 @@ start_api() {
     # Start the specific API with its profile and postgres-large
     case "$api_name" in
         producer-api-java-rest)
-            docker-compose --profile large --profile producer up -d postgres-large producer-api-java-rest
+            docker-compose --profile producer-java-rest up -d postgres-large producer-api-java-rest
             ;;
         producer-api-java-grpc)
-            docker-compose --profile large --profile producer-grpc up -d postgres-large producer-api-java-grpc
+            docker-compose --profile producer-java-grpc up -d postgres-large producer-api-java-grpc
             ;;
         producer-api-rust-rest)
-            docker-compose --profile large --profile producer-rust up -d postgres-large producer-api-rust-rest
+            docker-compose --profile producer-rust-rest up -d postgres-large producer-api-rust-rest
             ;;
         producer-api-rust-grpc)
-            docker-compose --profile large --profile producer-rust-grpc up -d postgres-large producer-api-rust-grpc
+            docker-compose --profile producer-rust-grpc up -d postgres-large producer-api-rust-grpc
             ;;
         producer-api-go-rest)
-            docker-compose --profile large --profile producer-go up -d postgres-large producer-api-go-rest
+            docker-compose --profile producer-go-rest up -d postgres-large producer-api-go-rest
             ;;
         producer-api-go-grpc)
-            docker-compose --profile large --profile producer-go-grpc up -d postgres-large producer-api-go-grpc
+            docker-compose --profile producer-go-grpc up -d postgres-large producer-api-go-grpc
             ;;
     esac
     
@@ -1038,19 +1038,19 @@ stop_api() {
     docker-compose stop "$api_name" 2>/dev/null || true
     case "$api_name" in
         producer-api-java-rest)
-            docker-compose --profile producer stop producer-api-java-rest 2>/dev/null || true
+            docker-compose --profile producer-java-rest stop producer-api-java-rest 2>/dev/null || true
             ;;
         producer-api-java-grpc)
-            docker-compose --profile producer-grpc stop producer-api-java-grpc 2>/dev/null || true
+            docker-compose --profile producer-java-grpc stop producer-api-java-grpc 2>/dev/null || true
             ;;
         producer-api-rust-rest)
-            docker-compose --profile producer-rust stop producer-api-rust-rest 2>/dev/null || true
+            docker-compose --profile producer-rust-rest stop producer-api-rust-rest 2>/dev/null || true
             ;;
         producer-api-rust-grpc)
             docker-compose --profile producer-rust-grpc stop producer-api-rust-grpc 2>/dev/null || true
             ;;
         producer-api-go-rest)
-            docker-compose --profile producer-go stop producer-api-go-rest 2>/dev/null || true
+            docker-compose --profile producer-go-rest stop producer-api-go-rest 2>/dev/null || true
             ;;
         producer-api-go-grpc)
             docker-compose --profile producer-go-grpc stop producer-api-go-grpc 2>/dev/null || true
@@ -1100,7 +1100,7 @@ run_k6_test() {
     cd "$BASE_DIR"
     if ! docker-compose ps k6-throughput 2>/dev/null | grep -q "k6-throughput"; then
         print_status "Building k6 throughput container..."
-        docker-compose --profile throughput-test build k6-throughput > /dev/null 2>&1 || true
+        docker-compose --profile k6-test build k6-throughput > /dev/null 2>&1 || true
     fi
     
     # Create results directory
@@ -1159,7 +1159,7 @@ run_k6_test() {
     # Use unbuffered output and prefix each line with API name for real-time visibility
     cd "$BASE_DIR"
     # Use prefix_logs function which handles cross-platform compatibility
-    if docker-compose --profile throughput-test run --rm --entrypoint /bin/sh k6-throughput -c "$k6_cmd" 2>&1 | prefix_logs "$api_name" | tee "$summary_file"; then
+    if docker-compose --profile k6-test run --rm --entrypoint /bin/sh k6-throughput -c "$k6_cmd" 2>&1 | prefix_logs "$api_name" | tee "$summary_file"; then
         # Move JSON file from container mount to final location
         if [ -f "$BASE_DIR/load-test/results/throughput-sequential/$api_name/$(basename $json_file)" ]; then
             mv "$BASE_DIR/load-test/results/throughput-sequential/$api_name/$(basename $json_file)" "$json_file"
@@ -1253,7 +1253,7 @@ run_ghz_test() {
     
     # Run ghz in Docker container
     cd "$BASE_DIR"
-    if docker-compose --profile throughput-test run --rm k6-throughput sh -c "
+    if docker-compose --profile k6-test run --rm k6-throughput sh -c "
         ghz --proto ${proto_file} \
             --call ${method} \
             --insecure \
@@ -2045,7 +2045,7 @@ main() {
     # Step 2: Build k6 container
     print_status "Step 2: Building k6 throughput container..."
     cd "$BASE_DIR"
-    if ! docker-compose --profile throughput-test build k6-throughput > /dev/null 2>&1; then
+    if ! docker-compose --profile k6-test build k6-throughput > /dev/null 2>&1; then
         print_warning "k6 container build had warnings, continuing anyway..."
     fi
     print_success "k6 container ready"

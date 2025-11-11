@@ -63,17 +63,7 @@ message HealthResponse {
 
 ## Database Schema
 
-The API uses the same database schema as the Java version:
-
-```sql
-CREATE TABLE car_entities (
-    id VARCHAR(255) PRIMARY KEY,
-    entity_type VARCHAR(255) NOT NULL,
-    created_at TIMESTAMP WITH TIME ZONE,
-    updated_at TIMESTAMP WITH TIME ZONE,
-    data TEXT NOT NULL
-);
-```
+The API uses the same database schema as all other producer APIs. See the main [README.md](../README.md) for schema details.
 
 ## Prerequisites
 
@@ -118,19 +108,10 @@ docker run -p 9090:9090 \
 
 ### Docker Compose
 
-The service can be integrated into the existing docker-compose.yml:
+The service is already configured in the main `docker-compose.yml`. Start it with:
 
-```yaml
-producer-api-rust-grpc:
-  build: ./producer-api-rust-grpc
-  ports:
-    - "9090:9090"
-  environment:
-    - DATABASE_URL=postgresql://postgres:password@postgres:5432/car_entities
-    - GRPC_SERVER_PORT=9090
-    - RUST_LOG=info
-  depends_on:
-    - postgres
+```bash
+docker-compose --profile producer-rust-grpc up -d postgres-large producer-api-rust-grpc
 ```
 
 ## Configuration
@@ -152,11 +133,7 @@ The application can be configured via environment variables:
 
 ## Event Processing Logic
 
-1. **Validation**: Validates event structure and required fields
-2. **Entity Check**: Determines if entities exist or need to be created
-3. **Update/Create**: Updates existing entities or creates new ones
-4. **JSON Processing**: Handles JSON data storage and updates
-5. **Error Handling**: Comprehensive error handling with gRPC status codes
+The API follows the same event processing workflow as all other producer APIs. The main difference is error handling, which uses gRPC status codes instead of HTTP status codes. See [producer-api-java-rest/README.md](../producer-api-java-rest/README.md#event-processing-logic) for the standard workflow.
 
 ## Testing
 
@@ -201,11 +178,11 @@ gRPC provides several advantages over REST:
 - **Streaming**: Support for streaming requests and responses
 - **Type Safety**: Compile-time type checking with generated code
 
-## Comparison with Java Version
+## Comparison with Other Implementations
 
-This Rust implementation provides the same functionality as the Java Spring Boot gRPC version with:
+This Rust implementation provides the same functionality as all other producer API gRPC implementations with:
 - Same proto definition and service methods
 - Same database schema and operations
 - Equivalent error handling and validation
-- Better performance characteristics
+- Better performance characteristics due to Rust's zero-cost abstractions
 

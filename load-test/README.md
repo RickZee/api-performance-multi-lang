@@ -1,6 +1,6 @@
 # Producer API Performance Testing
 
-This directory contains k6-based performance testing infrastructure for comparing the 4 producer API implementations.
+This directory contains k6-based performance testing infrastructure for comparing the 6 producer API implementations.
 
 ## Overview
 
@@ -104,20 +104,25 @@ Each test generates:
 
 ## Producer API Implementations
 
-The tests cover all 4 producer API implementations:
+The tests cover all 6 producer API implementations:
 
-1. **producer-api-java-rest** - Spring Boot REST (port 9081)
-2. **producer-api-java-grpc** - Java gRPC (port 9090)
-3. **producer-api-rust-rest** - Rust REST (port 9082)
-4. **producer-api-rust-grpc** - Rust gRPC (port 9091)
+1. **producer-api-java-rest** - Spring Boot REST (port 9081, profile: `producer-java-rest`)
+2. **producer-api-java-grpc** - Java gRPC (port 9090, profile: `producer-java-grpc`)
+3. **producer-api-rust-rest** - Rust REST (port 9082, profile: `producer-rust-rest`)
+4. **producer-api-rust-grpc** - Rust gRPC (port 9091, profile: `producer-rust-grpc`)
+5. **producer-api-go-rest** - Go REST (port 7081, profile: `producer-go-rest`)
+6. **producer-api-go-grpc** - Go gRPC (port 7090, profile: `producer-go-grpc`)
 
 ## Prerequisites
 
 1. Docker and Docker Compose must be installed and running
-2. All producer APIs must be available (either running or will be started by the test script)
+2. All producer APIs use Docker Compose profiles and will be started automatically by the test scripts
 3. PostgreSQL database must be accessible (will be started automatically for sequential tests)
 
-**Note**: k6 is executed in Docker containers - no local k6 installation required!
+**Note**: 
+- k6 is executed in Docker containers - no local k6 installation required!
+- The test scripts automatically start the required APIs using their profiles, so you don't need to manually start them
+- All APIs use profiles (`producer-java-rest`, `producer-java-grpc`, `producer-rust-rest`, `producer-rust-grpc`, `producer-go-rest`, `producer-go-grpc`), so they won't start with a simple `docker-compose up`
 
 ## Detailed Documentation
 

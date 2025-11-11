@@ -267,7 +267,7 @@ To debug test execution:
 
 2. **Run Tests Manually**:
    ```bash
-   docker-compose --profile throughput-test run --rm k6-throughput \
+   docker-compose --profile k6-test run --rm k6-throughput \
      k6 run /k6/scripts/rest-api-test.js \
      -e TEST_MODE=smoke \
      -e HOST=producer-api-java-rest \
