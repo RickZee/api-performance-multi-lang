@@ -16,7 +16,7 @@ ANALYSIS_OUTPUT_DIR="$RESULTS_BASE_DIR/analysis"
 TIMESTAMP=$(date +%Y%m%d_%H%M%S)
 
 # API list
-APIS="producer-api producer-api-grpc producer-api-rust producer-api-rust-grpc"
+APIS="producer-api-java-rest producer-api-java-grpc producer-api-rust-rest producer-api-rust-grpc"
 
 # Function to extract metrics from JTL file
 extract_metrics() {
@@ -211,7 +211,7 @@ main() {
         "all")
             analyze_all
             ;;
-        "producer-api"|"producer-api-grpc"|"producer-api-rust"|"producer-api-rust-grpc")
+        "producer-api-java-rest"|"producer-api-java-grpc"|"producer-api-rust-rest"|"producer-api-rust-grpc")
             analyze_api "$1"
             ;;
         "help"|"-h"|"--help")
@@ -222,15 +222,15 @@ main() {
             echo
             echo "Options:"
             echo "  all                  Analyze results for all APIs (default)"
-            echo "  producer-api         Analyze Spring Boot REST API results"
-            echo "  producer-api-grpc    Analyze Java gRPC API results"
-            echo "  producer-api-rust    Analyze Rust REST API results"
+            echo "  producer-api-java-rest         Analyze Spring Boot REST API results"
+            echo "  producer-api-java-grpc    Analyze Java gRPC API results"
+            echo "  producer-api-rust-rest    Analyze Rust REST API results"
             echo "  producer-api-rust-grpc  Analyze Rust gRPC API results"
             echo "  help                 Show this help message"
             echo
             echo "Examples:"
             echo "  $0                   # Analyze all results"
-            echo "  $0 producer-api      # Analyze Spring Boot REST API only"
+            echo "  $0 producer-api-java-rest      # Analyze Spring Boot REST API only"
             echo
             echo "Results are saved to: load-test/results/throughput/analysis/"
             ;;

@@ -43,16 +43,16 @@ services:
     deploy:
       resources:
         limits:
-          memory: 2G
-          cpus: '2.0'
+          memory: 4G
+          cpus: '4.0'
         reservations:
           memory: 1G
           cpus: '1.0'
 
   # Producer API - Spring Boot REST
-  producer-api:
-    build: ./producer-api
-    container_name: producer-api
+  producer-api-java-rest:
+    build: ./producer-api-java-rest
+    container_name: producer-api-java-rest
     ports:
       - "9081:8081"
     environment:
@@ -76,9 +76,9 @@ services:
           cpus: '1.0'
 
   # Producer API - Java gRPC
-  producer-api-grpc:
-    build: ./producer-api-grpc
-    container_name: producer-api-grpc
+  producer-api-java-grpc:
+    build: ./producer-api-java-grpc
+    container_name: producer-api-java-grpc
     ports:
       - "9090:9090"
     environment:
@@ -102,9 +102,9 @@ services:
           cpus: '1.0'
 
   # Producer API - Rust REST
-  producer-api-rust:
-    build: ./producer-api-rust
-    container_name: producer-api-rust
+  producer-api-rust-rest:
+    build: ./producer-api-rust-rest
+    container_name: producer-api-rust-rest
     ports:
       - "9082:8081"
     environment:
@@ -152,9 +152,9 @@ services:
           cpus: '1.0'
 
   # Producer API - Go REST
-  producer-api-go:
-    build: ./producer-api-go
-    container_name: producer-api-go
+  producer-api-go-rest:
+    build: ./producer-api-go-rest
+    container_name: producer-api-go-rest
     ports:
       - "7081:7081"
     environment:
@@ -216,7 +216,7 @@ services:
     volumes:
       - ./load-test/k6:/k6/scripts:ro
       - ./load-test/results:/k6/results
-      - ./producer-api-grpc/src/main/proto:/k6/proto/java-grpc:ro
+      - ./producer-api-java-grpc/src/main/proto:/k6/proto/java-grpc:ro
       - ./producer-api-rust-grpc/proto:/k6/proto/rust-grpc:ro
       - ./producer-api-go-grpc/proto:/k6/proto/go-grpc:ro
     networks:

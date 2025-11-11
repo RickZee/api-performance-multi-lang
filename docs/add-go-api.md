@@ -13,11 +13,11 @@ Create Go implementations of the producer APIs (REST and gRPC) with the same fun
 
 ## Implementation Tasks
 
-### 1. Go REST API (`producer-api-go`)
+### 1. Go REST API (`producer-api-go-rest`)
 
 #### 1.1 Project Structure
 
-- Create `producer-api-go/` directory
+- Create `producer-api-go-rest/` directory
 - Set up Go module (`go.mod`)
 - Create directory structure:
                 - `cmd/server/` - main application entry point
@@ -77,7 +77,7 @@ Create Go implementations of the producer APIs (REST and gRPC) with the same fun
 
 - Create `Dockerfile` (multi-stage build)
 - Create `.dockerignore`
-- Update `docker-compose.yml` with `producer-api-go` service
+- Update `docker-compose.yml` with `producer-api-go-rest` service
 
 ### 2. Go gRPC API (`producer-api-go-grpc`)
 
@@ -130,7 +130,7 @@ Create Go implementations of the producer APIs (REST and gRPC) with the same fun
 #### 3.1 Update Configuration
 
 - Update `load-test/k6/config.js`:
-                - Add `producer-api-go` configuration (port 7081)
+                - Add `producer-api-go-rest` configuration (port 7081)
                 - Add `producer-api-go-grpc` configuration (port 7090, proto file path)
 
 #### 3.2 Proto File Setup
@@ -149,7 +149,7 @@ Create Go implementations of the producer APIs (REST and gRPC) with the same fun
 #### 4.1 Add Go REST Service
 
 ```yaml
-producer-api-go:
+producer-api-go-rest:
   build: ./producer-api-go
   container_name: producer-api-go
   ports:
@@ -186,7 +186,7 @@ producer-api-go-grpc:
 
 #### 5.1 README Files
 
-- Create `producer-api-go/README.md` with:
+- Create `producer-api-go-rest/README.md` with:
                 - API endpoints documentation
                 - Running instructions
                 - Testing instructions
@@ -274,22 +274,22 @@ producer-api-go-grpc:
 
 ### REST API
 
-- `producer-api-go/go.mod`
-- `producer-api-go/go.sum`
-- `producer-api-go/cmd/server/main.go`
-- `producer-api-go/internal/config/config.go`
-- `producer-api-go/internal/models/event.go`
-- `producer-api-go/internal/models/entity.go`
-- `producer-api-go/internal/repository/car_entity_repo.go`
-- `producer-api-go/internal/service/event_processing.go`
-- `producer-api-go/internal/handlers/event.go`
-- `producer-api-go/internal/handlers/health.go`
-- `producer-api-go/internal/errors/app_error.go`
-- `producer-api-go/migrations/001_initial_schema.sql`
-- `producer-api-go/tests/integration_test.go`
-- `producer-api-go/Dockerfile`
-- `producer-api-go/.dockerignore`
-- `producer-api-go/README.md`
+- `producer-api-go-rest/go.mod`
+- `producer-api-go-rest/go.sum`
+- `producer-api-go-rest/cmd/server/main.go`
+- `producer-api-go-rest/internal/config/config.go`
+- `producer-api-go-rest/internal/models/event.go`
+- `producer-api-go-rest/internal/models/entity.go`
+- `producer-api-go-rest/internal/repository/car_entity_repo.go`
+- `producer-api-go-rest/internal/service/event_processing.go`
+- `producer-api-go-rest/internal/handlers/event.go`
+- `producer-api-go-rest/internal/handlers/health.go`
+- `producer-api-go-rest/internal/errors/app_error.go`
+- `producer-api-go-rest/migrations/001_initial_schema.sql`
+- `producer-api-go-rest/tests/integration_test.go`
+- `producer-api-go-rest/Dockerfile`
+- `producer-api-go-rest/.dockerignore`
+- `producer-api-go-rest/README.md`
 
 ### gRPC API
 

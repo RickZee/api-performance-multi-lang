@@ -8,27 +8,27 @@ export const TEST_MODE = __ENV.TEST_MODE || 'smoke';
 
 // API configurations
 export const API_CONFIG = {
-    'producer-api': {
+    'producer-api-java-rest': {
         protocol: 'http',
-        host: __ENV.HOST || 'producer-api',
+        host: __ENV.HOST || 'producer-api-java-rest',
         port: __ENV.PORT || 8081,
         path: '/api/v1/events',
     },
-    'producer-api-rust': {
+    'producer-api-rust-rest': {
         protocol: 'http',
-        host: __ENV.HOST || 'producer-api-rust',
+        host: __ENV.HOST || 'producer-api-rust-rest',
         port: __ENV.PORT || 8081,
         path: '/api/v1/events',
     },
-    'producer-api-go': {
+    'producer-api-go-rest': {
         protocol: 'http',
-        host: __ENV.HOST || 'producer-api-go',
+        host: __ENV.HOST || 'producer-api-go-rest',
         port: __ENV.PORT || 7081,
         path: '/api/v1/events',
     },
-    'producer-api-grpc': {
+    'producer-api-java-grpc': {
         protocol: 'grpc',
-        host: __ENV.HOST || 'producer-api-grpc',
+        host: __ENV.HOST || 'producer-api-java-grpc',
         port: __ENV.PORT || 9090,
         service: 'com.example.grpc.EventService',
         method: 'ProcessEvent',

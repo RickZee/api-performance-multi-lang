@@ -106,9 +106,9 @@ Each test generates:
 
 The tests cover all 4 producer API implementations:
 
-1. **producer-api** - Spring Boot REST (port 9081)
-2. **producer-api-grpc** - Java gRPC (port 9090)
-3. **producer-api-rust** - Rust REST (port 9082)
+1. **producer-api-java-rest** - Spring Boot REST (port 9081)
+2. **producer-api-java-grpc** - Java gRPC (port 9090)
+3. **producer-api-rust-rest** - Rust REST (port 9082)
 4. **producer-api-rust-grpc** - Rust gRPC (port 9091)
 
 ## Prerequisites
