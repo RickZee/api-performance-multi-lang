@@ -94,6 +94,8 @@ Test results are saved to `load-test/results/throughput-sequential/<api_name>/` 
 - Summary reports
 - Comparison reports
 
+**Sample Comparison Report**: See [docs/sample-comparison-report.html](docs/sample-comparison-report.html) for an example of the generated HTML comparison report showing performance metrics across all APIs.
+
 For detailed testing information, see [load-test/THROUGHPUT-TESTING-GUIDE.md](load-test/THROUGHPUT-TESTING-GUIDE.md).
 
 ## 📁 Project Structure
