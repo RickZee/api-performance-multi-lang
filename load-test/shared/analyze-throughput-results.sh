@@ -156,7 +156,7 @@ analyze_all() {
     
     if [ "$found_results" = false ]; then
         print_error "No results found. Please run throughput tests first:"
-        print_status "  ./run-throughput-tests.sh"
+        print_status "  ./run-sequential-throughput-tests.sh full"
         exit 1
     fi
     
