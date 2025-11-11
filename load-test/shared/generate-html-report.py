@@ -760,7 +760,7 @@ def generate_html_report(results_dir, test_mode, timestamp):
                      str(latest_json), str(latest_metrics_csv), test_mode],
                     capture_output=True,
                     text=True,
-                    timeout=30
+                    timeout=300  # Increased timeout for large JSON files (5 minutes)
                 )
                 if result.returncode == 0:
                     resource_data[api['name']] = json.loads(result.stdout)
@@ -877,7 +877,13 @@ def generate_html_report(results_dir, test_mode, timestamp):
                                 label: displayName,
                                 data: phases.map(phase => {
                                     const phaseData = resourceData[apiName]?.phases?.[phase];
-                                    return phaseData ? phaseData.avg_cpu_percent : 0;
+                                    // Use phase data if available, otherwise fall back to overall
+                                    if (phaseData && phaseData.avg_cpu_percent > 0) {
+                                        return phaseData.avg_cpu_percent;
+                                    }
+                                    // Fall back to overall CPU if phase data is missing or zero
+                                    const overall = resourceData[apiName]?.overall;
+                                    return overall ? overall.avg_cpu_percent : 0;
                                 }),
                                 backgroundColor: colors[idx % colors.length],
                                 borderColor: colors[idx % colors.length].replace('0.8', '1'),
@@ -890,7 +896,8 @@ def generate_html_report(results_dir, test_mode, timestamp):
                         maintainAspectRatio: false,
                         scales: {
                             y: {
-                                beginAtZero: true,
+                                type: 'logarithmic',
+                                beginAtZero: false,
                                 title: {
                                     display: true,
                                     text: 'CPU %'
@@ -925,7 +932,13 @@ def generate_html_report(results_dir, test_mode, timestamp):
                                 label: displayName,
                                 data: phases.map(phase => {
                                     const phaseData = resourceData[apiName]?.phases?.[phase];
-                                    return phaseData ? phaseData.avg_memory_mb : 0;
+                                    // Use phase data if available, otherwise fall back to overall
+                                    if (phaseData && phaseData.avg_memory_mb > 0) {
+                                        return phaseData.avg_memory_mb;
+                                    }
+                                    // Fall back to overall memory if phase data is missing or zero
+                                    const overall = resourceData[apiName]?.overall;
+                                    return overall ? overall.avg_memory_mb : 0;
                                 }),
                                 backgroundColor: colors[idx % colors.length],
                                 borderColor: colors[idx % colors.length].replace('0.8', '1'),
@@ -938,7 +951,8 @@ def generate_html_report(results_dir, test_mode, timestamp):
                         maintainAspectRatio: false,
                         scales: {
                             y: {
-                                beginAtZero: true,
+                                type: 'logarithmic',
+                                beginAtZero: false,
                                 title: {
                                     display: true,
                                     text: 'Memory (MB)'
@@ -973,7 +987,19 @@ def generate_html_report(results_dir, test_mode, timestamp):
                                 label: displayName,
                                 data: phases.map(phase => {
                                     const phaseData = resourceData[apiName]?.phases?.[phase];
-                                    return phaseData ? phaseData.cpu_percent_per_request : 0;
+                                    // Use phase data if available and has requests
+                                    if (phaseData && phaseData.requests > 0 && phaseData.cpu_percent_per_request > 0) {
+                                        return phaseData.cpu_percent_per_request;
+                                    }
+                                    // Calculate from overall if phase data is missing
+                                    const overall = resourceData[apiName]?.overall;
+                                    const requests = phaseData?.requests || 0;
+                                    if (overall && requests > 0) {
+                                        // Approximate: (avg CPU % * test duration) / requests
+                                        const testDuration = phaseData?.duration_seconds || 30;
+                                        return (overall.avg_cpu_percent * testDuration) / requests;
+                                    }
+                                    return 0;
                                 }),
                                 backgroundColor: colors[idx % colors.length],
                                 borderColor: colors[idx % colors.length].replace('0.8', '1'),
@@ -986,7 +1012,8 @@ def generate_html_report(results_dir, test_mode, timestamp):
                         maintainAspectRatio: false,
                         scales: {
                             y: {
-                                beginAtZero: true,
+                                type: 'logarithmic',
+                                beginAtZero: false,
                                 title: {
                                     display: true,
                                     text: 'CPU %-seconds per Request'
@@ -1021,7 +1048,19 @@ def generate_html_report(results_dir, test_mode, timestamp):
                                 label: displayName,
                                 data: phases.map(phase => {
                                     const phaseData = resourceData[apiName]?.phases?.[phase];
-                                    return phaseData ? phaseData.ram_mb_per_request : 0;
+                                    // Use phase data if available and has requests
+                                    if (phaseData && phaseData.requests > 0 && phaseData.ram_mb_per_request > 0) {
+                                        return phaseData.ram_mb_per_request;
+                                    }
+                                    // Calculate from overall if phase data is missing
+                                    const overall = resourceData[apiName]?.overall;
+                                    const requests = phaseData?.requests || 0;
+                                    if (overall && requests > 0) {
+                                        // Approximate: (avg memory MB * test duration) / requests
+                                        const testDuration = phaseData?.duration_seconds || 30;
+                                        return (overall.avg_memory_mb * testDuration) / requests;
+                                    }
+                                    return 0;
                                 }),
                                 backgroundColor: colors[idx % colors.length],
                                 borderColor: colors[idx % colors.length].replace('0.8', '1'),
@@ -1034,7 +1073,8 @@ def generate_html_report(results_dir, test_mode, timestamp):
                         maintainAspectRatio: false,
                         scales: {
                             y: {
-                                beginAtZero: true,
+                                type: 'logarithmic',
+                                beginAtZero: false,
                                 title: {
                                     display: true,
                                     text: 'RAM MB-seconds per Request'

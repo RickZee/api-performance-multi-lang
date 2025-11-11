@@ -254,6 +254,10 @@ def calculate_phase_metrics(metrics: List[Dict], phase_boundaries: List[Tuple[in
                 if (phase_start - 10) <= m['timestamp'] < (phase_end + 10)
             ]
         
+        # If still no metrics, use all available metrics for this phase (for very short tests like smoke)
+        if not phase_metrics and metrics:
+            phase_metrics = metrics
+        
         if not phase_metrics:
             phase_results[phase_num] = {
                 'phase': phase_num,
