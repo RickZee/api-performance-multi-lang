@@ -151,6 +151,60 @@ services:
           memory: 1G
           cpus: '1.0'
 
+  # Producer API - Go REST
+  producer-api-go:
+    build: ./producer-api-go
+    container_name: producer-api-go
+    ports:
+      - "7081:7081"
+    environment:
+      DATABASE_URL: postgresql://postgres:password@postgres-large:5432/car_entities
+      SERVER_PORT: 7081
+      LOG_LEVEL: info
+    depends_on:
+      postgres-large:
+        condition: service_healthy
+    restart: unless-stopped
+    networks:
+      - car_network
+    profiles:
+      - producer-go
+    deploy:
+      resources:
+        limits:
+          memory: 2G
+          cpus: '2.0'
+        reservations:
+          memory: 1G
+          cpus: '1.0'
+
+  # Producer API - Go gRPC
+  producer-api-go-grpc:
+    build: ./producer-api-go-grpc
+    container_name: producer-api-go-grpc
+    ports:
+      - "7090:7090"
+    environment:
+      DATABASE_URL: postgresql://postgres:password@postgres-large:5432/car_entities
+      GRPC_SERVER_PORT: 7090
+      LOG_LEVEL: info
+    depends_on:
+      postgres-large:
+        condition: service_healthy
+    restart: unless-stopped
+    networks:
+      - car_network
+    profiles:
+      - producer-go-grpc
+    deploy:
+      resources:
+        limits:
+          memory: 2G
+          cpus: '2.0'
+        reservations:
+          memory: 1G
+          cpus: '1.0'
+
   # k6 Throughput Test Runner
   k6-throughput:
     build:
@@ -164,6 +218,7 @@ services:
       - ./load-test/results:/k6/results
       - ./producer-api-grpc/src/main/proto:/k6/proto/java-grpc:ro
       - ./producer-api-rust-grpc/proto:/k6/proto/rust-grpc:ro
+      - ./producer-api-go-grpc/proto:/k6/proto/go-grpc:ro
     networks:
       - car_network
     restart: "no"

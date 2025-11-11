@@ -1,0 +1,131 @@
+{
+  "car": {
+    "id": "CAR-2025-001",
+    "make": "Tesla",
+    "model": "Model S",
+    "year": 2025,
+    "vin": "5TDJKRFH4LS123456",
+    "licensePlate": "TSL-001",
+    "color": "Midnight Silver",
+    "bodyType": "Sedan",
+    "transmission": "Automatic",
+    "fuelType": "Electric",
+    "engineCapacity": 0,
+    "horsepower": 450,
+    "torque": 630,
+    "driveType": "AWD",
+    "seatingCapacity": 5,
+    "doors": 4,
+    "wheelbase": 2960,
+    "length": 4950,
+    "width": 1945,
+    "height": 1435,
+    "weight": 2250,
+    "fuelTankCapacity": 0,
+    "batteryCapacity": 100,
+    "rangeEstimate": 400,
+    "zeroTo60": 2.1,
+    "topSpeed": 200,
+    "safetyRating": 5,
+    "owner": {
+      "id": "OWNER-001",
+      "firstName": "John",
+      "lastName": "Doe",
+      "email": "john.doe@example.com",
+      "phone": "+1-555-0100",
+      "address": {
+        "street": "123 Main Street",
+        "city": "San Francisco",
+        "state": "CA",
+        "zipCode": "94102",
+        "country": "USA"
+      }
+    },
+    "insurance": {
+      "provider": "Geico",
+      "policyNumber": "POL-2025-123456",
+      "expiryDate": "2026-11-10",
+      "coverageType": "Full Coverage",
+      "premiumAmount": 1200,
+      "deductible": 500
+    },
+    "maintenance": {
+      "lastServiceDate": "2025-06-01",
+      "nextServiceDue": "2025-12-01",
+      "mileage": 45000,
+      "oilChangeInterval": 10000,
+      "tireRotationInterval": 7500,
+      "warrantyCoverage": "Active",
+      "warrantyExpiryDate": "2027-06-01"
+    },
+    "registration": {
+      "registrationNumber": "REG-2025-123456",
+      "registrationDate": "2025-01-15",
+      "expiryDate": "2026-01-14",
+      "state": "CA",
+      "status": "Active"
+    },
+    "features": [
+      "Autopilot",
+      "Premium Audio",
+      "Panoramic Sunroof",
+      "Heated Seats",
+      "Air Suspension",
+      "Adaptive Headlights",
+      "Blind Spot Monitoring",
+      "Lane Keeping Assist",
+      "Forward Collision Warning",
+      "Adaptive Cruise Control"
+    ],
+    "serviceHistory": [
+      {
+        "serviceId": "SVC-001",
+        "serviceDate": "2025-06-01",
+        "serviceType": "Maintenance",
+        "mileage": 40000,
+        "cost": 500,
+        "description": "Regular service including fluid check and filter replacement",
+        "technician": "Mike Johnson"
+      },
+      {
+        "serviceId": "SVC-002",
+        "serviceDate": "2024-12-15",
+        "serviceType": "Inspection",
+        "mileage": 30000,
+        "cost": 200,
+        "description": "Annual safety inspection",
+        "technician": "Sarah Williams"
+      }
+    ],
+    "accidents": [
+      {
+        "accidentId": "ACC-001",
+        "date": "2023-05-20",
+        "location": "Bay Bridge",
+        "severity": "Minor",
+        "description": "Fender bender in traffic",
+        "damageEstimate": 3000,
+        "repairStatus": "Completed"
+      }
+    ],
+    "fuelEfficiency": {
+      "city": 0,
+      "highway": 0,
+      "combined": 0,
+      "unitType": "MPGe",
+      "energyConsumption": 25
+    },
+    "emissions": {
+      "co2PerMile": 0,
+      "emissionClass": "ZEV",
+      "environmentalRating": "Excellent"
+    },
+    "metadata": {
+      "createdAt": "2025-01-15T08:30:00Z",
+      "updatedAt": "2025-06-01T14:45:00Z",
+      "createdBy": "admin",
+      "source": "Tesla API",
+      "dataVersion": "1.0"
+    }
+  }
+}

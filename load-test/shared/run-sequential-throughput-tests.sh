@@ -9,30 +9,6 @@ set -e
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$SCRIPT_DIR/color-output.sh" 2>/dev/null || true
 
-# Colors for output
-RED='\033[0;31m'
-GREEN='\033[0;32m'
-YELLOW='\033[1;33m'
-BLUE='\033[0;34m'
-NC='\033[0m' # No Color
-
-# Function to print colored output
-print_status() {
-    echo -e "${BLUE}[INFO]${NC} $1"
-}
-
-print_success() {
-    echo -e "${GREEN}[SUCCESS]${NC} $1"
-}
-
-print_warning() {
-    echo -e "${YELLOW}[WARNING]${NC} $1"
-}
-
-print_error() {
-    echo -e "${RED}[ERROR]${NC} $1"
-}
-
 # Function to print section header
 print_section() {
     echo ""
@@ -111,6 +87,8 @@ if [ "$TEST_MODE" != "smoke" ] && [ "$TEST_MODE" != "full" ] && [ "$TEST_MODE" !
     echo "  producer-api-grpc"
     echo "  producer-api-rust"
     echo "  producer-api-rust-grpc"
+    echo "  producer-api-go"
+    echo "  producer-api-go-grpc"
     echo ""
     echo "Examples:"
     echo "  $0                           # Runs smoke tests for all APIs (default)"
@@ -121,20 +99,20 @@ if [ "$TEST_MODE" != "smoke" ] && [ "$TEST_MODE" != "full" ] && [ "$TEST_MODE" !
 fi
 
 # API list (default: all APIs)
-APIS="producer-api producer-api-grpc producer-api-rust producer-api-rust-grpc"
+APIS="producer-api producer-api-grpc producer-api-rust producer-api-rust-grpc producer-api-go producer-api-go-grpc"
 
 # Optional: Test single API for debugging
 SINGLE_API="${2:-}"
 if [ -n "$SINGLE_API" ]; then
     # Validate API name
     case "$SINGLE_API" in
-        producer-api|producer-api-grpc|producer-api-rust|producer-api-rust-grpc)
+        producer-api|producer-api-grpc|producer-api-rust|producer-api-rust-grpc|producer-api-go|producer-api-go-grpc)
             APIS="$SINGLE_API"
             echo "Running tests for single API: $SINGLE_API"
             ;;
         *)
             echo "Error: Invalid API name: '$SINGLE_API'"
-            echo "Valid API names: producer-api, producer-api-grpc, producer-api-rust, producer-api-rust-grpc"
+            echo "Valid API names: producer-api, producer-api-grpc, producer-api-rust, producer-api-rust-grpc, producer-api-go, producer-api-go-grpc"
             exit 1
             ;;
     esac
@@ -155,6 +133,12 @@ get_api_config() {
             ;;
         producer-api-rust-grpc)
             echo "grpc-api-test.js:9090:grpc:producer-rust-grpc:producer-api-rust-grpc:/k6/proto/rust-grpc/event_service.proto:com.example.grpc.EventService:ProcessEvent"
+            ;;
+        producer-api-go)
+            echo "rest-api-test.js:7081:http:producer-go:producer-api-go"
+            ;;
+        producer-api-go-grpc)
+            echo "grpc-api-test.js:7090:grpc:producer-go-grpc:producer-api-go-grpc:/k6/proto/go-grpc/event_service.proto:com.example.grpc.EventService:ProcessEvent"
             ;;
         *)
             echo ""
@@ -180,6 +164,12 @@ get_health_check_port() {
             ;;
         producer-api-grpc)
             echo "9090"  # Host port (container port is 9090)
+            ;;
+        producer-api-go)
+            echo "7081"  # Host port (container port is 7081)
+            ;;
+        producer-api-go-grpc)
+            echo "7090"  # Host port (container port is 7090)
             ;;
         *)
             echo "$container_port"  # Same port for others
@@ -980,6 +970,12 @@ rebuild_api() {
         producer-api-rust-grpc)
             docker-compose build --no-cache producer-api-rust-grpc 2>&1 | grep -v "no such service" || true
             ;;
+        producer-api-go)
+            docker-compose build --no-cache producer-api-go 2>&1 | grep -v "no such service" || true
+            ;;
+        producer-api-go-grpc)
+            docker-compose build --no-cache producer-api-go-grpc 2>&1 | grep -v "no such service" || true
+            ;;
     esac
     
     print_success "$api_name rebuilt"
@@ -1019,6 +1015,12 @@ start_api() {
         producer-api-rust-grpc)
             docker-compose --profile large --profile producer-rust-grpc up -d postgres-large producer-api-rust-grpc
             ;;
+        producer-api-go)
+            docker-compose --profile large --profile producer-go up -d postgres-large producer-api-go
+            ;;
+        producer-api-go-grpc)
+            docker-compose --profile large --profile producer-go-grpc up -d postgres-large producer-api-go-grpc
+            ;;
     esac
     
     print_success "$api_name started"
@@ -1046,6 +1048,12 @@ stop_api() {
             ;;
         producer-api-rust-grpc)
             docker-compose --profile producer-rust-grpc stop producer-api-rust-grpc 2>/dev/null || true
+            ;;
+        producer-api-go)
+            docker-compose --profile producer-go stop producer-api-go 2>/dev/null || true
+            ;;
+        producer-api-go-grpc)
+            docker-compose --profile producer-go-grpc stop producer-api-go-grpc 2>/dev/null || true
             ;;
     esac
     

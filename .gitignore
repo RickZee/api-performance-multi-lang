@@ -5,6 +5,8 @@ load-test/results/
 # Java/Gradle build folders
 build/
 **/build/
+bin/
+**/bin/
 
 # Rust/Cargo build folders
 target/

@@ -1,0 +1,115 @@
+{
+  "CarCreated": {
+    "eventHeader": {
+      "uuid": "${uuid}",
+      "eventName": "CarCreated",
+      "createdDate": "${timestamp}",
+      "savedDate": "${timestamp}",
+      "eventType": "CarCreated"
+    },
+    "eventBody": {
+      "entities": [
+        {
+          "entityType": "Car",
+          "entityId": "${carId}",
+          "updatedAttributes": {
+            "make": "${make}",
+            "model": "${model}",
+            "year": ${year},
+            "color": "${color}",
+            "mileage": ${mileage},
+            "owner": "${owner}",
+            "totalBalance": ${totalBalance}
+          }
+        }
+      ]
+    }
+  },
+  "LoanCreated": {
+    "eventHeader": {
+      "uuid": "${uuid}",
+      "eventName": "LoanCreated",
+      "createdDate": "${timestamp}",
+      "savedDate": "${timestamp}",
+      "eventType": "LoanCreated"
+    },
+    "eventBody": {
+      "entities": [
+        {
+          "entityType": "Car",
+          "entityId": "${carId}",
+          "updatedAttributes": {
+            "loan": {
+              "id": "${loanId}",
+              "balance": ${balance},
+              "loanAmount": ${loanAmount},
+              "interestRate": ${interestRate},
+              "termMonths": ${termMonths},
+              "startDate": "${timestamp}",
+              "status": "active",
+              "monthlyPayment": ${monthlyPayment},
+              "financialInstitution": "${financialInstitution}"
+            }
+          }
+        }
+      ]
+    }
+  },
+  "LoanPaymentSubmitted": {
+    "eventHeader": {
+      "uuid": "${uuid}",
+      "eventName": "LoanPaymentSubmitted",
+      "createdDate": "${timestamp}",
+      "savedDate": "${timestamp}",
+      "eventType": "LoanPaymentSubmitted"
+    },
+    "eventBody": {
+      "entities": [
+        {
+          "entityType": "Car",
+          "entityId": "${carId}",
+          "updatedAttributes": {
+            "loanPayment": {
+              "id": "${paymentId}",
+              "amount": ${amount},
+              "paymentDate": "${timestamp}",
+              "paymentMethod": "${paymentMethod}",
+              "transactionId": "${transactionId}",
+              "financialInstitution": "${financialInstitution}",
+              "accountLast4": "${accountLast4}"
+            }
+          }
+        }
+      ]
+    }
+  },
+  "CarServiceDone": {
+    "eventHeader": {
+      "uuid": "${uuid}",
+      "eventName": "CarServiceDone",
+      "createdDate": "${timestamp}",
+      "savedDate": "${timestamp}",
+      "eventType": "CarServiceDone"
+    },
+    "eventBody": {
+      "entities": [
+        {
+          "entityType": "Car",
+          "entityId": "${carId}",
+          "updatedAttributes": {
+            "service": {
+              "id": "${serviceId}",
+              "serviceDate": "${timestamp}",
+              "amountPaid": ${amountPaid},
+              "dealerId": "${dealerId}",
+              "dealerName": "${dealerName}",
+              "mileageAtService": ${mileageAtService},
+              "description": "${description}",
+              "serviceType": "${serviceType}"
+            }
+          }
+        }
+      ]
+    }
+  }
+}
