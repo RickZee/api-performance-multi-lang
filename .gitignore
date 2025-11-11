@@ -1,0 +1,56 @@
+# Test results
+load-test/results/
+
+# Build artifacts
+# Java/Gradle build folders
+build/
+**/build/
+
+# Rust/Cargo build folders
+target/
+**/target/
+
+# Gradle cache
+.gradle/
+**/.gradle/
+
+# Log files
+*.log
+*.log.*
+
+# OS files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# IDE files
+.idea/
+.vscode/
+*.iml
+*.iws
+*.ipr
+.settings/
+.classpath
+.project
+
+# Editor temporary files
+*.swp
+*.swo
+*~
+*.tmp
+*.temp
+*.orig
+*.rej
+
+# Environment files
+.env
+.env.local
+.env.*.local
+
+# Generated data (if applicable)
+load-test/shared/data/generated/
+

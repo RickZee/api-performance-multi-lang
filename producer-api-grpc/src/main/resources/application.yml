@@ -1,0 +1,28 @@
+spring:
+  application:
+    name: producer-api-grpc
+  
+  r2dbc:
+    url: r2dbc:postgresql://postgres-large:5432/car_entities
+    username: postgres
+    password: password
+    pool:
+      initial-size: 5
+      max-size: 10
+      max-idle-time: 30m
+      max-acquire-time: 30s
+      max-create-connection-time: 30s
+  
+  sql:
+    init:
+      mode: always
+      schema-locations: classpath:schema.sql
+
+grpc:
+  server:
+    port: 9090
+
+logging:
+  level:
+    com.example: DEBUG
+    org.springframework.r2dbc: DEBUG

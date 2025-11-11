@@ -1,0 +1,50 @@
+[package]
+name = "producer-api-rust-grpc"
+version = "1.0.0"
+edition = "2021"
+
+[dependencies]
+# gRPC
+tonic = "0.11"
+prost = "0.12"
+prost-types = "0.12"
+
+# Async runtime
+tokio = { version = "1", features = ["full"] }
+
+# Database
+sqlx = { version = "0.7", features = ["runtime-tokio-rustls", "postgres", "chrono", "json", "uuid"] }
+
+# Serialization
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+
+# Error handling
+thiserror = "1.0"
+anyhow = "1.0"
+
+# Logging
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+# Date/time
+chrono = { version = "0.4", features = ["serde"] }
+
+# Environment variables
+dotenvy = "0.15"
+
+[build-dependencies]
+tonic-build = "0.11"
+
+[dev-dependencies]
+sqlx = { version = "0.7", features = ["runtime-tokio-rustls", "postgres", "chrono", "json", "migrate"] }
+tokio-test = "0.4"
+tokio-stream = { version = "0.1", features = ["net"] }
+tonic = { version = "0.11", features = ["transport"] }
+tonic-build = "0.11"
+mockall = "0.13"
+testcontainers = "0.15"
+testcontainers-modules = { version = "0.1.0-beta.1", features = ["postgres"] }
+tracing-test = "0.2"
+async-trait = "0.1"
+
