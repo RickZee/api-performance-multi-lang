@@ -79,7 +79,7 @@ if [ "$TEST_MODE" != "smoke" ] && [ "$TEST_MODE" != "full" ] && [ "$TEST_MODE" !
     echo ""
     echo "TEST_MODE options:"
     echo "  smoke       - Quick smoke test (1 VU, 5 iterations per API) [DEFAULT]"
-    echo "  full        - Full throughput test (~6 minutes per API)"
+    echo "  full        - Full throughput test (~11 minutes per API)"
     echo "  saturation  - Saturation test (~14 minutes per API)"
     echo ""
     echo "API_NAME options (optional, for debugging single API):"
@@ -1148,7 +1148,7 @@ run_k6_test() {
     elif [ "$TEST_MODE" = "saturation" ]; then
         print_status "  Test duration: ~14 minutes (saturation test)"
     else
-        print_status "  Test duration: ~6 minutes (full test)"
+        print_status "  Test duration: ~11 minutes (full test)"
     fi
     
     # Create results directory in container mount point
@@ -1545,8 +1545,8 @@ create_comparison_report() {
             echo "- **Duration**: ~14 minutes per API"
         else
             echo "- **Mode**: Full Throughput Test"
-            echo "- **Phases**: 3 phases (10 → 50 → 100 VUs)"
-            echo "- **Duration**: ~6 minutes per API"
+            echo "- **Phases**: 4 phases (10 → 50 → 100 → 200 VUs)"
+            echo "- **Duration**: ~11 minutes per API"
         fi
         echo ""
         echo "## APIs Tested"

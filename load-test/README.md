@@ -66,8 +66,8 @@ cd load-test/shared
    - Must pass before full or saturation tests proceed
 
 2. **Full Tests**:
-   - 3 phases: 10 → 50 → 100 VUs
-   - ~6 minutes per API
+   - 4 phases: 10 → 50 → 100 → 200 VUs
+   - ~11 minutes per API
    - Identifies optimal parallelism and breaking points
 
 3. **Saturation Tests**:

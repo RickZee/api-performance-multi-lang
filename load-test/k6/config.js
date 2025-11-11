@@ -58,6 +58,7 @@ export const TEST_PHASES = {
         { duration: '2m', target: 10 },   // Phase 1: Baseline
         { duration: '2m', target: 50 },   // Phase 2: Mid-load
         { duration: '2m', target: 100 },  // Phase 3: High-load
+        { duration: '5m', target: 200 },  // Phase 4: Higher-load
     ],
     saturation: [
         { duration: '2m', target: 10 },    // Phase 1: Baseline
