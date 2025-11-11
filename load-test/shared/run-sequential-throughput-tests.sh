@@ -1487,7 +1487,7 @@ create_comparison_report() {
         echo ""
         echo "## Executive Summary"
         echo ""
-        echo "This report compares throughput test results for all 4 producer API implementations."
+        echo "This report compares throughput test results for all 6 producer API implementations."
         echo "Tests were run sequentially (one API at a time) to ensure fair comparison without resource competition."
         echo ""
         echo "## Test Configuration"
@@ -1512,6 +1512,8 @@ create_comparison_report() {
         echo "2. **producer-api-java-grpc** - Java gRPC (port 9090)"
         echo "3. **producer-api-rust-rest** - Rust REST (port 9082)"
         echo "4. **producer-api-rust-grpc** - Rust gRPC (port 9091)"
+        echo "5. **producer-api-go-rest** - Go REST (port 7081)"
+        echo "6. **producer-api-go-grpc** - Go gRPC (port 7090)"
         echo ""
         echo "## Results Summary"
         echo ""
@@ -1648,6 +1650,52 @@ create_comparison_report() {
         fi
         
         echo ""
+        echo "### producer-api-go-rest (Go REST)"
+        echo ""
+        api_dir="$RESULTS_BASE_DIR/producer-api-go-rest"
+        if [ -d "$api_dir" ]; then
+            latest_json=$(find "$api_dir" -name "*-throughput-*.json" -type f | sort -r | head -1)
+            if [ -n "$latest_json" ]; then
+                echo "**File**: \`$(basename "$latest_json")\`"
+                echo ""
+                metrics=$(extract_k6_metrics "$latest_json")
+                IFS='|' read -r total_samples success_samples error_samples duration_seconds throughput avg_response min_response max_response <<< "$metrics"
+                
+                echo "- **Total Samples**: $total_samples"
+                echo "- **Successful**: $success_samples"
+                echo "- **Errors**: $error_samples"
+                echo "- **Test Duration**: ${duration_seconds}s"
+                echo "- **Throughput**: ${throughput} req/s"
+                echo "- **Avg Response Time**: ${avg_response}ms"
+                echo "- **Min Response Time**: ${min_response}ms"
+                echo "- **Max Response Time**: ${max_response}ms"
+            fi
+        fi
+        
+        echo ""
+        echo "### producer-api-go-grpc (Go gRPC)"
+        echo ""
+        api_dir="$RESULTS_BASE_DIR/producer-api-go-grpc"
+        if [ -d "$api_dir" ]; then
+            latest_json=$(find "$api_dir" -name "*-throughput-*.json" -type f | sort -r | head -1)
+            if [ -n "$latest_json" ]; then
+                echo "**File**: \`$(basename "$latest_json")\`"
+                echo ""
+                metrics=$(extract_k6_metrics "$latest_json")
+                IFS='|' read -r total_samples success_samples error_samples duration_seconds throughput avg_response min_response max_response <<< "$metrics"
+                
+                echo "- **Total Samples**: $total_samples"
+                echo "- **Successful**: $success_samples"
+                echo "- **Errors**: $error_samples"
+                echo "- **Test Duration**: ${duration_seconds}s"
+                echo "- **Throughput**: ${throughput} req/s"
+                echo "- **Avg Response Time**: ${avg_response}ms"
+                echo "- **Min Response Time**: ${min_response}ms"
+                echo "- **Max Response Time**: ${max_response}ms"
+            fi
+        fi
+        
+        echo ""
         echo "## Comparison Analysis"
         echo ""
         echo "### Throughput Comparison"
@@ -1699,13 +1747,35 @@ create_comparison_report() {
         echo ""
         echo "All results are saved to: \`$RESULTS_BASE_DIR\`"
         echo ""
-        echo "For detailed analysis, review the HTML reports in each API's directory."
+        echo "## Reports Generated"
+        echo ""
+        echo "- **Markdown Report**: \`comparison-report-${TIMESTAMP}.md\`"
+        echo "- **HTML Report**: \`comparison-report-${TIMESTAMP}.html\` (with interactive charts)"
+        echo ""
+        echo "For detailed analysis, open the HTML report in a web browser for interactive charts and visualizations."
         
     } > "$report_file"
     
     print_success "Comparison report saved to: $report_file"
     cat "$report_file"
     echo ""
+    
+    # Generate HTML report
+    print_status "Generating HTML analysis report..."
+    local html_report_file="$RESULTS_BASE_DIR/comparison-report-${TIMESTAMP}.html"
+    if command -v python3 >/dev/null 2>&1; then
+        if python3 "$SCRIPT_DIR/generate-html-report.py" "$RESULTS_BASE_DIR" "$TEST_MODE" "$TIMESTAMP" 2>/dev/null; then
+            if [ -f "$html_report_file" ]; then
+                print_success "HTML report generated: $html_report_file"
+            else
+                print_warning "HTML report generation completed but file not found"
+            fi
+        else
+            print_warning "HTML report generation failed (check Python script)"
+        fi
+    else
+        print_warning "Python3 not available, skipping HTML report generation"
+    fi
 }
 
 # Function to run healthcheck cycle for all APIs
@@ -2190,7 +2260,10 @@ main() {
     
     echo ""
     print_status "Results directory: $RESULTS_BASE_DIR"
-    print_status "Comparison report: $RESULTS_BASE_DIR/comparison-report-${TIMESTAMP}.md"
+    print_status "Comparison report (Markdown): $RESULTS_BASE_DIR/comparison-report-${TIMESTAMP}.md"
+    if [ -f "$RESULTS_BASE_DIR/comparison-report-${TIMESTAMP}.html" ]; then
+        print_status "Comparison report (HTML): $RESULTS_BASE_DIR/comparison-report-${TIMESTAMP}.html"
+    fi
     echo ""
     print_status "Per-API execution logs:"
     for api_name in $APIS; do
