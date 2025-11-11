@@ -11,11 +11,11 @@ REPORT_FILE="$RESULTS_DIR/DETAILED-COMPARISON-REPORT-$(date +%Y%m%d_%H%M%S).md"
 
 # API configurations
 declare -A API_INFO
-API_INFO[producer-api]="Java REST (Spring Boot)|REST|Java|9081"
-API_INFO[producer-api-grpc]="Java gRPC|gRPC|Java|9090"
-API_INFO[producer-api-rust]="Rust REST|REST|Rust|9082"
+API_INFO[producer-api-java-rest]="Java REST (Spring Boot)|REST|Java|9081"
+API_INFO[producer-api-java-grpc]="Java gRPC|gRPC|Java|9090"
+API_INFO[producer-api-rust-rest]="Rust REST|REST|Rust|9082"
 API_INFO[producer-api-rust-grpc]="Rust gRPC|gRPC|Rust|9091"
-API_INFO[producer-api-go]="Go REST|REST|Go|7081"
+API_INFO[producer-api-go-rest]="Go REST|REST|Go|7081"
 API_INFO[producer-api-go-grpc]="Go gRPC|gRPC|Go|7090"
 
 # Find latest JSON for each API
@@ -54,7 +54,7 @@ This report provides a detailed comparison of all 6 producer API implementations
 EOF
 
 # Process each API
-for api in producer-api producer-api-grpc producer-api-rust producer-api-rust-grpc producer-api-go producer-api-go-grpc; do
+for api in producer-api-java-rest producer-api-java-grpc producer-api-rust-rest producer-api-rust-grpc producer-api-go-rest producer-api-go-grpc; do
     json_file=$(find_latest_json "$api")
     metrics=$(extract_metrics "$json_file")
     

@@ -18,13 +18,13 @@ TIMESTAMP=$(date +%Y%m%d_%H%M%S)
 get_api_config() {
     local api_name=$1
     case "$api_name" in
-        producer-api)
+        producer-api-java-rest)
             echo "producer-throughput/producer-throughput-test.jmx:8081:http"
             ;;
-        producer-api-grpc)
+        producer-api-java-grpc)
             echo "producer-grpc-throughput/producer-grpc-throughput-test.jmx:9090:grpc"
             ;;
-        producer-api-rust)
+        producer-api-rust-rest)
             echo "producer-rust-throughput/producer-rust-throughput-test.jmx:8081:http"
             ;;
         producer-api-rust-grpc)
@@ -37,7 +37,7 @@ get_api_config() {
 }
 
 # API list
-APIS="producer-api producer-api-grpc producer-api-rust producer-api-rust-grpc"
+APIS="producer-api-java-rest producer-api-java-grpc producer-api-rust-rest producer-api-rust-grpc"
 
 # Function to check if service is healthy
 check_service_health() {
@@ -504,7 +504,7 @@ main() {
         "all")
             run_all_tests "$test_mode"
             ;;
-        "producer-api"|"producer-api-grpc"|"producer-api-rust"|"producer-api-rust-grpc")
+        "producer-api-java-rest"|"producer-api-java-grpc"|"producer-api-rust-rest"|"producer-api-rust-grpc")
             local api_config=$(get_api_config "$first_arg")
             if [ -z "$api_config" ]; then
                 print_error "Unknown API: $first_arg"
@@ -522,17 +522,17 @@ main() {
             echo "Options:"
             echo "  smoke                Run smoke tests (quick verification, baseline only)"
             echo "  all                  Run throughput tests for all APIs (default)"
-            echo "  producer-api         Run test for Spring Boot REST API (port 8081)"
-            echo "  producer-api-grpc    Run test for Java gRPC API (port 9090)"
-            echo "  producer-api-rust    Run test for Rust REST API (port 8082)"
+            echo "  producer-api-java-rest         Run test for Spring Boot REST API (port 8081)"
+            echo "  producer-api-java-grpc    Run test for Java gRPC API (port 9090)"
+            echo "  producer-api-rust-rest    Run test for Rust REST API (port 8082)"
             echo "  producer-api-rust-grpc  Run test for Rust gRPC API (port 9091)"
             echo "  help                 Show this help message"
             echo
             echo "Examples:"
             echo "  $0                   # Run all full throughput tests (~15-20 min per API)"
             echo "  $0 smoke             # Run smoke tests for all APIs (~30 sec per API)"
-            echo "  $0 producer-api      # Run full test for Spring Boot REST API only"
-            echo "  $0 smoke producer-api  # Run smoke test for Spring Boot REST API only"
+            echo "  $0 producer-api-java-rest      # Run full test for Spring Boot REST API only"
+            echo "  $0 smoke producer-api-java-rest  # Run smoke test for Spring Boot REST API only"
             echo
             echo "Results are saved to: load-test/results/throughput/<api_name>/"
             echo

@@ -58,9 +58,9 @@ Each phase runs for a fixed duration to measure sustained performance at that pa
 
 The tests cover all 4 producer API implementations:
 
-1. **producer-api** - Spring Boot REST (port 9081)
-2. **producer-api-grpc** - Java gRPC (port 9090)
-3. **producer-api-rust** - Rust REST (port 9082)
+1. **producer-api-java-rest** - Spring Boot REST (port 9081)
+2. **producer-api-java-grpc** - Java gRPC (port 9090)
+3. **producer-api-rust-rest** - Rust REST (port 9082)
 4. **producer-api-rust-grpc** - Rust gRPC (port 9091)
 
 ## Running the Tests
@@ -199,8 +199,8 @@ The tests measure:
 
 The k6 test scripts are located in `load-test/k6/`:
 
-- **`rest-api-test.js`**: REST API test script (used for producer-api and producer-api-rust)
-- **`grpc-api-test.js`**: gRPC API test script (used for producer-api-grpc and producer-api-rust-grpc)
+- **`rest-api-test.js`**: REST API test script (used for producer-api-java-rest, producer-api-rust-rest, and producer-api-go-rest)
+- **`grpc-api-test.js`**: gRPC API test script (used for producer-api-java-grpc, producer-api-rust-grpc, and producer-api-go-grpc)
 - **`shared/helpers.js`**: Shared utilities for event generation
 - **`config.js`**: Centralized test configuration
 
@@ -270,7 +270,7 @@ To debug test execution:
    docker-compose --profile throughput-test run --rm k6-throughput \
      k6 run /k6/scripts/rest-api-test.js \
      -e TEST_MODE=smoke \
-     -e HOST=producer-api \
+     -e HOST=producer-api-java-rest \
      -e PORT=8081
    ```
 
@@ -302,14 +302,14 @@ After running throughput tests:
 
 Results summary
 API	Throughput (req/s)	Avg Response Time (ms)	Total Requests	Error Rate
-producer-api-rust (Rust REST)	2,901.10	38.94	2,355,297	0.00%
-producer-api (Spring Boot REST)	2,665.79	53.52	2,162,547	0.00%
+producer-api-rust-rest (Rust REST)	2,901.10	38.94	2,355,297	0.00%
+producer-api-java-rest (Spring Boot REST)	2,665.79	53.52	2,162,547	0.00%
 producer-api-rust-grpc (Rust gRPC)	133.18	5.94	28,231	0.00%
-producer-api-grpc (Java gRPC)	78.11	4.76	28,231	0.00%
+producer-api-java-grpc (Java gRPC)	78.11	4.76	28,231	0.00%
 Findings
-Highest throughput: producer-api-rust (Rust REST) — 2,901 req/s
-Lowest latency: producer-api-grpc (Java gRPC) — 4.76ms avg
-Best balance: producer-api-rust (Rust REST) — highest throughput (2,901 req/s) and low latency (38.94ms)
+Highest throughput: producer-api-rust-rest (Rust REST) — 2,901 req/s
+Lowest latency: producer-api-java-grpc (Java gRPC) — 4.76ms avg
+Best balance: producer-api-rust-rest (Rust REST) — highest throughput (2,901 req/s) and low latency (38.94ms)
 gRPC APIs: Hit connection limits earlier (connection errors at high load), resulting in lower total requests but very low latency
 Notes
 gRPC APIs hit system connection limits under extreme load (2000 VUs), causing "cannot assign requested address" errors
@@ -321,10 +321,10 @@ Analysis: Why Different Total Requests Between REST and gRPC APIs
 Findings
 Test durations:
 REST APIs: ~13.5 minutes (full test completed)
-producer-api: 811.22 seconds
-producer-api-rust: 811.86 seconds
+producer-api-java-rest: 811.22 seconds
+producer-api-rust-rest: 811.86 seconds
 gRPC APIs: shorter (test stopped early)
-producer-api-grpc: 361.45 seconds (6 minutes)
+producer-api-java-grpc: 361.45 seconds (6 minutes)
 producer-api-rust-grpc: 211.98 seconds (3.5 minutes)
 Total requests:
 REST: ~2.1–2.3 million requests each

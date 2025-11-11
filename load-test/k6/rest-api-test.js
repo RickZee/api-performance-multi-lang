@@ -1,6 +1,6 @@
 /**
  * k6 REST API Throughput Test
- * Tests REST APIs (producer-api and producer-api-rust)
+ * Tests REST APIs (producer-api-java-rest, producer-api-rust-rest, producer-api-go-rest)
  */
 
 import http from 'k6/http';
@@ -16,7 +16,7 @@ const errorRate = new Rate('errors');
 export const options = getTestOptions();
 
 // Get API configuration from environment
-const apiHost = __ENV.HOST || 'producer-api';
+const apiHost = __ENV.HOST || 'producer-api-java-rest';
 const apiPort = __ENV.PORT || 8081;
 const apiPath = __ENV.PATH || '/api/v1/events';
 const apiUrl = `http://${apiHost}:${apiPort}${apiPath}`;

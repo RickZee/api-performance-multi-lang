@@ -15,7 +15,7 @@ BASE_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 RESULTS_BASE_DIR="$BASE_DIR/results/comparison"
 
 # API names
-APIS=("producer-api" "producer-api-grpc" "producer-api-rust" "producer-api-rust-grpc")
+APIS=("producer-api-java-rest" "producer-api-java-grpc" "producer-api-rust-rest" "producer-api-rust-grpc")
 
 # Function to get latest JTL file for an API
 get_latest_jtl_file() {
@@ -54,9 +54,9 @@ generate_comparison_report() {
 ## Overview
 
 This report compares the performance of 4 producer API implementations:
-- **producer-api**: Spring Boot REST (Port 8081)
-- **producer-api-grpc**: Spring Boot gRPC (Port 9090)
-- **producer-api-rust**: Rust REST (Port 8082)
+- **producer-api-java-rest**: Spring Boot REST (Port 8081)
+- **producer-api-java-grpc**: Spring Boot gRPC (Port 9090)
+- **producer-api-rust-rest**: Rust REST (Port 8082)
 - **producer-api-rust-grpc**: Rust gRPC (Port 9091)
 
 ## Performance Metrics

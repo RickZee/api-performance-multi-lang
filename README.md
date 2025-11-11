@@ -8,9 +8,9 @@ A comprehensive performance comparison of 4 producer API implementations using k
 
 This project compares the performance characteristics of 4 different producer API implementations:
 
-1. **producer-api** - Spring Boot REST API (Java, Spring WebFlux, R2DBC)
-2. **producer-api-grpc** - Java gRPC API (Java, Spring Boot, R2DBC)
-3. **producer-api-rust** - Rust REST API (Rust, Axum, sqlx)
+1. **producer-api-java-rest** - Spring Boot REST API (Java, Spring WebFlux, R2DBC)
+2. **producer-api-java-grpc** - Java gRPC API (Java, Spring Boot, R2DBC)
+3. **producer-api-rust-rest** - Rust REST API (Rust, Axum, sqlx)
 4. **producer-api-rust-grpc** - Rust gRPC API (Rust, Tonic, sqlx)
 
 All APIs implement the same event processing functionality, allowing for fair performance comparison across different technology stacks and protocols.
@@ -21,9 +21,9 @@ All APIs implement the same event processing functionality, allowing for fair pe
 
 | API | Language | Framework | Protocol | Port | Database |
 |-----|----------|-----------|----------|------|----------|
-| producer-api | Java | Spring Boot (WebFlux) | REST | 9081 | PostgreSQL (R2DBC) |
-| producer-api-grpc | Java | Spring Boot | gRPC | 9090 | PostgreSQL (R2DBC) |
-| producer-api-rust | Rust | Axum | REST | 9082 | PostgreSQL (sqlx) |
+| producer-api-java-rest | Java | Spring Boot (WebFlux) | REST | 9081 | PostgreSQL (R2DBC) |
+| producer-api-java-grpc | Java | Spring Boot | gRPC | 9090 | PostgreSQL (R2DBC) |
+| producer-api-rust-rest | Rust | Axum | REST | 9082 | PostgreSQL (sqlx) |
 | producer-api-rust-grpc | Rust | Tonic | gRPC | 9091 | PostgreSQL (sqlx) |
 
 ### Common Functionality
@@ -111,9 +111,9 @@ For detailed testing information, see [load-test/THROUGHPUT-TESTING-GUIDE.md](lo
 
 ```
 producer-api-performance/
-├── producer-api/              # Spring Boot REST API
-├── producer-api-grpc/         # Java gRPC API
-├── producer-api-rust/         # Rust REST API
+├── producer-api-java-rest/    # Spring Boot REST API
+├── producer-api-java-grpc/    # Java gRPC API
+├── producer-api-rust-rest/    # Rust REST API
 ├── producer-api-rust-grpc/    # Rust gRPC API
 ├── load-test/                 # k6 performance testing framework
 │   ├── k6/                    # k6 test scripts
@@ -130,14 +130,14 @@ producer-api-performance/
 
 ```bash
 # Spring Boot APIs
-cd producer-api
+cd producer-api-java-rest
 ./gradlew build
 
-cd producer-api-grpc
+cd producer-api-java-grpc
 ./gradlew build
 
 # Rust APIs
-cd producer-api-rust
+cd producer-api-rust-rest
 cargo build --release
 
 cd producer-api-rust-grpc
@@ -158,9 +158,9 @@ cargo test
 
 ### API Documentation
 
-- [producer-api/README.md](producer-api/README.md) - Spring Boot REST API
-- [producer-api-grpc/README.md](producer-api-grpc/README.md) - Java gRPC API
-- [producer-api-rust/README.md](producer-api-rust/README.md) - Rust REST API
+- [producer-api-java-rest/README.md](producer-api-java-rest/README.md) - Spring Boot REST API
+- [producer-api-java-grpc/README.md](producer-api-java-grpc/README.md) - Java gRPC API
+- [producer-api-rust-rest/README.md](producer-api-rust-rest/README.md) - Rust REST API
 - [producer-api-rust-grpc/README.md](producer-api-rust-grpc/README.md) - Rust gRPC API
 - [load-test/README.md](load-test/README.md) - Performance testing framework
 
@@ -189,9 +189,9 @@ The database is automatically initialized when starting services with Docker Com
 The `docker-compose.yml` includes:
 
 - **postgres-large**: PostgreSQL 15 database
-- **producer-api**: Spring Boot REST API (port 9081)
-- **producer-api-grpc**: Java gRPC API (port 9090)
-- **producer-api-rust**: Rust REST API (port 9082)
+- **producer-api-java-rest**: Spring Boot REST API (port 9081)
+- **producer-api-java-grpc**: Java gRPC API (port 9090)
+- **producer-api-rust-rest**: Rust REST API (port 9082)
 - **producer-api-rust-grpc**: Rust gRPC API (port 9091)
 - **k6-throughput**: k6 test runner container
 

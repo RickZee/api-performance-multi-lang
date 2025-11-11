@@ -83,36 +83,36 @@ if [ "$TEST_MODE" != "smoke" ] && [ "$TEST_MODE" != "full" ] && [ "$TEST_MODE" !
     echo "  saturation  - Saturation test (~14 minutes per API)"
     echo ""
     echo "API_NAME options (optional, for debugging single API):"
-    echo "  producer-api"
-    echo "  producer-api-grpc"
-    echo "  producer-api-rust"
+    echo "  producer-api-java-rest"
+    echo "  producer-api-java-grpc"
+    echo "  producer-api-rust-rest"
     echo "  producer-api-rust-grpc"
-    echo "  producer-api-go"
+    echo "  producer-api-go-rest"
     echo "  producer-api-go-grpc"
     echo ""
     echo "Examples:"
     echo "  $0                           # Runs smoke tests for all APIs (default)"
     echo "  $0 smoke                     # Runs smoke tests for all APIs"
-    echo "  $0 smoke producer-api        # Runs smoke test for producer-api only"
-    echo "  $0 full producer-api-grpc    # Runs full test for producer-api-grpc only"
+    echo "  $0 smoke producer-api-java-rest        # Runs smoke test for producer-api-java-rest only"
+    echo "  $0 full producer-api-java-grpc    # Runs full test for producer-api-java-grpc only"
     exit 1
 fi
 
 # API list (default: all APIs)
-APIS="producer-api producer-api-grpc producer-api-rust producer-api-rust-grpc producer-api-go producer-api-go-grpc"
+APIS="producer-api-java-rest producer-api-java-grpc producer-api-rust-rest producer-api-rust-grpc producer-api-go-rest producer-api-go-grpc"
 
 # Optional: Test single API for debugging
 SINGLE_API="${2:-}"
 if [ -n "$SINGLE_API" ]; then
     # Validate API name
     case "$SINGLE_API" in
-        producer-api|producer-api-grpc|producer-api-rust|producer-api-rust-grpc|producer-api-go|producer-api-go-grpc)
+        producer-api-java-rest|producer-api-java-grpc|producer-api-rust-rest|producer-api-rust-grpc|producer-api-go-rest|producer-api-go-grpc)
             APIS="$SINGLE_API"
             echo "Running tests for single API: $SINGLE_API"
             ;;
         *)
             echo "Error: Invalid API name: '$SINGLE_API'"
-            echo "Valid API names: producer-api, producer-api-grpc, producer-api-rust, producer-api-rust-grpc, producer-api-go, producer-api-go-grpc"
+            echo "Valid API names: producer-api-java-rest, producer-api-java-grpc, producer-api-rust-rest, producer-api-rust-grpc, producer-api-go-rest, producer-api-go-grpc"
             exit 1
             ;;
     esac
@@ -122,20 +122,20 @@ fi
 get_api_config() {
     local api_name=$1
     case "$api_name" in
-        producer-api)
-            echo "rest-api-test.js:8081:http:producer:producer-api"
+        producer-api-java-rest)
+            echo "rest-api-test.js:8081:http:producer:producer-api-java-rest"
             ;;
-        producer-api-grpc)
-            echo "grpc-api-test.js:9090:grpc:producer-grpc:producer-api-grpc:/k6/proto/java-grpc/event_service.proto:com.example.grpc.EventService:ProcessEvent"
+        producer-api-java-grpc)
+            echo "grpc-api-test.js:9090:grpc:producer-grpc:producer-api-java-grpc:/k6/proto/java-grpc/event_service.proto:com.example.grpc.EventService:ProcessEvent"
             ;;
-        producer-api-rust)
-            echo "rest-api-test.js:8081:http:producer-rust:producer-api-rust"
+        producer-api-rust-rest)
+            echo "rest-api-test.js:8081:http:producer-rust:producer-api-rust-rest"
             ;;
         producer-api-rust-grpc)
             echo "grpc-api-test.js:9090:grpc:producer-rust-grpc:producer-api-rust-grpc:/k6/proto/rust-grpc/event_service.proto:com.example.grpc.EventService:ProcessEvent"
             ;;
-        producer-api-go)
-            echo "rest-api-test.js:7081:http:producer-go:producer-api-go"
+        producer-api-go-rest)
+            echo "rest-api-test.js:7081:http:producer-go:producer-api-go-rest"
             ;;
         producer-api-go-grpc)
             echo "grpc-api-test.js:7090:grpc:producer-go-grpc:producer-api-go-grpc:/k6/proto/go-grpc/event_service.proto:com.example.grpc.EventService:ProcessEvent"
@@ -153,19 +153,19 @@ get_health_check_port() {
     
     # For APIs with port mapping, use host port for health check from host
     case "$api_name" in
-        producer-api)
+        producer-api-java-rest)
             echo "9081"  # Host port (container port is 8081)
             ;;
-        producer-api-rust)
+        producer-api-rust-rest)
             echo "9082"  # Host port (container port is 8081)
             ;;
         producer-api-rust-grpc)
             echo "9091"  # Host port (container port is 9090)
             ;;
-        producer-api-grpc)
+        producer-api-java-grpc)
             echo "9090"  # Host port (container port is 9090)
             ;;
-        producer-api-go)
+        producer-api-go-rest)
             echo "7081"  # Host port (container port is 7081)
             ;;
         producer-api-go-grpc)
@@ -915,13 +915,13 @@ stop_all_apis() {
     cd "$BASE_DIR"
     
     # List of all producer API container names
-    local api_containers="producer-api producer-api-grpc producer-api-rust producer-api-rust-grpc"
+    local api_containers="producer-api-java-rest producer-api-java-grpc producer-api-rust-rest producer-api-rust-grpc"
     
     # First, try docker-compose stop (graceful)
-    docker-compose stop producer-api producer-api-grpc producer-api-rust producer-api-rust-grpc 2>/dev/null || true
-    docker-compose --profile producer stop producer-api 2>/dev/null || true
-    docker-compose --profile producer-grpc stop producer-api-grpc 2>/dev/null || true
-    docker-compose --profile producer-rust stop producer-api-rust 2>/dev/null || true
+    docker-compose stop producer-api-java-rest producer-api-java-grpc producer-api-rust-rest producer-api-rust-grpc 2>/dev/null || true
+    docker-compose --profile producer stop producer-api-java-rest 2>/dev/null || true
+    docker-compose --profile producer-grpc stop producer-api-java-grpc 2>/dev/null || true
+    docker-compose --profile producer-rust stop producer-api-rust-rest 2>/dev/null || true
     docker-compose --profile producer-rust-grpc stop producer-api-rust-grpc 2>/dev/null || true
     
     # Then, forcefully stop using docker stop (more reliable)
@@ -936,7 +936,7 @@ stop_all_apis() {
     sleep 3
     
     # Verify all are stopped
-    local running_apis=$(docker ps --format "{{.Names}}" 2>/dev/null | grep -E "^(producer-api|producer-api-grpc|producer-api-rust|producer-api-rust-grpc)$" || true)
+    local running_apis=$(docker ps --format "{{.Names}}" 2>/dev/null | grep -E "^(producer-api-java-rest|producer-api-java-grpc|producer-api-rust-rest|producer-api-rust-grpc)$" || true)
     if [ -n "$running_apis" ]; then
         print_warning "Some APIs are still running, force killing..."
         echo "$running_apis" | while read -r container; do
@@ -958,20 +958,20 @@ rebuild_api() {
     
     # Rebuild without starting dependencies
     case "$api_name" in
-        producer-api)
-            docker-compose build --no-cache producer-api 2>&1 | grep -v "no such service" || true
+        producer-api-java-rest)
+            docker-compose build --no-cache producer-api-java-rest 2>&1 | grep -v "no such service" || true
             ;;
-        producer-api-grpc)
-            docker-compose build --no-cache producer-api-grpc 2>&1 | grep -v "no such service" || true
+        producer-api-java-grpc)
+            docker-compose build --no-cache producer-api-java-grpc 2>&1 | grep -v "no such service" || true
             ;;
-        producer-api-rust)
-            docker-compose build --no-cache producer-api-rust 2>&1 | grep -v "no such service" || true
+        producer-api-rust-rest)
+            docker-compose build --no-cache producer-api-rust-rest 2>&1 | grep -v "no such service" || true
             ;;
         producer-api-rust-grpc)
             docker-compose build --no-cache producer-api-rust-grpc 2>&1 | grep -v "no such service" || true
             ;;
-        producer-api-go)
-            docker-compose build --no-cache producer-api-go 2>&1 | grep -v "no such service" || true
+        producer-api-go-rest)
+            docker-compose build --no-cache producer-api-go-rest 2>&1 | grep -v "no such service" || true
             ;;
         producer-api-go-grpc)
             docker-compose build --no-cache producer-api-go-grpc 2>&1 | grep -v "no such service" || true
@@ -1003,20 +1003,20 @@ start_api() {
     
     # Start the specific API with its profile and postgres-large
     case "$api_name" in
-        producer-api)
-            docker-compose --profile large --profile producer up -d postgres-large producer-api
+        producer-api-java-rest)
+            docker-compose --profile large --profile producer up -d postgres-large producer-api-java-rest
             ;;
-        producer-api-grpc)
-            docker-compose --profile large --profile producer-grpc up -d postgres-large producer-api-grpc
+        producer-api-java-grpc)
+            docker-compose --profile large --profile producer-grpc up -d postgres-large producer-api-java-grpc
             ;;
-        producer-api-rust)
-            docker-compose --profile large --profile producer-rust up -d postgres-large producer-api-rust
+        producer-api-rust-rest)
+            docker-compose --profile large --profile producer-rust up -d postgres-large producer-api-rust-rest
             ;;
         producer-api-rust-grpc)
             docker-compose --profile large --profile producer-rust-grpc up -d postgres-large producer-api-rust-grpc
             ;;
-        producer-api-go)
-            docker-compose --profile large --profile producer-go up -d postgres-large producer-api-go
+        producer-api-go-rest)
+            docker-compose --profile large --profile producer-go up -d postgres-large producer-api-go-rest
             ;;
         producer-api-go-grpc)
             docker-compose --profile large --profile producer-go-grpc up -d postgres-large producer-api-go-grpc
@@ -1037,20 +1037,20 @@ stop_api() {
     # Try docker-compose stop first (graceful)
     docker-compose stop "$api_name" 2>/dev/null || true
     case "$api_name" in
-        producer-api)
-            docker-compose --profile producer stop producer-api 2>/dev/null || true
+        producer-api-java-rest)
+            docker-compose --profile producer stop producer-api-java-rest 2>/dev/null || true
             ;;
-        producer-api-grpc)
-            docker-compose --profile producer-grpc stop producer-api-grpc 2>/dev/null || true
+        producer-api-java-grpc)
+            docker-compose --profile producer-grpc stop producer-api-java-grpc 2>/dev/null || true
             ;;
-        producer-api-rust)
-            docker-compose --profile producer-rust stop producer-api-rust 2>/dev/null || true
+        producer-api-rust-rest)
+            docker-compose --profile producer-rust stop producer-api-rust-rest 2>/dev/null || true
             ;;
         producer-api-rust-grpc)
             docker-compose --profile producer-rust-grpc stop producer-api-rust-grpc 2>/dev/null || true
             ;;
-        producer-api-go)
-            docker-compose --profile producer-go stop producer-api-go 2>/dev/null || true
+        producer-api-go-rest)
+            docker-compose --profile producer-go stop producer-api-go-rest 2>/dev/null || true
             ;;
         producer-api-go-grpc)
             docker-compose --profile producer-go-grpc stop producer-api-go-grpc 2>/dev/null || true
@@ -1508,9 +1508,9 @@ create_comparison_report() {
         echo ""
         echo "## APIs Tested"
         echo ""
-        echo "1. **producer-api** - Spring Boot REST (port 9081)"
-        echo "2. **producer-api-grpc** - Java gRPC (port 9090)"
-        echo "3. **producer-api-rust** - Rust REST (port 9082)"
+        echo "1. **producer-api-java-rest** - Spring Boot REST (port 9081)"
+        echo "2. **producer-api-java-grpc** - Java gRPC (port 9090)"
+        echo "3. **producer-api-rust-rest** - Rust REST (port 9082)"
         echo "4. **producer-api-rust-grpc** - Rust gRPC (port 9091)"
         echo ""
         echo "## Results Summary"
@@ -1556,9 +1556,9 @@ create_comparison_report() {
         echo ""
         echo "## Detailed Results"
         echo ""
-        echo "### producer-api (Spring Boot REST)"
+        echo "### producer-api-java-rest (Spring Boot REST)"
         echo ""
-        local api_dir="$RESULTS_BASE_DIR/producer-api"
+        local api_dir="$RESULTS_BASE_DIR/producer-api-java-rest"
         if [ -d "$api_dir" ]; then
             local latest_json=$(find "$api_dir" -name "*-throughput-*.json" -type f | sort -r | head -1)
             if [ -n "$latest_json" ]; then
@@ -1579,9 +1579,9 @@ create_comparison_report() {
         fi
         
         echo ""
-        echo "### producer-api-grpc (Java gRPC)"
+        echo "### producer-api-java-grpc (Java gRPC)"
         echo ""
-        api_dir="$RESULTS_BASE_DIR/producer-api-grpc"
+        api_dir="$RESULTS_BASE_DIR/producer-api-java-grpc"
         if [ -d "$api_dir" ]; then
             latest_json=$(find "$api_dir" -name "*-throughput-*.json" -type f | sort -r | head -1)
             if [ -n "$latest_json" ]; then
@@ -1602,9 +1602,9 @@ create_comparison_report() {
         fi
         
         echo ""
-        echo "### producer-api-rust (Rust REST)"
+        echo "### producer-api-rust-rest (Rust REST)"
         echo ""
-        api_dir="$RESULTS_BASE_DIR/producer-api-rust"
+        api_dir="$RESULTS_BASE_DIR/producer-api-rust-rest"
         if [ -d "$api_dir" ]; then
             latest_json=$(find "$api_dir" -name "*-throughput-*.json" -type f | sort -r | head -1)
             if [ -n "$latest_json" ]; then
@@ -1740,7 +1740,7 @@ run_healthcheck_cycle() {
         stop_all_apis
         
         # Verify no APIs are running before starting the next one
-        local running_apis=$(docker ps --format "{{.Names}}" 2>/dev/null | grep -E "^(producer-api|producer-api-grpc|producer-api-rust|producer-api-rust-grpc)$" || true)
+        local running_apis=$(docker ps --format "{{.Names}}" 2>/dev/null | grep -E "^(producer-api-java-rest|producer-api-java-grpc|producer-api-rust-rest|producer-api-rust-grpc)$" || true)
         if [ -n "$running_apis" ]; then
             print_error "Some APIs are still running after stop_all_apis:"
             echo "$running_apis" | while read -r container; do
@@ -1848,7 +1848,7 @@ run_smoke_tests() {
         stop_all_apis
         
         # Verify no APIs are running before starting the next one
-        local running_apis=$(docker ps --format "{{.Names}}" 2>/dev/null | grep -E "^(producer-api|producer-api-grpc|producer-api-rust|producer-api-rust-grpc)$" || true)
+        local running_apis=$(docker ps --format "{{.Names}}" 2>/dev/null | grep -E "^(producer-api-java-rest|producer-api-java-grpc|producer-api-rust-rest|producer-api-rust-grpc)$" || true)
         if [ -n "$running_apis" ]; then
             print_error "Some APIs are still running after stop_all_apis:"
             echo "$running_apis" | while read -r container; do
@@ -2097,7 +2097,7 @@ main() {
         stop_all_apis
         
         # Verify no APIs are running before starting the next one
-        local running_apis=$(docker ps --format "{{.Names}}" 2>/dev/null | grep -E "^(producer-api|producer-api-grpc|producer-api-rust|producer-api-rust-grpc)$" || true)
+        local running_apis=$(docker ps --format "{{.Names}}" 2>/dev/null | grep -E "^(producer-api-java-rest|producer-api-java-grpc|producer-api-rust-rest|producer-api-rust-grpc)$" || true)
         if [ -n "$running_apis" ]; then
             print_error "Some APIs are still running after stop_all_apis:"
             echo "$running_apis" | while read -r container; do

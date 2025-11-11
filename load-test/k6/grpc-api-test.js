@@ -1,6 +1,6 @@
 /**
  * k6 gRPC API Throughput Test
- * Tests gRPC APIs (producer-api-grpc and producer-api-rust-grpc)
+ * Tests gRPC APIs (producer-api-java-grpc, producer-api-rust-grpc, producer-api-go-grpc)
  */
 
 import grpc from 'k6/net/grpc';
@@ -16,7 +16,7 @@ const errorRate = new Rate('errors');
 export const options = getTestOptions();
 
 // Get API configuration from environment
-const apiHost = __ENV.HOST || 'producer-api-grpc';
+const apiHost = __ENV.HOST || 'producer-api-java-grpc';
 const apiPort = __ENV.PORT || 9090;
 const serviceName = __ENV.SERVICE || 'com.example.grpc.EventService';
 const methodName = __ENV.METHOD || 'ProcessEvent';

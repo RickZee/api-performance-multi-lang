@@ -15,19 +15,19 @@ source "$SCRIPT_DIR/color-output.sh" 2>/dev/null || true
 
 # API configurations
 declare -A API_NAMES
-API_NAMES[producer-api]="Java REST (Spring Boot)"
-API_NAMES[producer-api-grpc]="Java gRPC"
-API_NAMES[producer-api-rust]="Rust REST"
+API_NAMES[producer-api-java-rest]="Java REST (Spring Boot)"
+API_NAMES[producer-api-java-grpc]="Java gRPC"
+API_NAMES[producer-api-rust-rest]="Rust REST"
 API_NAMES[producer-api-rust-grpc]="Rust gRPC"
-API_NAMES[producer-api-go]="Go REST"
+API_NAMES[producer-api-go-rest]="Go REST"
 API_NAMES[producer-api-go-grpc]="Go gRPC"
 
 declare -A API_PORTS
-API_PORTS[producer-api]="9081"
-API_PORTS[producer-api-grpc]="9090"
-API_PORTS[producer-api-rust]="9082"
+API_PORTS[producer-api-java-rest]="9081"
+API_PORTS[producer-api-java-grpc]="9090"
+API_PORTS[producer-api-rust-rest]="9082"
 API_PORTS[producer-api-rust-grpc]="9091"
-API_PORTS[producer-api-go]="7081"
+API_PORTS[producer-api-go-rest]="7081"
 API_PORTS[producer-api-go-grpc]="7090"
 
 # Function to extract metrics from k6 JSON file
@@ -85,7 +85,7 @@ EOF
 total_apis=0
 successful_apis=0
 
-for api in producer-api producer-api-grpc producer-api-rust producer-api-rust-grpc producer-api-go producer-api-go-grpc; do
+for api in producer-api-java-rest producer-api-java-grpc producer-api-rust-rest producer-api-rust-grpc producer-api-go-rest producer-api-go-grpc; do
     total_apis=$((total_apis + 1))
     
     json_file=$(find_latest_json "$api")
