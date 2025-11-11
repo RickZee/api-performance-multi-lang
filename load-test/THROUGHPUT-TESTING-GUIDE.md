@@ -118,19 +118,6 @@ cd load-test/shared
 ./run-sequential-throughput-tests.sh smoke
 ```
 
-#### Parallel Tests (All APIs Running Simultaneously)
-
-For testing with all APIs running at once:
-
-```bash
-cd load-test/shared
-./run-throughput-tests.sh
-```
-
-**Prerequisites for parallel tests:**
-- All producer APIs must be running and healthy
-- Database must be accessible
-- Sufficient system resources for concurrent load
 
 ## Test Results
 
@@ -163,7 +150,6 @@ The tests measure:
 ### Result Locations
 
 - **Sequential Tests**: `load-test/results/throughput-sequential/<api_name>/`
-- **Parallel Tests**: `load-test/results/throughput/<api_name>/`
 - **Comparison Reports**: `load-test/results/throughput-sequential/comparison-report-*.md`
 
 ## Understanding Results

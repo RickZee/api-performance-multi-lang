@@ -27,16 +27,13 @@ load-test/
 │   └── shared/
 │       └── helpers.js          # Shared helper functions
 ├── shared/                      # Test execution scripts
-│   ├── run-throughput-tests.sh              # Parallel throughput tests
 │   ├── run-sequential-throughput-tests.sh   # Sequential throughput tests
 │   ├── analyze-throughput-results.sh        # Results analysis
 │   ├── extract_k6_metrics.py               # Metrics extraction
-│   ├── compare-producer-results.sh          # Results comparison
 │   ├── color-output.sh                      # Colored output utilities
 │   └── common-functions.sh                  # Common functions
 ├── results/                     # Test results directory
-│   ├── throughput-sequential/   # Sequential test results
-│   └── throughput/              # Parallel test results
+│   └── throughput-sequential/   # Sequential test results
 ├── README.md                    # This file
 └── THROUGHPUT-TESTING-GUIDE.md  # Detailed testing guide
 ```
@@ -60,19 +57,6 @@ cd load-test/shared
 ./run-sequential-throughput-tests.sh smoke
 ```
 
-### Parallel Tests
-
-Parallel tests run against all APIs simultaneously (requires all APIs to be running):
-
-```bash
-cd load-test/shared
-
-# Run full throughput tests
-./run-throughput-tests.sh
-
-# Run smoke tests only
-./run-throughput-tests.sh smoke
-```
 
 ## Test Workflow
 
@@ -95,7 +79,6 @@ cd load-test/shared
 
 Results are saved to:
 - Sequential: `load-test/results/throughput-sequential/<api_name>/`
-- Parallel: `load-test/results/throughput/<api_name>/`
 
 Each test generates:
 - JSON result files (k6 metrics)
