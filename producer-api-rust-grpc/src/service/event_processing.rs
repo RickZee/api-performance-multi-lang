@@ -5,6 +5,8 @@ use serde_json::Value;
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicU64, Ordering};
 
+use crate::constants::API_NAME;
+
 pub struct EventProcessingService {
     repository: CarEntityRepository,
     persisted_event_count: std::sync::Arc<AtomicU64>,
@@ -21,7 +23,7 @@ impl EventProcessingService {
     fn log_persisted_event_count(&self) {
         let count = self.persisted_event_count.fetch_add(1, Ordering::Relaxed) + 1;
         if count % 10 == 0 {
-            tracing::info!("*** Persisted events count: {} ***", count);
+            tracing::info!("{} *** Persisted events count: {} ***", API_NAME, count);
         }
     }
 
@@ -32,7 +34,7 @@ impl EventProcessingService {
         entity_id: &str,
         updated_attributes: &HashMap<String, String>,
     ) -> anyhow::Result<()> {
-        tracing::info!("Processing event: {}", event_name);
+        tracing::info!("{} Processing event: {}", API_NAME, event_name);
 
         self.process_entity_update(entity_type, entity_id, updated_attributes)
             .await
@@ -54,13 +56,13 @@ impl EventProcessingService {
             .context("Failed to check if entity exists")?;
 
         if exists {
-            tracing::warn!("Entity already exists, updating: {}", entity_id);
+            tracing::warn!("{} Entity already exists, updating: {}", API_NAME, entity_id);
             self.update_existing_entity(entity_type, entity_id, updated_attributes)
                 .await
                 .context("Failed to update existing entity")?;
             self.log_persisted_event_count();
         } else {
-            tracing::info!("Entity does not exist, creating new: {}", entity_id);
+            tracing::info!("{} Entity does not exist, creating new: {}", API_NAME, entity_id);
             self.create_new_entity(entity_type, entity_id, updated_attributes)
                 .await
                 .context("Failed to create new entity")?;
@@ -86,7 +88,7 @@ impl EventProcessingService {
             .await
             .context("Failed to insert entity into database")?;
 
-        tracing::info!("Successfully created entity: {}", entity.id);
+        tracing::info!("{} Successfully created entity: {}", API_NAME, entity.id);
         Ok(())
     }
 
@@ -124,7 +126,7 @@ impl EventProcessingService {
             .await
             .context("Failed to update entity in database")?;
 
-        tracing::info!("Successfully updated entity: {}", existing_entity.id);
+        tracing::info!("{} Successfully updated entity: {}", API_NAME, existing_entity.id);
         Ok(())
     }
 }

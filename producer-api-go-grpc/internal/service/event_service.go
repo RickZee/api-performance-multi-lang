@@ -9,6 +9,7 @@ import (
 	"go.uber.org/zap"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
+	"producer-api-go-grpc/internal/constants"
 )
 
 type EventServiceImpl struct {
@@ -29,7 +30,7 @@ func (s *EventServiceImpl) ProcessEvent(ctx context.Context, req *proto.EventReq
 	if req.EventHeader != nil {
 		eventName = req.EventHeader.EventName
 	}
-	s.logger.Info("Received gRPC event", zap.String("event_name", eventName))
+	s.logger.Info(fmt.Sprintf("%s Received gRPC event", constants.APIName()), zap.String("event_name", eventName))
 
 	// Validate request
 	if req.EventHeader == nil {
@@ -72,7 +73,7 @@ func (s *EventServiceImpl) ProcessEvent(ctx context.Context, req *proto.EventReq
 			entityUpdate.EntityId,
 			updatedAttributes,
 		); err != nil {
-			s.logger.Error("Error processing entity update", zap.Error(err))
+			s.logger.Error(fmt.Sprintf("%s Error processing entity update", constants.APIName()), zap.Error(err))
 			return nil, status.Error(codes.Internal, fmt.Sprintf("Failed to process entity: %v", err))
 		}
 	}
@@ -84,7 +85,7 @@ func (s *EventServiceImpl) ProcessEvent(ctx context.Context, req *proto.EventReq
 }
 
 func (s *EventServiceImpl) HealthCheck(ctx context.Context, req *proto.HealthRequest) (*proto.HealthResponse, error) {
-	s.logger.Info("Health check requested")
+	s.logger.Info(fmt.Sprintf("%s Health check requested", constants.APIName()))
 
 	return &proto.HealthResponse{
 		Healthy: true,

@@ -7,6 +7,7 @@ import (
 	"net"
 	"os"
 	"producer-api-go-grpc/internal/config"
+	"producer-api-go-grpc/internal/constants"
 	"producer-api-go-grpc/internal/repository"
 	"producer-api-go-grpc/internal/service"
 	"producer-api-go-grpc/proto"
@@ -34,7 +35,7 @@ func main() {
 	}
 	defer logger.Sync()
 
-	logger.Info("Starting Producer API Go gRPC server",
+	logger.Info(fmt.Sprintf("%s Starting Producer API Go gRPC server", constants.APIName()),
 		zap.Int("port", cfg.GRPCServerPort),
 		zap.String("log_level", cfg.LogLevel),
 	)
@@ -51,14 +52,14 @@ func main() {
 		logger.Fatal("Failed to ping database", zap.Error(err))
 	}
 
-	logger.Info("Connected to database")
+	logger.Info(fmt.Sprintf("%s Connected to database", constants.APIName()))
 
 	// Run migrations
 	if err := runMigrations(cfg.DatabaseURL, logger); err != nil {
 		logger.Fatal("Failed to run migrations", zap.Error(err))
 	}
 
-	logger.Info("Database migrations completed")
+	logger.Info(fmt.Sprintf("%s Database migrations completed", constants.APIName()))
 
 	// Initialize repository and service
 	repo := repository.NewCarEntityRepository(pool)
@@ -82,7 +83,7 @@ func main() {
 		logger.Fatal("Failed to listen", zap.Error(err), zap.String("address", addr))
 	}
 
-	logger.Info("gRPC server listening", zap.String("address", addr))
+	logger.Info(fmt.Sprintf("%s gRPC server listening", constants.APIName()), zap.String("address", addr))
 
 	if err := grpcServer.Serve(lis); err != nil {
 		logger.Fatal("Failed to serve", zap.Error(err))

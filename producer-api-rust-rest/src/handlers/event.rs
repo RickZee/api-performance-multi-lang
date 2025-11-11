@@ -12,6 +12,8 @@ use crate::error::AppError;
 use crate::models::Event;
 use crate::service::EventProcessingService;
 
+use crate::constants::API_NAME;
+
 pub fn router() -> Router<EventProcessingService> {
     Router::new()
         .route("/", post(process_event))
@@ -41,7 +43,7 @@ async fn process_event(
         }
     }
 
-    tracing::info!("Received event: {}", event.event_header.event_name);
+    tracing::info!("{} Received event: {}", API_NAME, event.event_header.event_name);
 
     service
         .process_event(event)
@@ -64,7 +66,7 @@ async fn process_bulk_events(
         ));
     }
 
-    tracing::info!("Received bulk request with {} events", events.len());
+    tracing::info!("{} Received bulk request with {} events", API_NAME, events.len());
 
     let mut processed_count = 0;
     let mut failed_count = 0;
@@ -79,7 +81,7 @@ async fn process_bulk_events(
             match service.process_event(event).await {
                 Ok(_) => processed_count += 1,
                 Err(e) => {
-                    tracing::error!("Error processing event in bulk: {}", e);
+                    tracing::error!("{} Error processing event in bulk: {}", API_NAME, e);
                     failed_count += 1;
                 }
             }

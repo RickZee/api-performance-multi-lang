@@ -1,6 +1,7 @@
 package com.example;
 
 import ch.qos.logback.classic.Logger;
+import com.example.constants.ApiConstants;
 import ch.qos.logback.classic.spi.ILoggingEvent;
 import ch.qos.logback.core.read.ListAppender;
 import com.example.dto.EntityUpdate;
@@ -76,13 +77,14 @@ class EventLoggingIntegrationTest {
             Thread.currentThread().interrupt();
         }
 
-        // Then - Verify "Processing event" log
+        // Then - Verify "Processing event" log with API name
         List<ILoggingEvent> processingLogs = logAppender.list.stream()
                 .filter(log -> log.getFormattedMessage().contains("Processing event:"))
                 .collect(Collectors.toList());
 
         assertThat(processingLogs).isNotEmpty();
         assertThat(processingLogs.get(0).getFormattedMessage())
+                .contains(ApiConstants.API_NAME)
                 .contains("Processing event: LoanPaymentSubmitted");
     }
 
@@ -106,13 +108,14 @@ class EventLoggingIntegrationTest {
             Thread.currentThread().interrupt();
         }
 
-        // Then - Verify "Creating new entity" log
+        // Then - Verify "Creating new entity" log with API name
         List<ILoggingEvent> createLogs = logAppender.list.stream()
                 .filter(log -> log.getFormattedMessage().contains("Creating new entity with ID:"))
                 .collect(Collectors.toList());
 
         assertThat(createLogs).isNotEmpty();
         assertThat(createLogs.get(0).getFormattedMessage())
+                .contains(ApiConstants.API_NAME)
                 .contains("Creating new entity with ID: loan-log-test-002");
     }
 
@@ -136,13 +139,14 @@ class EventLoggingIntegrationTest {
             Thread.currentThread().interrupt();
         }
 
-        // Then - Verify "Successfully created entity" log
+        // Then - Verify "Successfully created entity" log with API name
         List<ILoggingEvent> successLogs = logAppender.list.stream()
                 .filter(log -> log.getFormattedMessage().contains("Successfully created entity:"))
                 .collect(Collectors.toList());
 
         assertThat(successLogs).isNotEmpty();
         assertThat(successLogs.get(0).getFormattedMessage())
+                .contains(ApiConstants.API_NAME)
                 .contains("Successfully created entity: loan-log-test-003");
     }
 
@@ -173,11 +177,13 @@ class EventLoggingIntegrationTest {
 
         assertThat(countLogs.size()).isGreaterThanOrEqualTo(2);
         
-        // Verify log format
+        // Verify log format with API name
         boolean found10 = countLogs.stream()
-                .anyMatch(log -> log.getFormattedMessage().contains("Persisted events count: 10"));
+                .anyMatch(log -> log.getFormattedMessage().contains("[producer-api-java-rest]") 
+                        && log.getFormattedMessage().contains("Persisted events count: 10"));
         boolean found20 = countLogs.stream()
-                .anyMatch(log -> log.getFormattedMessage().contains("Persisted events count: 20"));
+                .anyMatch(log -> log.getFormattedMessage().contains("[producer-api-java-rest]")
+                        && log.getFormattedMessage().contains("Persisted events count: 20"));
 
         assertThat(found10).isTrue();
         assertThat(found20).isTrue();
@@ -203,13 +209,14 @@ class EventLoggingIntegrationTest {
             Thread.currentThread().interrupt();
         }
 
-        // Then - Verify all required log patterns are present
+        // Then - Verify all required log patterns are present with API name
         List<String> logMessages = logAppender.list.stream()
                 .map(ILoggingEvent::getFormattedMessage)
                 .collect(Collectors.toList());
 
         String allLogs = String.join("\n", logMessages);
 
+        assertThat(allLogs).contains("[producer-api-java-rest]");
         assertThat(allLogs).contains("Processing event:");
         assertThat(allLogs).contains("Creating new entity with ID:");
         assertThat(allLogs).contains("Successfully created entity:");

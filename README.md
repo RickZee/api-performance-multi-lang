@@ -65,7 +65,7 @@ cd load-test/shared
 
 ### Testing Tool: k6
 
-This repository uses **k6** as the primary performance testing tool. k6 is a modern, developer-friendly load testing tool that provides:
+This repository uses **k6** as the primary performance testing tool. k6 is a modern, developer-friendly load testing tool that provides (supersedes jmeter):
 
 - Native gRPC support
 - Docker-based execution (no local installation required)

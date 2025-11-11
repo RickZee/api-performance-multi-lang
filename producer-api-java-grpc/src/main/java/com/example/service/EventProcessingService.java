@@ -1,5 +1,6 @@
 package com.example.service;
 
+import com.example.constants.ApiConstants;
 import com.example.entity.CarEntity;
 import com.example.repository.CarEntityRepository;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -17,14 +18,14 @@ import java.util.concurrent.atomic.AtomicLong;
 @RequiredArgsConstructor
 @Slf4j
 public class EventProcessingService {
-
+    
     private final CarEntityRepository carEntityRepository;
     private final ObjectMapper objectMapper;
     private final DatabaseClient databaseClient;
     private final AtomicLong persistedEventCount = new AtomicLong(0);
 
     public Mono<Void> processEvent(String eventName, String entityType, String entityId, Map<String, String> updatedAttributes) {
-        log.info("Processing event: {}", eventName);
+        log.info("{} Processing event: {}", ApiConstants.API_NAME, eventName);
         
         return processEntityUpdate(entityType, entityId, updatedAttributes)
                 .then();
@@ -65,11 +66,11 @@ public class EventProcessingService {
             
             return carEntityRepository.save(updatedEntity)
                     .doOnNext(savedEntity -> {
-                        log.info("Successfully updated entity: {}", savedEntity.getId());
+                        log.info("{} Successfully updated entity: {}", ApiConstants.API_NAME, savedEntity.getId());
                         logPersistedEventCount();
                     });
         } catch (Exception e) {
-            log.error("Error processing JSON for entity update", e);
+            log.error("{} Error processing JSON for entity update", ApiConstants.API_NAME, e);
             return Mono.error(new RuntimeException("Error processing entity update", e));
         }
     }
@@ -79,7 +80,7 @@ public class EventProcessingService {
             OffsetDateTime now = OffsetDateTime.now();
             String dataJson = objectMapper.writeValueAsString(updatedAttributes);
             
-            log.info("Creating new entity with ID: {}", entityId);
+            log.info("{} Creating new entity with ID: {}", ApiConstants.API_NAME, entityId);
             
             return databaseClient.sql("INSERT INTO car_entities (id, entity_type, created_at, updated_at, data) VALUES (:id, :entityType, :createdAt, :updatedAt, :data)")
                     .bind("id", entityId)
@@ -91,12 +92,12 @@ public class EventProcessingService {
                     .rowsUpdated()
                     .then(Mono.just(new CarEntity(entityId, entityType, now, now, dataJson)))
                     .doOnNext(savedEntity -> {
-                        log.info("Successfully created entity: {}", savedEntity.getId());
+                        log.info("{} Successfully created entity: {}", ApiConstants.API_NAME, savedEntity.getId());
                         logPersistedEventCount();
                     })
-                    .doOnError(error -> log.error("Failed to create entity: {}", error.getMessage()));
+                    .doOnError(error -> log.error("{} Failed to create entity: {}", ApiConstants.API_NAME, error.getMessage()));
         } catch (Exception e) {
-            log.error("Error creating new entity", e);
+            log.error("{} Error creating new entity", ApiConstants.API_NAME, e);
             return Mono.error(new RuntimeException("Error creating new entity", e));
         }
     }
@@ -104,7 +105,7 @@ public class EventProcessingService {
     private void logPersistedEventCount() {
         long count = persistedEventCount.incrementAndGet();
         if (count % 10 == 0) {
-            log.info("*** Persisted events count: {} ***", count);
+            log.info("{} *** Persisted events count: {} ***", ApiConstants.API_NAME, count);
         }
     }
 }

@@ -1,5 +1,6 @@
 package com.example.controller;
 
+import com.example.constants.ApiConstants;
 import com.example.dto.Event;
 import com.example.service.EventProcessingService;
 import lombok.RequiredArgsConstructor;
@@ -19,7 +20,7 @@ import java.util.concurrent.atomic.AtomicInteger;
 @RequiredArgsConstructor
 @Slf4j
 public class EventController {
-
+    
     private final EventProcessingService eventProcessingService;
 
     @PostMapping
@@ -30,14 +31,14 @@ public class EventController {
                     .body("Invalid request: Event body is required"));
         }
         
-        log.info("Received event: {}", event.getEventHeader() != null ? 
+        log.info("{} Received event: {}", ApiConstants.API_NAME, event.getEventHeader() != null ? 
                 event.getEventHeader().getEventName() : "null or invalid");
         
         return eventProcessingService.processEvent(event)
                 .then(Mono.just(ResponseEntity.ok("Event processed successfully")))
-                .doOnError(error -> log.warn("Error in reactive chain: {} - {}", error.getClass().getName(), error.getMessage()))
+                .doOnError(error -> log.warn("{} Error in reactive chain: {} - {}", ApiConstants.API_NAME, error.getClass().getName(), error.getMessage()))
                 .onErrorResume(IllegalArgumentException.class, ex -> {
-                    log.warn("Caught IllegalArgumentException: {}", ex.getMessage());
+                    log.warn("{} Caught IllegalArgumentException: {}", ApiConstants.API_NAME, ex.getMessage());
                     return Mono.just(ResponseEntity.status(HttpStatus.UNPROCESSABLE_ENTITY)
                             .body("Invalid event: " + ex.getMessage()));
                 })
@@ -45,16 +46,16 @@ public class EventController {
                     // Check if it's an IllegalArgumentException wrapped in RuntimeException
                     Throwable cause = ex.getCause();
                     if (cause instanceof IllegalArgumentException) {
-                        log.warn("Caught wrapped IllegalArgumentException: {}", cause.getMessage());
+                        log.warn("{} Caught wrapped IllegalArgumentException: {}", ApiConstants.API_NAME, cause.getMessage());
                         return Mono.just(ResponseEntity.status(HttpStatus.UNPROCESSABLE_ENTITY)
                                 .body("Invalid event: " + cause.getMessage()));
                     }
-                    log.error("Caught RuntimeException: {} - {}", ex.getClass().getName(), ex.getMessage(), ex);
+                    log.error("{} Caught RuntimeException: {} - {}", ApiConstants.API_NAME, ex.getClass().getName(), ex.getMessage(), ex);
                     return Mono.just(ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
                             .body("Error processing event: " + ex.getMessage()));
                 })
                 .onErrorResume(throwable -> {
-                    log.error("Caught unexpected error: {} - {}", throwable.getClass().getName(), throwable.getMessage(), throwable);
+                    log.error("{} Caught unexpected error: {} - {}", ApiConstants.API_NAME, throwable.getClass().getName(), throwable.getMessage(), throwable);
                     return Mono.just(ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
                             .body("Error processing event: " + throwable.getMessage()));
                 });
@@ -71,7 +72,7 @@ public class EventController {
             )));
         }
         
-        log.info("Received bulk request with {} events", events.size());
+        log.info("{} Received bulk request with {} events", ApiConstants.API_NAME, events.size());
         
         AtomicInteger processedCount = new AtomicInteger(0);
         AtomicInteger failedCount = new AtomicInteger(0);
@@ -83,7 +84,7 @@ public class EventController {
                     // Validate event structure
                     if (event == null || event.getEventHeader() == null) {
                         failedCount.incrementAndGet();
-                        log.warn("Skipping invalid event: null or missing header");
+                        log.warn("{} Skipping invalid event: null or missing header", ApiConstants.API_NAME);
                         return Mono.just(false);
                     }
                     
@@ -95,7 +96,7 @@ public class EventController {
                             }))
                             .onErrorResume(error -> {
                                 failedCount.incrementAndGet();
-                                log.error("Error processing event in bulk: {}", error.getMessage(), error);
+                                log.error("{} Error processing event in bulk: {}", ApiConstants.API_NAME, error.getMessage(), error);
                                 return Mono.just(false);
                             });
                 })
