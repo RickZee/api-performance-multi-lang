@@ -96,7 +96,7 @@ Health check endpoint.
 The application uses environment variables for configuration:
 
 - `DATABASE_URL`: PostgreSQL connection string (default: `postgresql://postgres:password@localhost:5432/car_entities`)
-- `SERVER_PORT`: Server port (default: `7081`)
+- `SERVER_PORT`: Server port (default: `9083`)
 - `LOG_LEVEL`: Logging level - `debug`, `info`, `warn`, `error` (default: `info`)
 
 ## Running Locally
@@ -127,9 +127,9 @@ docker build -t producer-api-go .
 Run the container:
 
 ```bash
-docker run -p 7081:7081 \
+docker run -p 9083:9083 \
   -e DATABASE_URL=postgresql://postgres:password@host.docker.internal:5432/car_entities \
-  -e SERVER_PORT=7081 \
+  -e SERVER_PORT=9083 \
   -e LOG_LEVEL=info \
   producer-api-go
 ```

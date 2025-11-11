@@ -110,8 +110,8 @@ The tests cover all 6 producer API implementations:
 2. **producer-api-java-grpc** - Java gRPC (port 9090, profile: `producer-java-grpc`)
 3. **producer-api-rust-rest** - Rust REST (port 9082, profile: `producer-rust-rest`)
 4. **producer-api-rust-grpc** - Rust gRPC (port 9091, profile: `producer-rust-grpc`)
-5. **producer-api-go-rest** - Go REST (port 7081, profile: `producer-go-rest`)
-6. **producer-api-go-grpc** - Go gRPC (port 7090, profile: `producer-go-grpc`)
+5. **producer-api-go-rest** - Go REST (port 9083, profile: `producer-go-rest`)
+6. **producer-api-go-grpc** - Go gRPC (port 9092, profile: `producer-go-grpc`)
 
 ## Prerequisites
 

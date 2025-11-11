@@ -135,10 +135,10 @@ get_api_config() {
             echo "grpc-api-test.js:9090:grpc:producer-rust-grpc:producer-api-rust-grpc:/k6/proto/rust-grpc/event_service.proto:com.example.grpc.EventService:ProcessEvent"
             ;;
         producer-api-go-rest)
-            echo "rest-api-test.js:7081:http:producer-go:producer-api-go-rest"
+            echo "rest-api-test.js:9083:http:producer-go:producer-api-go-rest"
             ;;
         producer-api-go-grpc)
-            echo "grpc-api-test.js:7090:grpc:producer-go-grpc:producer-api-go-grpc:/k6/proto/go-grpc/event_service.proto:com.example.grpc.EventService:ProcessEvent"
+            echo "grpc-api-test.js:9092:grpc:producer-go-grpc:producer-api-go-grpc:/k6/proto/go-grpc/event_service.proto:com.example.grpc.EventService:ProcessEvent"
             ;;
         *)
             echo ""
@@ -166,10 +166,10 @@ get_health_check_port() {
             echo "9090"  # Host port (container port is 9090)
             ;;
         producer-api-go-rest)
-            echo "7081"  # Host port (container port is 7081)
+            echo "9083"  # Host port (container port is 9083)
             ;;
         producer-api-go-grpc)
-            echo "7090"  # Host port (container port is 7090)
+            echo "9092"  # Host port (container port is 9092)
             ;;
         *)
             echo "$container_port"  # Same port for others
@@ -1469,6 +1469,49 @@ except Exception as e:
 PYTHON_SCRIPT
 }
 
+# Function to clear previous test results
+clear_previous_test_results() {
+    print_status "=========================================="
+    print_status "Clearing Previous Test Results"
+    print_status "=========================================="
+    echo ""
+    
+    local cleared_files=0
+    
+    for api_name in $APIS; do
+        local api_dir="$RESULTS_BASE_DIR/$api_name"
+        if [ -d "$api_dir" ]; then
+            # Remove ALL old result files (JSON, TXT, LOG) - not just for current test mode
+            # This ensures we don't pick up stale data from previous runs
+            local json_count=$(find "$api_dir" -name "*-throughput-*.json" -type f | wc -l | tr -d ' ')
+            local txt_count=$(find "$api_dir" -name "*-throughput-*.txt" -type f | wc -l | tr -d ' ')
+            local log_count=$(find "$api_dir" -name "*-throughput-*.log" -type f | wc -l | tr -d ' ')
+            
+            find "$api_dir" -name "*-throughput-*.json" -type f -delete 2>/dev/null || true
+            find "$api_dir" -name "*-throughput-*.txt" -type f -delete 2>/dev/null || true
+            find "$api_dir" -name "*-throughput-*.log" -type f -delete 2>/dev/null || true
+            
+            local total=$((json_count + txt_count + log_count))
+            if [ $total -gt 0 ]; then
+                print_status "Cleared $total old result files for $api_name ($json_count JSON, $txt_count TXT, $log_count LOG)"
+                cleared_files=$((cleared_files + total))
+            fi
+        fi
+    done
+    
+    # Also clear old comparison reports
+    local report_count=$(find "$RESULTS_BASE_DIR" -name "comparison-report-*.md" -o -name "comparison-report-*.html" | wc -l | tr -d ' ')
+    find "$RESULTS_BASE_DIR" -name "comparison-report-*.md" -type f -delete 2>/dev/null || true
+    find "$RESULTS_BASE_DIR" -name "comparison-report-*.html" -type f -delete 2>/dev/null || true
+    
+    if [ $cleared_files -gt 0 ] || [ $report_count -gt 0 ]; then
+        print_success "Cleared $cleared_files old result files and $report_count old reports"
+    else
+        print_status "No previous test results found to clear"
+    fi
+    echo ""
+}
+
 # Function to create comparison report
 create_comparison_report() {
     print_status "=========================================="
@@ -1512,8 +1555,8 @@ create_comparison_report() {
         echo "2. **producer-api-java-grpc** - Java gRPC (port 9090)"
         echo "3. **producer-api-rust-rest** - Rust REST (port 9082)"
         echo "4. **producer-api-rust-grpc** - Rust gRPC (port 9091)"
-        echo "5. **producer-api-go-rest** - Go REST (port 7081)"
-        echo "6. **producer-api-go-grpc** - Go gRPC (port 7090)"
+        echo "5. **producer-api-go-rest** - Go REST (port 9083)"
+        echo "6. **producer-api-go-grpc** - Go gRPC (port 9092)"
         echo ""
         echo "## Results Summary"
         echo ""
@@ -2082,15 +2125,18 @@ main() {
     print_status "=========================================="
     echo ""
     
-    # Step 0: Ensure database is running (NEW - dedicated step)
+    # Step 0: Clear previous test results
+    clear_previous_test_results
+    
+    # Step 1: Ensure database is running
     if ! ensure_database_running; then
         print_error "Failed to start database. Aborting test execution."
         exit 1
     fi
     
-    # Step 1: Rebuild all producer APIs (skip for smoke tests to save time)
+    # Step 2: Rebuild all producer APIs (skip for smoke tests to save time)
     if [ "$TEST_MODE" != "smoke" ]; then
-        print_status "Step 1: Rebuilding all producer API Docker images..."
+        print_status "Step 2: Rebuilding all producer API Docker images..."
         cd "$BASE_DIR"
         
         for api_name in $APIS; do
@@ -2108,12 +2154,12 @@ main() {
         print_success "All APIs rebuilt"
         echo ""
     else
-        print_status "Step 1: Skipping rebuild for smoke tests (using existing images)..."
+        print_status "Step 2: Skipping rebuild for smoke tests (using existing images)..."
         echo ""
     fi
     
-    # Step 2: Build k6 container
-    print_status "Step 2: Building k6 throughput container..."
+    # Step 3: Build k6 container
+    print_status "Step 3: Building k6 throughput container..."
     cd "$BASE_DIR"
     if ! docker-compose --profile k6-test build k6-throughput > /dev/null 2>&1; then
         print_warning "k6 container build had warnings, continuing anyway..."
@@ -2121,37 +2167,37 @@ main() {
     print_success "k6 container ready"
     echo ""
     
-    # Step 3: Run healthcheck cycle for all APIs (skip for smoke tests to save time)
+    # Step 4: Run healthcheck cycle for all APIs (skip for smoke tests to save time)
     if [ "$TEST_MODE" != "smoke" ]; then
-        print_status "Step 3: Running healthcheck cycle for all APIs..."
+        print_status "Step 4: Running healthcheck cycle for all APIs..."
         if ! run_healthcheck_cycle; then
             print_error "Healthcheck cycle failed. Aborting test execution."
             exit 1
         fi
         echo ""
     else
-        print_status "Step 3: Skipping healthcheck cycle for smoke tests (will verify health before each test)..."
+        print_status "Step 4: Skipping healthcheck cycle for smoke tests (will verify health before each test)..."
         echo ""
     fi
     
-    # Step 4: If running full or saturation tests, run smoke tests first as a pre-check
+    # Step 5: If running full or saturation tests, run smoke tests first as a pre-check
     if [ "$TEST_MODE" = "full" ] || [ "$TEST_MODE" = "saturation" ]; then
-        print_status "Step 4: Running smoke tests (pre-check) before $TEST_MODE tests..."
+        print_status "Step 5: Running smoke tests (pre-check) before $TEST_MODE tests..."
         if ! run_smoke_tests; then
             print_error "Smoke tests failed. Aborting $TEST_MODE test execution."
             exit 1
         fi
         if [ "$TEST_MODE" = "saturation" ]; then
-            print_status "Step 5: Running saturation throughput tests sequentially (one API at a time)..."
+            print_status "Step 6: Running saturation throughput tests sequentially (one API at a time)..."
         else
-            print_status "Step 5: Running full throughput tests sequentially (one API at a time)..."
+            print_status "Step 6: Running full throughput tests sequentially (one API at a time)..."
         fi
     else
-        print_status "Step 4: Running smoke throughput tests sequentially (one API at a time)..."
+        print_status "Step 5: Running smoke throughput tests sequentially (one API at a time)..."
     fi
     echo ""
     
-    # Step 5/6: Run tests sequentially
+    # Step 6/7: Run tests sequentially
     mkdir -p "$RESULTS_BASE_DIR"
     local failed_apis=""
     
@@ -2233,7 +2279,7 @@ main() {
         echo ""
     done
     
-    # Step 6/7: Create comparison report
+    # Step 7/8: Create comparison report
     echo ""
     create_comparison_report
     

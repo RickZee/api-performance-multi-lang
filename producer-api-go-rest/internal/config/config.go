@@ -20,7 +20,7 @@ func Load() (*Config, error) {
 
 	serverPortStr := os.Getenv("SERVER_PORT")
 	if serverPortStr == "" {
-		serverPortStr = "7081"
+		serverPortStr = "9083"
 	}
 	serverPort, err := strconv.Atoi(serverPortStr)
 	if err != nil {

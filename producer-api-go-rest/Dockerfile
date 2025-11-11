@@ -28,7 +28,7 @@ COPY --from=builder /app/producer-api-go .
 COPY --from=builder /app/migrations ./migrations
 
 # Expose port
-EXPOSE 7081
+EXPOSE 9083
 
 # Run the binary
 CMD ["./producer-api-go"]

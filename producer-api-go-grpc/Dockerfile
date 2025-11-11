@@ -35,7 +35,7 @@ COPY --from=builder /app/producer-api-go-grpc .
 COPY --from=builder /app/migrations ./migrations
 
 # Expose port
-EXPOSE 7090
+EXPOSE 9092
 
 # Run the binary
 CMD ["./producer-api-go-grpc"]

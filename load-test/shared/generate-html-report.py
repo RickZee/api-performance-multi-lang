@@ -196,8 +196,8 @@ def generate_html_report(results_dir, test_mode, timestamp):
         {'name': 'producer-api-java-grpc', 'display': 'Java gRPC', 'port': 9090, 'protocol': 'gRPC'},
         {'name': 'producer-api-rust-rest', 'display': 'Rust REST', 'port': 9082, 'protocol': 'REST'},
         {'name': 'producer-api-rust-grpc', 'display': 'Rust gRPC', 'port': 9091, 'protocol': 'gRPC'},
-        {'name': 'producer-api-go-rest', 'display': 'Go REST', 'port': 7081, 'protocol': 'REST'},
-        {'name': 'producer-api-go-grpc', 'display': 'Go gRPC', 'port': 7090, 'protocol': 'gRPC'},
+        {'name': 'producer-api-go-rest', 'display': 'Go REST', 'port': 9083, 'protocol': 'REST'},
+        {'name': 'producer-api-go-grpc', 'display': 'Go gRPC', 'port': 9092, 'protocol': 'gRPC'},
     ]
     
     # Collect metrics for all APIs
