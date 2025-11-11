@@ -208,13 +208,35 @@ def generate_html_report(results_dir, test_mode, timestamp):
             api_results.append({**api, 'status': 'no_results'})
             continue
         
-        # Find latest JSON file
-        json_files = list(api_dir.glob("*-throughput-*.json"))
+        # Find JSON file matching timestamp and test mode
+        if timestamp:
+            # Match files with specific timestamp and test mode
+            if test_mode == 'smoke':
+                json_pattern = f"*-throughput-smoke-{timestamp}.json"
+            elif test_mode == 'saturation':
+                json_pattern = f"*-throughput-saturation-{timestamp}.json"
+            else:
+                json_pattern = f"*-throughput-{timestamp}.json"
+            
+            json_files = list(api_dir.glob(json_pattern))
+        else:
+            # Find latest files (fallback)
+            json_files = list(api_dir.glob("*-throughput-*.json"))
+        
         if not json_files:
             api_results.append({**api, 'status': 'no_json'})
             continue
         
-        latest_json = max(json_files, key=lambda p: p.stat().st_mtime)
+        # Use the first matching file if timestamp specified, otherwise use latest
+        if timestamp:
+            latest_json = json_files[0] if json_files else None
+        else:
+            latest_json = max(json_files, key=lambda p: p.stat().st_mtime)
+        
+        if not latest_json:
+            api_results.append({**api, 'status': 'no_json'})
+            continue
+        
         metrics = extract_metrics_from_json(latest_json)
         
         if metrics:
@@ -229,6 +251,7 @@ def generate_html_report(results_dir, test_mode, timestamp):
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>API Performance Test Report - {test_mode.upper()}</title>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
     <style>
         * {{
             margin: 0;
@@ -401,6 +424,36 @@ def generate_html_report(results_dir, test_mode, timestamp):
             text-align: center;
             color: #999;
             font-size: 13px;
+        }}
+        .chart-container {{
+            position: relative;
+            height: 400px;
+            margin: 20px 0;
+            padding: 20px;
+            background: white;
+            border-radius: 6px;
+            border: 1px solid #e8e8e8;
+        }}
+        .chart-container h4 {{
+            color: #1a1a1a;
+            font-size: 16px;
+            font-weight: 600;
+            margin-bottom: 16px;
+            margin-top: 0;
+        }}
+        .resource-section {{
+            margin: 30px 0;
+            padding: 24px;
+            background: #fafafa;
+            border-radius: 6px;
+            border: 1px solid #e8e8e8;
+        }}
+        .resource-section h3 {{
+            color: #1a1a1a;
+            font-size: 18px;
+            font-weight: 600;
+            margin-bottom: 20px;
+            margin-top: 0;
         }}
     </style>
 </head>
@@ -653,6 +706,355 @@ def generate_html_report(results_dir, test_mode, timestamp):
                 </ul>
             </div>
         </div>
+"""
+    
+    # Add resource utilization section (for all test modes)
+    if True:  # Always include resource metrics
+        # Load resource metrics for all APIs
+        import subprocess
+        resource_data = {}
+        
+        for api in apis:
+            api_dir = results_path / api['name']
+            if not api_dir.exists():
+                continue
+            
+            # Find JSON and metrics CSV files matching the timestamp and test mode
+            if timestamp:
+                # Match files with specific timestamp
+                json_pattern = f"*-throughput-{timestamp}.json"
+                csv_pattern = f"*-throughput-{timestamp}-metrics.csv"
+                if test_mode == 'smoke':
+                    json_pattern = f"*-throughput-smoke-{timestamp}.json"
+                    csv_pattern = f"*-throughput-smoke-{timestamp}-metrics.csv"
+                elif test_mode == 'saturation':
+                    json_pattern = f"*-throughput-saturation-{timestamp}.json"
+                    csv_pattern = f"*-throughput-saturation-{timestamp}-metrics.csv"
+                
+                json_files = list(api_dir.glob(json_pattern))
+                metrics_csv_files = list(api_dir.glob(csv_pattern))
+            else:
+                # Find latest files
+                json_files = list(api_dir.glob("*-throughput-*.json"))
+                metrics_csv_files = list(api_dir.glob("*-throughput-*-metrics.csv"))
+            
+            if not json_files or not metrics_csv_files:
+                continue
+            
+            # Match JSON and CSV files by timestamp
+            if timestamp:
+                latest_json = json_files[0] if json_files else None
+                latest_metrics_csv = metrics_csv_files[0] if metrics_csv_files else None
+            else:
+                latest_json = max(json_files, key=lambda p: p.stat().st_mtime)
+                latest_metrics_csv = max(metrics_csv_files, key=lambda p: p.stat().st_mtime)
+            
+            if not latest_json or not latest_metrics_csv:
+                continue
+            
+            # Analyze resource metrics
+            try:
+                script_dir = Path(__file__).parent
+                result = subprocess.run(
+                    ['python3', str(script_dir / 'analyze-resource-metrics.py'), 
+                     str(latest_json), str(latest_metrics_csv), test_mode],
+                    capture_output=True,
+                    text=True,
+                    timeout=30
+                )
+                if result.returncode == 0:
+                    resource_data[api['name']] = json.loads(result.stdout)
+            except Exception as e:
+                print(f"Error loading resource metrics for {api['name']}: {e}", file=sys.stderr)
+        
+        if resource_data:
+            html_content += """
+        <h2>💻 Resource Utilization Metrics</h2>
+        
+        <div class="resource-section">
+            <h3>Overall Resource Usage</h3>
+            <table>
+                <thead>
+                    <tr>
+                        <th>API</th>
+                        <th>Avg CPU %</th>
+                        <th>Max CPU %</th>
+                        <th>Avg Memory %</th>
+                        <th>Max Memory %</th>
+                        <th>Avg Memory (MB)</th>
+                        <th>Max Memory (MB)</th>
+                    </tr>
+                </thead>
+                <tbody>
+"""
+            
+            for api in apis:
+                if api['name'] in resource_data:
+                    r = resource_data[api['name']]['overall']
+                    html_content += f"""
+                    <tr>
+                        <td><strong>{api['display']}</strong></td>
+                        <td>{r['avg_cpu_percent']:.2f}</td>
+                        <td>{r['max_cpu_percent']:.2f}</td>
+                        <td>{r['avg_memory_percent']:.2f}</td>
+                        <td>{r['max_memory_percent']:.2f}</td>
+                        <td>{r['avg_memory_mb']:.2f}</td>
+                        <td>{r['max_memory_mb']:.2f}</td>
+                    </tr>
+"""
+            
+            html_content += """
+                </tbody>
+            </table>
+        </div>
+        
+        <div class="resource-section">
+            <h3>Per-Phase CPU Usage Comparison</h3>
+            <div class="chart-container">
+                <canvas id="cpuPhaseChart"></canvas>
+            </div>
+        </div>
+        
+        <div class="resource-section">
+            <h3>Per-Phase Memory Usage Comparison</h3>
+            <div class="chart-container">
+                <canvas id="memoryPhaseChart"></canvas>
+            </div>
+        </div>
+        
+        <div class="resource-section">
+            <h3>Derived Metrics: CPU % per Request</h3>
+            <div class="chart-container">
+                <canvas id="cpuPerRequestChart"></canvas>
+            </div>
+        </div>
+        
+        <div class="resource-section">
+            <h3>Derived Metrics: RAM MB per Request</h3>
+            <div class="chart-container">
+                <canvas id="ramPerRequestChart"></canvas>
+            </div>
+        </div>
+        
+        <script>
+            // Prepare data for charts
+            const resourceData = """ + json.dumps(resource_data) + """;
+            
+            // Get all phase numbers
+            const allPhases = new Set();
+            Object.values(resourceData).forEach(data => {
+                Object.keys(data.phases || {}).forEach(phase => allPhases.add(parseInt(phase)));
+            });
+            const phases = Array.from(allPhases).sort((a, b) => a - b);
+            
+            // Get API names
+            const apiNames = Object.keys(resourceData).map(name => {
+                const api = """ + json.dumps(apis) + """.find(a => a.name === name);
+                return api ? api.display : name;
+            });
+            
+            // Color palette
+            const colors = [
+                'rgba(54, 162, 235, 0.8)',
+                'rgba(255, 99, 132, 0.8)',
+                'rgba(75, 192, 192, 0.8)',
+                'rgba(255, 206, 86, 0.8)',
+                'rgba(153, 102, 255, 0.8)',
+                'rgba(255, 159, 64, 0.8)'
+            ];
+            
+            // CPU Phase Chart
+            const cpuPhaseCtx = document.getElementById('cpuPhaseChart');
+            if (cpuPhaseCtx) {
+                new Chart(cpuPhaseCtx, {
+                    type: 'bar',
+                    data: {
+                        labels: phases.map(p => 'Phase ' + p),
+                        datasets: Object.keys(resourceData).map((apiName, idx) => {
+                            const api = """ + json.dumps(apis) + """.find(a => a.name === apiName);
+                            const displayName = api ? api.display : apiName;
+                            return {
+                                label: displayName,
+                                data: phases.map(phase => {
+                                    const phaseData = resourceData[apiName]?.phases?.[phase];
+                                    return phaseData ? phaseData.avg_cpu_percent : 0;
+                                }),
+                                backgroundColor: colors[idx % colors.length],
+                                borderColor: colors[idx % colors.length].replace('0.8', '1'),
+                                borderWidth: 1
+                            };
+                        })
+                    },
+                    options: {
+                        responsive: true,
+                        maintainAspectRatio: false,
+                        scales: {
+                            y: {
+                                beginAtZero: true,
+                                title: {
+                                    display: true,
+                                    text: 'CPU %'
+                                }
+                            }
+                        },
+                        plugins: {
+                            legend: {
+                                display: true,
+                                position: 'top'
+                            },
+                            title: {
+                                display: true,
+                                text: 'Average CPU Usage by Phase'
+                            }
+                        }
+                    }
+                });
+            }
+            
+            // Memory Phase Chart
+            const memoryPhaseCtx = document.getElementById('memoryPhaseChart');
+            if (memoryPhaseCtx) {
+                new Chart(memoryPhaseCtx, {
+                    type: 'bar',
+                    data: {
+                        labels: phases.map(p => 'Phase ' + p),
+                        datasets: Object.keys(resourceData).map((apiName, idx) => {
+                            const api = """ + json.dumps(apis) + """.find(a => a.name === apiName);
+                            const displayName = api ? api.display : apiName;
+                            return {
+                                label: displayName,
+                                data: phases.map(phase => {
+                                    const phaseData = resourceData[apiName]?.phases?.[phase];
+                                    return phaseData ? phaseData.avg_memory_mb : 0;
+                                }),
+                                backgroundColor: colors[idx % colors.length],
+                                borderColor: colors[idx % colors.length].replace('0.8', '1'),
+                                borderWidth: 1
+                            };
+                        })
+                    },
+                    options: {
+                        responsive: true,
+                        maintainAspectRatio: false,
+                        scales: {
+                            y: {
+                                beginAtZero: true,
+                                title: {
+                                    display: true,
+                                    text: 'Memory (MB)'
+                                }
+                            }
+                        },
+                        plugins: {
+                            legend: {
+                                display: true,
+                                position: 'top'
+                            },
+                            title: {
+                                display: true,
+                                text: 'Average Memory Usage by Phase'
+                            }
+                        }
+                    }
+                });
+            }
+            
+            // CPU per Request Chart
+            const cpuPerRequestCtx = document.getElementById('cpuPerRequestChart');
+            if (cpuPerRequestCtx) {
+                new Chart(cpuPerRequestCtx, {
+                    type: 'bar',
+                    data: {
+                        labels: phases.map(p => 'Phase ' + p),
+                        datasets: Object.keys(resourceData).map((apiName, idx) => {
+                            const api = """ + json.dumps(apis) + """.find(a => a.name === apiName);
+                            const displayName = api ? api.display : apiName;
+                            return {
+                                label: displayName,
+                                data: phases.map(phase => {
+                                    const phaseData = resourceData[apiName]?.phases?.[phase];
+                                    return phaseData ? phaseData.cpu_percent_per_request : 0;
+                                }),
+                                backgroundColor: colors[idx % colors.length],
+                                borderColor: colors[idx % colors.length].replace('0.8', '1'),
+                                borderWidth: 1
+                            };
+                        })
+                    },
+                    options: {
+                        responsive: true,
+                        maintainAspectRatio: false,
+                        scales: {
+                            y: {
+                                beginAtZero: true,
+                                title: {
+                                    display: true,
+                                    text: 'CPU %-seconds per Request'
+                                }
+                            }
+                        },
+                        plugins: {
+                            legend: {
+                                display: true,
+                                position: 'top'
+                            },
+                            title: {
+                                display: true,
+                                text: 'CPU Efficiency: CPU % per Request (lower is better)'
+                            }
+                        }
+                    }
+                });
+            }
+            
+            // RAM per Request Chart
+            const ramPerRequestCtx = document.getElementById('ramPerRequestChart');
+            if (ramPerRequestCtx) {
+                new Chart(ramPerRequestCtx, {
+                    type: 'bar',
+                    data: {
+                        labels: phases.map(p => 'Phase ' + p),
+                        datasets: Object.keys(resourceData).map((apiName, idx) => {
+                            const api = """ + json.dumps(apis) + """.find(a => a.name === apiName);
+                            const displayName = api ? api.display : apiName;
+                            return {
+                                label: displayName,
+                                data: phases.map(phase => {
+                                    const phaseData = resourceData[apiName]?.phases?.[phase];
+                                    return phaseData ? phaseData.ram_mb_per_request : 0;
+                                }),
+                                backgroundColor: colors[idx % colors.length],
+                                borderColor: colors[idx % colors.length].replace('0.8', '1'),
+                                borderWidth: 1
+                            };
+                        })
+                    },
+                    options: {
+                        responsive: true,
+                        maintainAspectRatio: false,
+                        scales: {
+                            y: {
+                                beginAtZero: true,
+                                title: {
+                                    display: true,
+                                    text: 'RAM MB-seconds per Request'
+                                }
+                            }
+                        },
+                        plugins: {
+                            legend: {
+                                display: true,
+                                position: 'top'
+                            },
+                            title: {
+                                display: true,
+                                text: 'Memory Efficiency: RAM MB per Request (lower is better)'
+                            }
+                        }
+                    }
+                });
+            }
+        </script>
 """
     
     html_content += """

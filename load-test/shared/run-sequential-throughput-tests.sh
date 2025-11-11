@@ -8,6 +8,7 @@ set -e
 # Source common functions
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$SCRIPT_DIR/color-output.sh" 2>/dev/null || true
+source "$SCRIPT_DIR/collect-metrics.sh" 2>/dev/null || true
 
 # Function to print section header
 print_section() {
@@ -1085,6 +1086,29 @@ stop_api() {
     fi
 }
 
+# Function to calculate test duration in seconds based on test mode
+calculate_test_duration() {
+    local test_mode=$1
+    local duration=0
+    
+    if [ "$test_mode" = "smoke" ]; then
+        # Smoke test: 1 VU, 5 iterations, ~5-10 seconds
+        duration=15
+    elif [ "$test_mode" = "full" ]; then
+        # Full test: 5m = 5 minutes = 300 seconds (single phase for quick testing)
+        duration=300
+    elif [ "$test_mode" = "saturation" ]; then
+        # Saturation test: 2m * 7 = 14 minutes = 840 seconds
+        duration=840
+    else
+        # Default to 15 minutes for safety
+        duration=900
+    fi
+    
+    # Add buffer time (30 seconds) for test startup and completion
+    echo $((duration + 30))
+}
+
 # Function to run k6 test
 run_k6_test() {
     local api_name=$1
@@ -1118,6 +1142,7 @@ run_k6_test() {
     local json_file="$RESULT_DIR/${api_name}-${test_suffix}-${TIMESTAMP}.json"
     local summary_file="$RESULT_DIR/${api_name}-${test_suffix}-${TIMESTAMP}.txt"
     local log_file="$RESULT_DIR/${api_name}-${test_suffix}-${TIMESTAMP}.log"
+    local metrics_file="$RESULT_DIR/${api_name}-${test_suffix}-${TIMESTAMP}-metrics.csv"
     
     # Build k6 command
     local k6_script="/k6/scripts/$test_file"
@@ -1154,28 +1179,63 @@ run_k6_test() {
     # Create results directory in container mount point
     mkdir -p "$BASE_DIR/load-test/results/throughput-sequential/$api_name"
     
+    # Calculate test duration for metrics collection
+    local test_duration=$(calculate_test_duration "$TEST_MODE")
+    
+    # Start metrics collection in background (for all test modes)
+    local metrics_pid=""
+    print_status "Starting resource utilization metrics collection..."
+    metrics_pid=$(start_metrics_collection "$api_name" "$metrics_file" "$test_duration" "$TEST_MODE" "$api_name")
+    if [ -n "$metrics_pid" ]; then
+        print_success "Metrics collection started (PID: $metrics_pid)"
+    else
+        print_warning "Failed to start metrics collection, continuing without resource metrics..."
+    fi
+    
     # Run k6 in Docker container
     # Note: k6 image has k6 as entrypoint, so we need to override it to run shell commands
     # Use unbuffered output and prefix each line with API name for real-time visibility
     cd "$BASE_DIR"
+    local test_exit_code=0
     # Use prefix_logs function which handles cross-platform compatibility
     if docker-compose --profile k6-test run --rm --entrypoint /bin/sh k6-throughput -c "$k6_cmd" 2>&1 | prefix_logs "$api_name" | tee "$summary_file"; then
-        # Move JSON file from container mount to final location
-        if [ -f "$BASE_DIR/load-test/results/throughput-sequential/$api_name/$(basename $json_file)" ]; then
-            mv "$BASE_DIR/load-test/results/throughput-sequential/$api_name/$(basename $json_file)" "$json_file"
+        test_exit_code=0
+    else
+        test_exit_code=1
+    fi
+    
+    # Stop metrics collection if it was started
+    if [ -n "$metrics_pid" ]; then
+        print_status "Stopping metrics collection..."
+        stop_metrics_collection "$metrics_pid"
+        # Wait a moment for final metrics to be written
+        sleep 2
+        if [ -f "$metrics_file" ]; then
+            print_success "Metrics collection completed: $metrics_file"
+        else
+            print_warning "Metrics file not found: $metrics_file"
         fi
-        
-        # Copy summary to log file
-        if [ -f "$summary_file" ]; then
-            cp "$summary_file" "$log_file"
-        fi
-        
+    fi
+    
+    # Move JSON file from container mount to final location
+    if [ -f "$BASE_DIR/load-test/results/throughput-sequential/$api_name/$(basename $json_file)" ]; then
+        mv "$BASE_DIR/load-test/results/throughput-sequential/$api_name/$(basename $json_file)" "$json_file"
+    fi
+    
+    # Copy summary to log file
+    if [ -f "$summary_file" ]; then
+        cp "$summary_file" "$log_file"
+    fi
+    
+    if [ $test_exit_code -eq 0 ]; then
         print_success "Test completed for $api_name"
         print_status "Results saved to: $RESULT_DIR"
         print_status "  - JSON: $json_file"
         print_status "  - Summary: $summary_file"
+        if [ -f "$metrics_file" ]; then
+            print_status "  - Metrics: $metrics_file"
+        fi
         echo ""
-        
         return 0
     else
         print_error "Test failed for $api_name"
@@ -1739,6 +1799,120 @@ create_comparison_report() {
         fi
         
         echo ""
+        echo "## Resource Utilization Metrics"
+        echo ""
+        
+        # Only include resource metrics for full and saturation tests
+        if [ "$TEST_MODE" != "smoke" ]; then
+            echo "### Overall Resource Usage"
+            echo ""
+            echo "| API | Avg CPU % | Max CPU % | Avg Memory % | Max Memory % | Avg Memory (MB) | Max Memory (MB) |"
+            echo "|-----|-----------|-----------|--------------|--------------|-----------------|-----------------|"
+            
+            for api_name in $APIS; do
+                local api_dir="$RESULTS_BASE_DIR/$api_name"
+                if [ ! -d "$api_dir" ]; then
+                    echo "| $api_name | - | - | - | - | - | - |"
+                    continue
+                fi
+                
+                # Find latest JSON and metrics CSV files
+                local latest_json=$(find "$api_dir" -name "*-throughput-*.json" -type f | sort -r | head -1)
+                local latest_metrics_csv=$(find "$api_dir" -name "*-throughput-*-metrics.csv" -type f | sort -r | head -1)
+                
+                if [ -z "$latest_json" ] || [ -z "$latest_metrics_csv" ]; then
+                    echo "| $api_name | - | - | - | - | - | - |"
+                    continue
+                fi
+                
+                # Analyze resource metrics
+                local resource_analysis=$(python3 "$SCRIPT_DIR/analyze-resource-metrics.py" "$latest_json" "$latest_metrics_csv" "$TEST_MODE" 2>/dev/null)
+                
+                if [ -n "$resource_analysis" ]; then
+                    local avg_cpu=$(echo "$resource_analysis" | python3 -c "import sys, json; d=json.load(sys.stdin); print('%.2f' % d['overall']['avg_cpu_percent'])" 2>/dev/null || echo "-")
+                    local max_cpu=$(echo "$resource_analysis" | python3 -c "import sys, json; d=json.load(sys.stdin); print('%.2f' % d['overall']['max_cpu_percent'])" 2>/dev/null || echo "-")
+                    local avg_mem=$(echo "$resource_analysis" | python3 -c "import sys, json; d=json.load(sys.stdin); print('%.2f' % d['overall']['avg_memory_percent'])" 2>/dev/null || echo "-")
+                    local max_mem=$(echo "$resource_analysis" | python3 -c "import sys, json; d=json.load(sys.stdin); print('%.2f' % d['overall']['max_memory_percent'])" 2>/dev/null || echo "-")
+                    local avg_mem_mb=$(echo "$resource_analysis" | python3 -c "import sys, json; d=json.load(sys.stdin); print('%.2f' % d['overall']['avg_memory_mb'])" 2>/dev/null || echo "-")
+                    local max_mem_mb=$(echo "$resource_analysis" | python3 -c "import sys, json; d=json.load(sys.stdin); print('%.2f' % d['overall']['max_memory_mb'])" 2>/dev/null || echo "-")
+                    
+                    echo "| $api_name | $avg_cpu | $max_cpu | $avg_mem | $max_mem | $avg_mem_mb | $max_mem_mb |"
+                else
+                    echo "| $api_name | - | - | - | - | - | - |"
+                fi
+            done
+            
+            echo ""
+            echo "### Per-Phase Resource Usage"
+            echo ""
+            echo "The following tables show resource utilization for each test phase:"
+            echo ""
+            
+            # Determine number of phases based on test mode
+            local num_phases=4
+            if [ "$TEST_MODE" = "saturation" ]; then
+                num_phases=7
+            fi
+            
+            # Generate per-phase tables
+            for phase_num in $(seq 1 $num_phases); do
+                echo "#### Phase $phase_num"
+                echo ""
+                echo "| API | Avg CPU % | Max CPU % | Avg Memory (MB) | Max Memory (MB) | Requests | CPU %/Req | RAM MB/Req |"
+                echo "|-----|-----------|-----------|----------------|-----------------|----------|-----------|------------|"
+                
+                for api_name in $APIS; do
+                    local api_dir="$RESULTS_BASE_DIR/$api_name"
+                    if [ ! -d "$api_dir" ]; then
+                        echo "| $api_name | - | - | - | - | - | - | - |"
+                        continue
+                    fi
+                    
+                    local latest_json=$(find "$api_dir" -name "*-throughput-*.json" -type f | sort -r | head -1)
+                    local latest_metrics_csv=$(find "$api_dir" -name "*-throughput-*-metrics.csv" -type f | sort -r | head -1)
+                    
+                    if [ -z "$latest_json" ] || [ -z "$latest_metrics_csv" ]; then
+                        echo "| $api_name | - | - | - | - | - | - | - |"
+                        continue
+                    fi
+                    
+                    local resource_analysis=$(python3 "$SCRIPT_DIR/analyze-resource-metrics.py" "$latest_json" "$latest_metrics_csv" "$TEST_MODE" 2>/dev/null)
+                    
+                    if [ -n "$resource_analysis" ]; then
+                        local phase_data=$(echo "$resource_analysis" | python3 -c "import sys, json; d=json.load(sys.stdin); p=d['phases'].get($phase_num, {}); print(json.dumps(p))" 2>/dev/null)
+                        
+                        if [ -n "$phase_data" ] && [ "$phase_data" != "{}" ]; then
+                            local avg_cpu=$(echo "$phase_data" | python3 -c "import sys, json; d=json.load(sys.stdin); print('%.2f' % d.get('avg_cpu_percent', 0))" 2>/dev/null || echo "-")
+                            local max_cpu=$(echo "$phase_data" | python3 -c "import sys, json; d=json.load(sys.stdin); print('%.2f' % d.get('max_cpu_percent', 0))" 2>/dev/null || echo "-")
+                            local avg_mem_mb=$(echo "$phase_data" | python3 -c "import sys, json; d=json.load(sys.stdin); print('%.2f' % d.get('avg_memory_mb', 0))" 2>/dev/null || echo "-")
+                            local max_mem_mb=$(echo "$phase_data" | python3 -c "import sys, json; d=json.load(sys.stdin); print('%.2f' % d.get('max_memory_mb', 0))" 2>/dev/null || echo "-")
+                            local requests=$(echo "$phase_data" | python3 -c "import sys, json; d=json.load(sys.stdin); print(d.get('requests', 0))" 2>/dev/null || echo "-")
+                            local cpu_per_req=$(echo "$phase_data" | python3 -c "import sys, json; d=json.load(sys.stdin); print('%.4f' % d.get('cpu_percent_per_request', 0))" 2>/dev/null || echo "-")
+                            local ram_per_req=$(echo "$phase_data" | python3 -c "import sys, json; d=json.load(sys.stdin); print('%.4f' % d.get('ram_mb_per_request', 0))" 2>/dev/null || echo "-")
+                            
+                            echo "| $api_name | $avg_cpu | $max_cpu | $avg_mem_mb | $max_mem_mb | $requests | $cpu_per_req | $ram_per_req |"
+                        else
+                            echo "| $api_name | - | - | - | - | - | - | - |"
+                        fi
+                    else
+                        echo "| $api_name | - | - | - | - | - | - | - |"
+                    fi
+                done
+                
+                echo ""
+            done
+            
+            echo "### Derived Metrics Explanation"
+            echo ""
+            echo "- **CPU %/Req**: CPU percentage-seconds per request. Lower is better - indicates efficiency."
+            echo "- **RAM MB/Req**: Memory MB-seconds per request. Lower is better - indicates memory efficiency."
+            echo ""
+        else
+            echo "Resource utilization metrics are only collected for full and saturation tests."
+            echo ""
+        fi
+        
+        echo ""
         echo "## Comparison Analysis"
         echo ""
         echo "### Throughput Comparison"
@@ -2168,7 +2342,8 @@ main() {
     echo ""
     
     # Step 4: Run healthcheck cycle for all APIs (skip for smoke tests to save time)
-    if [ "$TEST_MODE" != "smoke" ]; then
+    # Skip healthcheck cycle if SKIP_HEALTHCHECK environment variable is set
+    if [ "$TEST_MODE" != "smoke" ] && [ -z "$SKIP_HEALTHCHECK" ]; then
         print_status "Step 4: Running healthcheck cycle for all APIs..."
         if ! run_healthcheck_cycle; then
             print_error "Healthcheck cycle failed. Aborting test execution."
@@ -2176,16 +2351,25 @@ main() {
         fi
         echo ""
     else
-        print_status "Step 4: Skipping healthcheck cycle for smoke tests (will verify health before each test)..."
+        if [ "$TEST_MODE" = "smoke" ]; then
+            print_status "Step 4: Skipping healthcheck cycle for smoke tests (will verify health before each test)..."
+        else
+            print_status "Step 4: Skipping healthcheck cycle (SKIP_HEALTHCHECK is set)..."
+        fi
         echo ""
     fi
     
     # Step 5: If running full or saturation tests, run smoke tests first as a pre-check
+    # Skip smoke tests if SKIP_HEALTHCHECK environment variable is set
     if [ "$TEST_MODE" = "full" ] || [ "$TEST_MODE" = "saturation" ]; then
-        print_status "Step 5: Running smoke tests (pre-check) before $TEST_MODE tests..."
-        if ! run_smoke_tests; then
-            print_error "Smoke tests failed. Aborting $TEST_MODE test execution."
-            exit 1
+        if [ -z "$SKIP_HEALTHCHECK" ]; then
+            print_status "Step 5: Running smoke tests (pre-check) before $TEST_MODE tests..."
+            if ! run_smoke_tests; then
+                print_error "Smoke tests failed. Aborting $TEST_MODE test execution."
+                exit 1
+            fi
+        else
+            print_status "Step 5: Skipping smoke tests (SKIP_HEALTHCHECK is set)..."
         fi
         if [ "$TEST_MODE" = "saturation" ]; then
             print_status "Step 6: Running saturation throughput tests sequentially (one API at a time)..."

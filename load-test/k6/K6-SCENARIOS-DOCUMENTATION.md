@@ -302,6 +302,94 @@ Tests are configured via environment variables:
 | `grpc_req_failed` | Error rate | None (monitored but no threshold) |
 | `errors` | Custom error rate | None |
 
+### Resource Utilization Metrics
+
+Resource utilization metrics (CPU and memory) are automatically collected during **full** and **saturation** tests. These metrics provide insights into how efficiently each API uses system resources.
+
+#### Collection Details
+
+- **Collection Method**: Docker stats API (sampled every 5 seconds)
+- **Metrics Collected**:
+  - CPU usage percentage
+  - Memory usage percentage
+  - Memory used (MB)
+  - Memory limit (MB)
+- **Storage**: CSV files saved alongside k6 JSON results
+- **File Format**: `{api-name}-{test-mode}-{timestamp}-metrics.csv`
+
+#### Metrics Analyzed
+
+**Overall Metrics:**
+- Average CPU %
+- Peak CPU %
+- Average memory %
+- Peak memory %
+- Average memory used (MB)
+- Peak memory used (MB)
+
+**Per-Phase Metrics:**
+- Average CPU % per phase
+- Peak CPU % per phase
+- Average memory (MB) per phase
+- Peak memory (MB) per phase
+- Number of requests per phase
+
+**Derived Metrics:**
+- **CPU % per Request**: `(avg CPU % × phase duration) / total requests in phase`
+  - Lower is better - indicates CPU efficiency
+  - Normalizes CPU usage by throughput
+  - Measured in CPU percentage-seconds per request
+
+- **RAM MB per Request**: `(avg memory MB × phase duration) / total requests in phase`
+  - Lower is better - indicates memory efficiency
+  - Normalizes memory usage by throughput
+  - Measured in MB-seconds per request
+
+#### Phase Mapping
+
+Resource samples are automatically mapped to test phases based on timestamps:
+- Phase boundaries are calculated from test start time and phase durations
+- Each resource sample is assigned to the appropriate phase
+- Phase transitions (ramp-up periods) are handled automatically
+
+#### Report Integration
+
+Resource utilization metrics are included in:
+- **Markdown Reports**: Tables showing overall and per-phase resource usage
+- **HTML Reports**: Interactive charts using Chart.js:
+  - Per-phase CPU usage comparison (bar chart)
+  - Per-phase memory usage comparison (bar chart)
+  - CPU % per request comparison (bar chart)
+  - RAM MB per request comparison (bar chart)
+
+#### Interpreting Resource Charts
+
+**CPU Usage Charts:**
+- Shows how CPU usage scales with load (VU count)
+- Higher CPU usage at higher VUs is expected
+- Compare APIs to identify which is more CPU-efficient
+
+**Memory Usage Charts:**
+- Shows memory consumption patterns across phases
+- Look for memory leaks (gradual increase over time)
+- Compare peak memory usage across APIs
+
+**Derived Metrics Charts:**
+- **CPU % per Request**: Lower values indicate better CPU efficiency
+  - Useful for comparing resource efficiency independent of throughput
+  - Helps identify which API processes requests most efficiently
+
+- **RAM MB per Request**: Lower values indicate better memory efficiency
+  - Useful for comparing memory efficiency independent of throughput
+  - Helps identify which API uses memory most efficiently
+
+#### Example Use Cases
+
+1. **Capacity Planning**: Use peak CPU/memory to estimate resource requirements
+2. **Efficiency Comparison**: Use derived metrics to compare resource efficiency
+3. **Bottleneck Identification**: High CPU with low throughput may indicate CPU bottleneck
+4. **Memory Leak Detection**: Gradual memory increase across phases may indicate leaks
+
 ### Response Time Percentiles
 
 - **p(95)**: 95th percentile - 95% of requests complete within this time
@@ -416,6 +504,9 @@ Four event types are randomly selected:
 - ✅ **Multiple test modes**: Smoke, Full, and Saturation
 - ✅ **Gradual load increase**: Stages ramp up VUs gradually
 - ✅ **Comprehensive metrics**: Request counts, response times, error rates
+- ✅ **Resource utilization tracking**: CPU and memory metrics per phase (full/saturation tests)
+- ✅ **Derived efficiency metrics**: CPU % per request, RAM MB per request
+- ✅ **Interactive charts**: Visual resource utilization analysis in HTML reports
 - ✅ **Realistic payloads**: Random event generation with entity-specific attributes
 - ✅ **Protocol support**: Both REST (HTTP) and gRPC
 - ✅ **Threshold validation**: Automatic performance regression detection
