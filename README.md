@@ -17,6 +17,8 @@ This project compares the performance characteristics of 6 different producer AP
 
 All APIs implement the same event processing functionality, allowing for fair performance comparison across different technology stacks and protocols.
 
+**Important:** This is a simple, non-production experiment that lacks logging, authentication and authorization.
+
 ## 🚀 Quick Start
 
 ### Prerequisites
@@ -85,6 +87,10 @@ Tests run sequentially (one API at a time) to ensure fair comparison:
 - Database is automatically cleared between API tests
 - Same test conditions for all APIs
 - Consistent environment and resources
+
+### Test Limitations
+
+These tests do not account for networking infrastructure overhead. All services communicate within an isolated Docker bridge network, which provides minimal latency and no external network factors. The performance results reflect application-level performance in this controlled environment and do not represent real-world network conditions, including WAN latency, network congestion, load balancers, API gateways, or other production networking infrastructure that would typically be present in a deployed system.
 
 ### Results
 
@@ -164,3 +170,13 @@ The `docker-compose.yml` includes:
 - **k6-throughput**: k6 test runner container (profile: `k6-test`)
 
 **Note:** All producer APIs use profiles, so they won't start by default. Use `--profile <profile-name>` to start specific services. This allows you to run only the APIs you need, reducing resource usage.
+
+## 🖥️ Infrastructure and Requirements
+
+All services run in Docker containers on local infrastructure. The following resource allocations are configured in `docker-compose.yml`:
+
+- **PostgreSQL Database**: 4GB memory limit, 4 CPUs (1GB memory and 1 CPU reserved)
+- **Each API Service**: 2GB memory limit, 2 CPUs (1GB memory and 1 CPU reserved)
+- **k6 Test Runner**: 2GB memory limit, 2 CPUs (512MB memory and 0.5 CPU reserved)
+
+All services communicate via a Docker bridge network, providing isolated container-to-container communication. These are local Docker containers running on your development machine, not production-grade infrastructure. Performance results should be interpreted in this context and may differ significantly in production environments with different hardware, network topology, and resource constraints.
