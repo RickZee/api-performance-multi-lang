@@ -320,14 +320,53 @@ def calculate_derived_metrics(phase_results: Dict, phase_requests: Dict[int, int
     return derived
 
 
-def analyze_resource_metrics(k6_json_file: str, metrics_csv_file: str, test_mode: str) -> Dict:
-    """Main analysis function"""
+def analyze_resource_metrics(k6_json_file: str, metrics_csv_file: Optional[str] = None, test_mode: str = "smoke", test_run_id: Optional[int] = None) -> Dict:
+    """Main analysis function - can read from database or CSV file"""
     if not os.path.exists(k6_json_file):
         print(f"Error: k6 JSON file not found: {k6_json_file}", file=sys.stderr)
         return {}
     
-    if not os.path.exists(metrics_csv_file):
-        print(f"Error: Metrics CSV file not found: {metrics_csv_file}", file=sys.stderr)
+    # Try to read from database first if test_run_id is provided
+    metrics = []
+    metrics_start_time = None
+    
+    if test_run_id:
+        try:
+            # Import db_client functions
+            script_dir = os.path.dirname(os.path.abspath(__file__))
+            sys.path.insert(0, script_dir)
+            from db_client import get_resource_metrics
+            
+            # Get resource metrics from database
+            db_metrics = get_resource_metrics(test_run_id)
+            if db_metrics:
+                # Convert database metrics to the format expected by the rest of the function
+                metrics = [
+                    {
+                        'timestamp': m['timestamp'].timestamp() if hasattr(m['timestamp'], 'timestamp') else float(m['timestamp']),
+                        'datetime': str(m['timestamp']),
+                        'container': 'unknown',
+                        'cpu_percent': float(m['cpu_percent']),
+                        'memory_percent': float(m['memory_percent']),
+                        'memory_used_mb': float(m['memory_used_mb']),
+                        'memory_limit_mb': float(m['memory_limit_mb']),
+                    }
+                    for m in db_metrics
+                ]
+                # Use first metric timestamp as start time
+                if metrics:
+                    metrics_start_time = metrics[0]['timestamp']
+        except Exception as e:
+            print(f"Warning: Could not read from database ({e}), falling back to CSV", file=sys.stderr)
+            metrics = []
+    
+    # Fall back to CSV if database read failed or test_run_id not provided
+    if not metrics and metrics_csv_file and os.path.exists(metrics_csv_file):
+        metrics_start_time = extract_metrics_start_time_from_csv(metrics_csv_file)
+        metrics = parse_metrics_csv(metrics_csv_file)
+    
+    if not metrics:
+        print("Warning: No metrics found in CSV file or database", file=sys.stderr)
         return {}
     
     # Get phase boundaries
@@ -338,7 +377,6 @@ def analyze_resource_metrics(k6_json_file: str, metrics_csv_file: str, test_mode
     
     # Extract start times
     k6_start_time = extract_test_start_time_from_k6_json(k6_json_file)
-    metrics_start_time = extract_metrics_start_time_from_csv(metrics_csv_file)
     
     if k6_start_time is None:
         print("Warning: Could not extract k6 start time, using metrics start time", file=sys.stderr)
@@ -350,13 +388,6 @@ def analyze_resource_metrics(k6_json_file: str, metrics_csv_file: str, test_mode
     
     # Extract requests per phase
     phase_requests = extract_requests_per_phase_from_k6_json(k6_json_file, phase_boundaries, k6_start_time)
-    
-    # Parse metrics CSV
-    metrics = parse_metrics_csv(metrics_csv_file)
-    
-    if not metrics:
-        print("Warning: No metrics found in CSV file", file=sys.stderr)
-        return {}
     
     # Calculate phase metrics
     phase_results = calculate_phase_metrics(metrics, phase_boundaries, metrics_start_time, k6_start_time)
@@ -395,15 +426,16 @@ def analyze_resource_metrics(k6_json_file: str, metrics_csv_file: str, test_mode
 
 
 def main():
-    if len(sys.argv) < 4:
-        print("Usage: analyze-resource-metrics.py <k6_json_file> <metrics_csv_file> <test_mode>", file=sys.stderr)
+    if len(sys.argv) < 3:
+        print("Usage: analyze-resource-metrics.py <k6_json_file> <test_mode> [metrics_csv_file] [test_run_id]", file=sys.stderr)
         sys.exit(1)
     
     k6_json_file = sys.argv[1]
-    metrics_csv_file = sys.argv[2]
-    test_mode = sys.argv[3]
+    test_mode = sys.argv[2]
+    metrics_csv_file = sys.argv[3] if len(sys.argv) > 3 else None
+    test_run_id = int(sys.argv[4]) if len(sys.argv) > 4 and sys.argv[4] else None
     
-    result = analyze_resource_metrics(k6_json_file, metrics_csv_file, test_mode)
+    result = analyze_resource_metrics(k6_json_file, metrics_csv_file, test_mode, test_run_id)
     
     if result:
         print(json.dumps(result, indent=2))

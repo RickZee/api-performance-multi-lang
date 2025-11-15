@@ -68,7 +68,6 @@ prefix_logs() {
 
 # Configuration
 BASE_DIR="$(cd "$SCRIPT_DIR/../.." && pwd)"
-RESULTS_BASE_DIR="$BASE_DIR/load-test/results/throughput-sequential"
 TIMESTAMP=$(date +%Y%m%d_%H%M%S)
 TEST_MODE="${1:-smoke}"  # smoke, full, or saturation
 
@@ -76,7 +75,7 @@ TEST_MODE="${1:-smoke}"  # smoke, full, or saturation
 if [ "$TEST_MODE" != "smoke" ] && [ "$TEST_MODE" != "full" ] && [ "$TEST_MODE" != "saturation" ]; then
     echo "Error: Invalid TEST_MODE parameter: '$TEST_MODE'"
     echo ""
-    echo "Usage: $0 [TEST_MODE] [API_NAME]"
+    echo "Usage: $0 [TEST_MODE] [API_NAME] [PAYLOAD_SIZE]"
     echo ""
     echo "TEST_MODE options:"
     echo "  smoke       - Quick smoke test (1 VU, 5 iterations per API) [DEFAULT]"
@@ -91,11 +90,17 @@ if [ "$TEST_MODE" != "smoke" ] && [ "$TEST_MODE" != "full" ] && [ "$TEST_MODE" !
     echo "  producer-api-go-rest"
     echo "  producer-api-go-grpc"
     echo ""
+    echo "PAYLOAD_SIZE options (optional):"
+    echo "  4k, 8k, 32k, 64k  - Specific payload size"
+    echo "  all               - Run all payload sizes sequentially [DEFAULT if not specified]"
+    echo "  (empty)           - Use default small payload (~400-500 bytes)"
+    echo ""
     echo "Examples:"
-    echo "  $0                           # Runs smoke tests for all APIs (default)"
-    echo "  $0 smoke                     # Runs smoke tests for all APIs"
-    echo "  $0 smoke producer-api-java-rest        # Runs smoke test for producer-api-java-rest only"
-    echo "  $0 full producer-api-java-grpc    # Runs full test for producer-api-java-grpc only"
+    echo "  $0                                    # Runs smoke tests for all APIs with all payload sizes"
+    echo "  $0 smoke                              # Runs smoke tests for all APIs with all payload sizes"
+    echo "  $0 smoke producer-api-java-rest       # Runs smoke test for producer-api-java-rest with all payload sizes"
+    echo "  $0 full producer-api-java-grpc 8k     # Runs full test for producer-api-java-grpc with 8k payloads"
+    echo "  $0 saturation '' 32k                  # Runs saturation tests for all APIs with 32k payloads"
     exit 1
 fi
 
@@ -118,6 +123,32 @@ if [ -n "$SINGLE_API" ]; then
             ;;
     esac
 fi
+
+# Payload size configuration
+PAYLOAD_SIZE_PARAM="${3:-}"  # Default to empty (small payload)
+PAYLOAD_SIZES=""
+
+# Validate and set payload sizes
+if [ -z "$PAYLOAD_SIZE_PARAM" ]; then
+    # Empty means default small payload
+    PAYLOAD_SIZES="default"
+    echo "Running tests with default payload size (~400-500 bytes)"
+elif [ "$PAYLOAD_SIZE_PARAM" = "all" ]; then
+    # Run all payload sizes
+    PAYLOAD_SIZES="4k 8k 32k 64k"
+    echo "Running tests with all payload sizes: $PAYLOAD_SIZES"
+elif [ "$PAYLOAD_SIZE_PARAM" = "4k" ] || [ "$PAYLOAD_SIZE_PARAM" = "8k" ] || [ "$PAYLOAD_SIZE_PARAM" = "32k" ] || [ "$PAYLOAD_SIZE_PARAM" = "64k" ]; then
+    # Run single payload size
+    PAYLOAD_SIZES="$PAYLOAD_SIZE_PARAM"
+    echo "Running tests with payload size: $PAYLOAD_SIZES"
+else
+    echo "Error: Invalid PAYLOAD_SIZE parameter: '$PAYLOAD_SIZE_PARAM'"
+    echo "Valid options: 4k, 8k, 32k, 64k, all, or empty for default"
+    exit 1
+fi
+
+# Results base directory (will be updated per payload size)
+RESULTS_BASE_DIR="$BASE_DIR/load-test/results/throughput-sequential"
 
 # API configurations
 get_api_config() {
@@ -285,6 +316,146 @@ ensure_database_running() {
     return 1
 }
 
+# Function to check Docker disk space
+check_docker_disk_space() {
+    local test_mode=$1
+    local payload_size=$2
+    local num_apis=${3:-6}  # Default to 6 APIs if not specified
+    
+    # Calculate estimated space needed per test
+    # Base estimates (conservative):
+    # - Database data: ~100MB per full/saturation test (can grow significantly with large payloads)
+    # - JSON result files: ~10-50MB per test
+    # - Metrics CSV: ~5-10MB per test
+    # - Container logs: ~5-10MB per test
+    local space_per_test_mb=0
+    
+    if [ "$test_mode" = "smoke" ]; then
+        space_per_test_mb=5  # Smoke tests are quick, minimal data
+    elif [ "$test_mode" = "full" ]; then
+        # Full test: ~11 minutes, moderate data generation
+        if [ -z "$payload_size" ] || [ "$payload_size" = "default" ]; then
+            space_per_test_mb=150  # Default payload
+        elif [ "$payload_size" = "4k" ]; then
+            space_per_test_mb=200
+        elif [ "$payload_size" = "8k" ]; then
+            space_per_test_mb=300
+        elif [ "$payload_size" = "32k" ]; then
+            space_per_test_mb=500
+        elif [ "$payload_size" = "64k" ]; then
+            space_per_test_mb=800
+        else
+            space_per_test_mb=200  # Conservative default
+        fi
+    elif [ "$test_mode" = "saturation" ]; then
+        # Saturation test: ~14 minutes, high data generation
+        if [ -z "$payload_size" ] || [ "$payload_size" = "default" ]; then
+            space_per_test_mb=200  # Default payload
+        elif [ "$payload_size" = "4k" ]; then
+            space_per_test_mb=300
+        elif [ "$payload_size" = "8k" ]; then
+            space_per_test_mb=500
+        elif [ "$payload_size" = "32k" ]; then
+            space_per_test_mb=1000
+        elif [ "$payload_size" = "64k" ]; then
+            space_per_test_mb=1500
+        else
+            space_per_test_mb=300  # Conservative default
+        fi
+    else
+        space_per_test_mb=100  # Conservative default
+    fi
+    
+    # Calculate total space needed (with 20% buffer)
+    local total_space_needed_mb=$((space_per_test_mb * num_apis * 120 / 100))
+    
+    # Get available Docker disk space
+    # Try multiple methods to determine available space
+    local available_space_mb=0
+    
+    # Method 1: Check Docker's data directory directly (Linux)
+    local docker_data_dir
+    if [ -d "/var/lib/docker" ]; then
+        docker_data_dir="/var/lib/docker"
+        if command -v df >/dev/null 2>&1; then
+            available_space_mb=$(df -m "$docker_data_dir" 2>/dev/null | tail -1 | awk '{print $4}' || echo "0")
+        fi
+    fi
+    
+    # Method 2: For macOS Docker Desktop, check the host filesystem where Docker VM is stored
+    if [ "$available_space_mb" -eq 0 ] || [ -z "$available_space_mb" ]; then
+        # On macOS, Docker Desktop stores data in a VM disk image
+        # Check the parent directory or use the home directory as fallback
+        if [ -d "$HOME/Library/Containers/com.docker.docker" ]; then
+            # Check space on the volume containing Docker Desktop's data
+            if command -v df >/dev/null 2>&1; then
+                available_space_mb=$(df -m "$HOME/Library/Containers/com.docker.docker" 2>/dev/null | tail -1 | awk '{print $4}' || echo "0")
+            fi
+        fi
+    fi
+    
+    # Method 3: Try to get Docker Root Dir from docker info
+    if [ "$available_space_mb" -eq 0 ] || [ -z "$available_space_mb" ]; then
+        docker_data_dir=$(docker info 2>/dev/null | grep "Docker Root Dir" | awk '{print $4}' || echo "")
+        if [ -n "$docker_data_dir" ] && [ -d "$docker_data_dir" ]; then
+            if command -v df >/dev/null 2>&1; then
+                available_space_mb=$(df -m "$docker_data_dir" 2>/dev/null | tail -1 | awk '{print $4}' || echo "0")
+            fi
+        fi
+    fi
+    
+    # Method 4: Fallback - check current directory's filesystem (where test results will be stored)
+    if [ "$available_space_mb" -eq 0 ] || [ -z "$available_space_mb" ]; then
+        if command -v df >/dev/null 2>&1; then
+            available_space_mb=$(df -m "$BASE_DIR" 2>/dev/null | tail -1 | awk '{print $4}' || echo "0")
+        fi
+    fi
+    
+    # Convert to integer (handle any decimal values)
+    available_space_mb=${available_space_mb%.*}
+    
+    # If we still can't determine space, show a warning but continue
+    if [ "$available_space_mb" -eq 0 ] || [ -z "$available_space_mb" ]; then
+        print_warning "Could not determine exact Docker disk space. Proceeding with caution..."
+        print_warning "Please ensure you have sufficient disk space before running tests."
+        return 0
+    fi
+    
+    # Check if we have enough space (with 50% safety margin)
+    local required_space_mb=$((total_space_needed_mb * 150 / 100))
+    
+    if [ "$available_space_mb" -lt "$required_space_mb" ] && [ "$available_space_mb" -gt 0 ]; then
+        print_warning "=========================================="
+        print_warning "Docker Disk Space Warning"
+        print_warning "=========================================="
+        print_warning "Available Docker disk space: ~${available_space_mb}MB"
+        print_warning "Estimated space needed for tests: ~${total_space_needed_mb}MB"
+        print_warning "Recommended free space: ~${required_space_mb}MB"
+        print_warning ""
+        print_warning "There may not be enough disk space to complete all tests."
+        print_warning "Consider running: docker system prune -a"
+        print_warning "Or clean up old test results and database data."
+        print_warning "=========================================="
+        echo ""
+        
+        # Ask for confirmation (non-interactive mode will continue)
+        if [ -t 0 ]; then
+            read -p "Continue anyway? (y/N): " -n 1 -r
+            echo ""
+            if [[ ! $REPLY =~ ^[Yy]$ ]]; then
+                print_error "Test execution cancelled by user"
+                return 1
+            fi
+        fi
+    else
+        if [ "$available_space_mb" -gt 0 ]; then
+            print_status "Docker disk space check: OK (~${available_space_mb}MB available, ~${total_space_needed_mb}MB needed)"
+        fi
+    fi
+    
+    return 0
+}
+
 # Function to clear database
 clear_database() {
     print_status "Clearing database..."
@@ -297,12 +468,35 @@ clear_database() {
     fi
     
     # Clear the car_entities table
-    if docker-compose exec -T postgres-large psql -U postgres -d car_entities -c "TRUNCATE TABLE car_entities CASCADE;" > /dev/null 2>&1; then
+    # Try TRUNCATE first, if it fails due to disk space, try DELETE with LIMIT
+    local truncate_output
+    truncate_output=$(docker-compose exec -T postgres-large psql -U postgres -d car_entities -c "TRUNCATE TABLE car_entities CASCADE;" 2>&1)
+    if [ $? -eq 0 ]; then
         print_success "Database cleared"
         return 0
     else
-        print_warning "Failed to clear database, continuing anyway..."
-        return 1
+        # Check if it's a disk space issue
+        if echo "$truncate_output" | grep -qi "No space left on device"; then
+            print_warning "Disk space issue detected. Attempting to delete records in batches..."
+            # Delete in batches to avoid transaction issues
+            local deleted=1
+            local iteration=0
+            while [ $deleted -gt 0 ] && [ $iteration -lt 100 ]; do
+                iteration=$((iteration + 1))
+                deleted=$(docker-compose exec -T postgres-large psql -U postgres -d car_entities -t -c "WITH deleted AS (DELETE FROM car_entities WHERE ctid IN (SELECT ctid FROM car_entities LIMIT 10000) RETURNING 1) SELECT COUNT(*) FROM deleted;" 2>&1 | grep -E "^[[:space:]]*[0-9]+" | tr -d ' ' || echo "0")
+                if [ "$deleted" = "0" ] || [ -z "$deleted" ]; then
+                    break
+                fi
+                # Small delay to avoid overwhelming the database
+                sleep 0.1
+            done
+            print_success "Database cleared (using batch delete due to disk space constraints)"
+            return 0
+        else
+            print_warning "Failed to clear database: $truncate_output"
+            print_warning "Continuing anyway..."
+            return 1
+        fi
     fi
 }
 
@@ -1127,8 +1321,15 @@ run_k6_test() {
         docker-compose --profile k6-test build k6-throughput > /dev/null 2>&1 || true
     fi
     
-    # Create results directory
-    RESULT_DIR="$RESULTS_BASE_DIR/$api_name"
+    # Get payload size from environment or use empty for default
+    local payload_size="${PAYLOAD_SIZE:-}"
+    
+    # Create results directory with payload size subdirectory
+    if [ -n "$payload_size" ]; then
+        RESULT_DIR="$RESULTS_BASE_DIR/$api_name/$payload_size"
+    else
+        RESULT_DIR="$RESULTS_BASE_DIR/$api_name"
+    fi
     mkdir -p "$RESULT_DIR"
     
     # Generate result file names
@@ -1139,20 +1340,35 @@ run_k6_test() {
         test_suffix="throughput-saturation"
     fi
     
-    local json_file="$RESULT_DIR/${api_name}-${test_suffix}-${TIMESTAMP}.json"
-    local summary_file="$RESULT_DIR/${api_name}-${test_suffix}-${TIMESTAMP}.txt"
-    local log_file="$RESULT_DIR/${api_name}-${test_suffix}-${TIMESTAMP}.log"
-    local metrics_file="$RESULT_DIR/${api_name}-${test_suffix}-${TIMESTAMP}-metrics.csv"
+    # Add payload size to filename if specified
+    local payload_suffix=""
+    if [ -n "$payload_size" ]; then
+        payload_suffix="-${payload_size}"
+    fi
+    
+    local json_file="$RESULT_DIR/${api_name}-${test_suffix}${payload_suffix}-${TIMESTAMP}.json"
+    local summary_file="$RESULT_DIR/${api_name}-${test_suffix}${payload_suffix}-${TIMESTAMP}.txt"
+    local log_file="$RESULT_DIR/${api_name}-${test_suffix}${payload_suffix}-${TIMESTAMP}.log"
+    local metrics_file="$RESULT_DIR/${api_name}-${test_suffix}${payload_suffix}-${TIMESTAMP}-metrics.csv"
     
     # Build k6 command
     local k6_script="/k6/scripts/$test_file"
-    local json_file_in_container="/k6/results/throughput-sequential/$api_name/$(basename $json_file)"
+    local json_file_in_container="/k6/results/throughput-sequential/$api_name"
+    if [ -n "$payload_size" ]; then
+        json_file_in_container="$json_file_in_container/$payload_size"
+    fi
+    json_file_in_container="$json_file_in_container/$(basename $json_file)"
     local k6_cmd="k6 run"
     k6_cmd="$k6_cmd --out json=$json_file_in_container"
     k6_cmd="$k6_cmd -e TEST_MODE=$TEST_MODE"
     k6_cmd="$k6_cmd -e PROTOCOL=$protocol"
     k6_cmd="$k6_cmd -e HOST=$docker_host"
     k6_cmd="$k6_cmd -e PORT=$port"
+    
+    # Add payload size environment variable if specified
+    if [ -n "$payload_size" ]; then
+        k6_cmd="$k6_cmd -e PAYLOAD_SIZE=$payload_size"
+    fi
     
     if [ "$protocol" = "grpc" ]; then
         k6_cmd="$k6_cmd -e PROTO_FILE=$proto_file"
@@ -1168,6 +1384,11 @@ run_k6_test() {
     print_status "  Script: $test_file"
     print_status "  Host: ${docker_host}:${port}"
     print_status "  Protocol: $protocol"
+    if [ -n "$payload_size" ]; then
+        print_status "  Payload size: $payload_size"
+    else
+        print_status "  Payload size: default (~400-500 bytes)"
+    fi
     if [ "$TEST_MODE" = "smoke" ]; then
         print_status "  Test duration: ~5-10 seconds (smoke test: 1 VU, 5 iterations)"
     elif [ "$TEST_MODE" = "saturation" ]; then
@@ -1177,15 +1398,59 @@ run_k6_test() {
     fi
     
     # Create results directory in container mount point
-    mkdir -p "$BASE_DIR/load-test/results/throughput-sequential/$api_name"
+    local container_result_dir="$BASE_DIR/load-test/results/throughput-sequential/$api_name"
+    if [ -n "$payload_size" ]; then
+        container_result_dir="$container_result_dir/$payload_size"
+    fi
+    mkdir -p "$container_result_dir"
     
     # Calculate test duration for metrics collection
     local test_duration=$(calculate_test_duration "$TEST_MODE")
     
+    # Check Docker disk space before running test
+    check_docker_disk_space "$TEST_MODE" "$payload_size" 1
+    
+    # Create test run record in database
+    local test_run_id=""
+    # Use SCRIPT_DIR which is set at the top of the script
+    local db_script_dir="$SCRIPT_DIR"
+    local protocol_upper=$(echo "$protocol" | tr '[:lower:]' '[:upper:]')
+    local payload_size_db="${payload_size:-default}"
+    
+    # Test database connection (use absolute path to ensure it works)
+    local db_client_path="$db_script_dir/db_client.py"
+    if [ -f "$db_client_path" ]; then
+        # Test connection - capture both stdout and stderr
+        local db_test_output
+        db_test_output=$(python3 "$db_client_path" test 2>&1) || true
+        # Check if output contains "successful" (case insensitive)
+        if echo "$db_test_output" | grep -qi "successful"; then
+            print_status "Creating test run record in database..."
+            # Create test run and capture the ID (last line of output)
+            local create_output
+            create_output=$(python3 "$db_client_path" create_test_run \
+                "$api_name" "$TEST_MODE" "$payload_size_db" "$protocol_upper" \
+                "$json_file" 2>&1) || true
+            test_run_id=$(echo "$create_output" | tail -1 | grep -E '^[0-9]+$' || echo "")
+            if [ -n "$test_run_id" ] && [ "$test_run_id" -gt 0 ] 2>/dev/null; then
+                print_success "Test run created with ID: $test_run_id"
+            else
+                print_warning "Failed to create test run record (output: $create_output), continuing without database storage..."
+                test_run_id=""
+            fi
+        else
+            print_warning "Database not available (test output: $db_test_output), continuing without database storage..."
+            test_run_id=""
+        fi
+    else
+        print_warning "Database client script not found at $db_client_path, continuing without database storage..."
+        test_run_id=""
+    fi
+    
     # Start metrics collection in background (for all test modes)
     local metrics_pid=""
     print_status "Starting resource utilization metrics collection..."
-    metrics_pid=$(start_metrics_collection "$api_name" "$metrics_file" "$test_duration" "$TEST_MODE" "$api_name")
+    metrics_pid=$(start_metrics_collection "$api_name" "$metrics_file" "$test_duration" "$TEST_MODE" "$api_name" "$test_run_id")
     if [ -n "$metrics_pid" ]; then
         print_success "Metrics collection started (PID: $metrics_pid)"
     else
@@ -1218,13 +1483,60 @@ run_k6_test() {
     fi
     
     # Move JSON file from container mount to final location
-    if [ -f "$BASE_DIR/load-test/results/throughput-sequential/$api_name/$(basename $json_file)" ]; then
-        mv "$BASE_DIR/load-test/results/throughput-sequential/$api_name/$(basename $json_file)" "$json_file"
+    local container_json_file="$BASE_DIR/load-test/results/throughput-sequential/$api_name"
+    if [ -n "$payload_size" ]; then
+        container_json_file="$container_json_file/$payload_size"
+    fi
+    container_json_file="$container_json_file/$(basename $json_file)"
+    if [ -f "$container_json_file" ]; then
+        mv "$container_json_file" "$json_file"
     fi
     
     # Copy summary to log file
     if [ -f "$summary_file" ]; then
         cp "$summary_file" "$log_file"
+    fi
+    
+    # Store performance metrics in database if test_run_id exists
+    if [ -n "$test_run_id" ] && [ -f "$json_file" ]; then
+        print_status "Storing performance metrics in database..."
+        local metrics_output=$(python3 "$db_script_dir/extract_k6_metrics.py" "$json_file" 2>/dev/null || echo "")
+        if [ -n "$metrics_output" ]; then
+            IFS='|' read -r total_samples success_samples error_samples duration_seconds throughput avg_response min_response max_response <<< "$metrics_output"
+            
+            # Calculate error rate
+            local error_rate=0.0
+            if [ "$total_samples" -gt 0 ] 2>/dev/null; then
+                error_rate=$(awk "BEGIN {printf \"%.2f\", ($error_samples / $total_samples) * 100}" 2>/dev/null || echo "0.0")
+            fi
+            
+            # Insert performance metrics
+            python3 "$db_script_dir/db_client.py" insert_performance_metrics \
+                "$test_run_id" \
+                "$total_samples" "$success_samples" "$error_samples" \
+                "$throughput" "$avg_response" "$min_response" "$max_response" \
+                "$error_rate" >/dev/null 2>&1 || true
+            
+            # Update test run completion
+            python3 "$db_script_dir/db_client.py" update_test_run_completion \
+                "$test_run_id" "completed" "$duration_seconds" >/dev/null 2>&1 || true
+            
+            print_success "Performance metrics stored in database"
+        else
+            print_warning "Could not extract metrics from JSON file"
+        fi
+    fi
+    
+    # Store phase metrics if available (for full/saturation tests)
+    if [ -n "$test_run_id" ] && [ "$TEST_MODE" != "smoke" ] && [ -f "$metrics_file" ]; then
+        local phase_analysis=$(python3 "$db_script_dir/analyze-resource-metrics.py" \
+            "$json_file" "$TEST_MODE" "$metrics_file" 2>/dev/null || echo "")
+        if [ -n "$phase_analysis" ]; then
+            # Parse phase data and insert (this would require more complex parsing)
+            # For now, we'll skip phase insertion as it requires JSON parsing
+            # This can be enhanced later
+            true
+        fi
     fi
     
     if [ $test_exit_code -eq 0 ]; then
@@ -1235,9 +1547,17 @@ run_k6_test() {
         if [ -f "$metrics_file" ]; then
             print_status "  - Metrics: $metrics_file"
         fi
+        if [ -n "$test_run_id" ]; then
+            print_status "  - Database test run ID: $test_run_id"
+        fi
         echo ""
         return 0
     else
+        # Update test run status to failed
+        if [ -n "$test_run_id" ]; then
+            python3 "$db_script_dir/db_client.py" update_test_run_completion \
+                "$test_run_id" "failed" >/dev/null 2>&1 || true
+        fi
         print_error "Test failed for $api_name"
         return 1
     fi
@@ -1465,13 +1785,22 @@ run_throughput_test() {
 extract_k6_metrics() {
     local json_file=$1
     if [ ! -f "$json_file" ]; then
+        echo "0|0|0|0.00|0.00|0.00|0.00|0.00" >&2
         echo "0|0|0|0.00|0.00|0.00|0.00|0.00"
         return 1
     fi
     
     # Use external Python script for better NDJSON handling
-    local script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-    python3 "$script_dir/extract_k6_metrics.py" "$json_file" 2>/dev/null || echo "0|0|0|0.00|0.00|0.00|0.00|0.00"
+    # Use BASE_DIR which is set at the top of the script
+    local script_dir="${BASE_DIR}/load-test/shared"
+    # Capture both stdout and stderr, but only output stdout
+    local result=$(python3 "$script_dir/extract_k6_metrics.py" "$json_file" 2>&1)
+    local exit_code=$?
+    if [ $exit_code -eq 0 ] && [ -n "$result" ] && ! echo "$result" | grep -q "can't open file"; then
+        echo "$result"
+    else
+        echo "0|0|0|0.00|0.00|0.00|0.00|0.00"
+    fi
 }
 
 # Old inline version (kept for reference, but not used)
@@ -1587,6 +1916,11 @@ create_comparison_report() {
         echo "**Date**: $(date)"  
         echo "**Test Mode**: $TEST_MODE"
         echo "**Test Type**: Sequential (one API at a time)"
+        if [ -n "$PAYLOAD_SIZE_PARAM" ] && [ "$PAYLOAD_SIZE_PARAM" != "all" ]; then
+            echo "**Payload Size**: $PAYLOAD_SIZE_PARAM"
+        elif [ "$PAYLOAD_SIZE_PARAM" = "all" ]; then
+            echo "**Payload Sizes**: 4k, 8k, 32k, 64k (all sizes tested)"
+        fi
         echo ""
         echo "## Executive Summary"
         echo ""
@@ -1632,7 +1966,20 @@ create_comparison_report() {
             fi
             
             # Find the most recent k6 JSON file
-            local latest_json=$(find "$api_dir" -name "*-throughput-*.json" -type f | sort -r | head -1)
+            # For default payload, look in root directory first, then subdirectories
+            # For specific payload sizes, look in that subdirectory
+            local latest_json=""
+            if [ -z "$PAYLOAD_SIZE_PARAM" ] || [ "$PAYLOAD_SIZE_PARAM" = "default" ]; then
+                # Default payload: prefer files in root directory, exclude payload size subdirectories
+                latest_json=$(find "$api_dir" -maxdepth 1 -name "*-throughput-*.json" -type f 2>/dev/null | sort -r | head -1)
+                # If not found in root, search subdirectories but exclude payload size dirs
+                if [ -z "$latest_json" ]; then
+                    latest_json=$(find "$api_dir" -name "*-throughput-*.json" -type f ! -path "*/4k/*" ! -path "*/8k/*" ! -path "*/32k/*" ! -path "*/64k/*" 2>/dev/null | sort -r | head -1)
+                fi
+            else
+                # Specific payload size: search in that subdirectory
+                latest_json=$(find "$api_dir" -name "*-throughput-*.json" -type f | sort -r | head -1)
+            fi
             if [ -z "$latest_json" ]; then
                 echo "| $api_name | ❌ No JSON file | - | - | - | - | - |"
                 continue
@@ -1665,7 +2012,16 @@ create_comparison_report() {
         echo ""
         local api_dir="$RESULTS_BASE_DIR/producer-api-java-rest"
         if [ -d "$api_dir" ]; then
-            local latest_json=$(find "$api_dir" -name "*-throughput-*.json" -type f | sort -r | head -1)
+            # Find most recent JSON file (prefer root directory for default payload)
+            local latest_json=""
+            if [ -z "$PAYLOAD_SIZE_PARAM" ] || [ "$PAYLOAD_SIZE_PARAM" = "default" ]; then
+                latest_json=$(find "$api_dir" -maxdepth 1 -name "*-throughput-*.json" -type f 2>/dev/null | sort -r | head -1)
+                if [ -z "$latest_json" ]; then
+                    latest_json=$(find "$api_dir" -name "*-throughput-*.json" -type f ! -path "*/4k/*" ! -path "*/8k/*" ! -path "*/32k/*" ! -path "*/64k/*" 2>/dev/null | sort -r | head -1)
+                fi
+            else
+                latest_json=$(find "$api_dir" -name "*-throughput-*.json" -type f | sort -r | head -1)
+            fi
             if [ -n "$latest_json" ]; then
                 echo "**File**: \`$(basename "$latest_json")\`"
                 echo ""
@@ -1688,7 +2044,15 @@ create_comparison_report() {
         echo ""
         api_dir="$RESULTS_BASE_DIR/producer-api-java-grpc"
         if [ -d "$api_dir" ]; then
-            latest_json=$(find "$api_dir" -name "*-throughput-*.json" -type f | sort -r | head -1)
+            # Find most recent JSON file (prefer root directory for default payload)
+            if [ -z "$PAYLOAD_SIZE_PARAM" ] || [ "$PAYLOAD_SIZE_PARAM" = "default" ]; then
+                latest_json=$(find "$api_dir" -maxdepth 1 -name "*-throughput-*.json" -type f 2>/dev/null | sort -r | head -1)
+                if [ -z "$latest_json" ]; then
+                    latest_json=$(find "$api_dir" -name "*-throughput-*.json" -type f ! -path "*/4k/*" ! -path "*/8k/*" ! -path "*/32k/*" ! -path "*/64k/*" 2>/dev/null | sort -r | head -1)
+                fi
+            else
+                latest_json=$(find "$api_dir" -name "*-throughput-*.json" -type f | sort -r | head -1)
+            fi
             if [ -n "$latest_json" ]; then
                 echo "**File**: \`$(basename "$latest_json")\`"
                 echo ""
@@ -1711,7 +2075,15 @@ create_comparison_report() {
         echo ""
         api_dir="$RESULTS_BASE_DIR/producer-api-rust-rest"
         if [ -d "$api_dir" ]; then
-            latest_json=$(find "$api_dir" -name "*-throughput-*.json" -type f | sort -r | head -1)
+            # Find most recent JSON file (prefer root directory for default payload)
+            if [ -z "$PAYLOAD_SIZE_PARAM" ] || [ "$PAYLOAD_SIZE_PARAM" = "default" ]; then
+                latest_json=$(find "$api_dir" -maxdepth 1 -name "*-throughput-*.json" -type f 2>/dev/null | sort -r | head -1)
+                if [ -z "$latest_json" ]; then
+                    latest_json=$(find "$api_dir" -name "*-throughput-*.json" -type f ! -path "*/4k/*" ! -path "*/8k/*" ! -path "*/32k/*" ! -path "*/64k/*" 2>/dev/null | sort -r | head -1)
+                fi
+            else
+                latest_json=$(find "$api_dir" -name "*-throughput-*.json" -type f | sort -r | head -1)
+            fi
             if [ -n "$latest_json" ]; then
                 echo "**File**: \`$(basename "$latest_json")\`"
                 echo ""
@@ -1734,7 +2106,15 @@ create_comparison_report() {
         echo ""
         api_dir="$RESULTS_BASE_DIR/producer-api-rust-grpc"
         if [ -d "$api_dir" ]; then
-            latest_json=$(find "$api_dir" -name "*-throughput-*.json" -type f | sort -r | head -1)
+            # Find most recent JSON file (prefer root directory for default payload)
+            if [ -z "$PAYLOAD_SIZE_PARAM" ] || [ "$PAYLOAD_SIZE_PARAM" = "default" ]; then
+                latest_json=$(find "$api_dir" -maxdepth 1 -name "*-throughput-*.json" -type f 2>/dev/null | sort -r | head -1)
+                if [ -z "$latest_json" ]; then
+                    latest_json=$(find "$api_dir" -name "*-throughput-*.json" -type f ! -path "*/4k/*" ! -path "*/8k/*" ! -path "*/32k/*" ! -path "*/64k/*" 2>/dev/null | sort -r | head -1)
+                fi
+            else
+                latest_json=$(find "$api_dir" -name "*-throughput-*.json" -type f | sort -r | head -1)
+            fi
             if [ -n "$latest_json" ]; then
                 echo "**File**: \`$(basename "$latest_json")\`"
                 echo ""
@@ -1757,7 +2137,15 @@ create_comparison_report() {
         echo ""
         api_dir="$RESULTS_BASE_DIR/producer-api-go-rest"
         if [ -d "$api_dir" ]; then
-            latest_json=$(find "$api_dir" -name "*-throughput-*.json" -type f | sort -r | head -1)
+            # Find most recent JSON file (prefer root directory for default payload)
+            if [ -z "$PAYLOAD_SIZE_PARAM" ] || [ "$PAYLOAD_SIZE_PARAM" = "default" ]; then
+                latest_json=$(find "$api_dir" -maxdepth 1 -name "*-throughput-*.json" -type f 2>/dev/null | sort -r | head -1)
+                if [ -z "$latest_json" ]; then
+                    latest_json=$(find "$api_dir" -name "*-throughput-*.json" -type f ! -path "*/4k/*" ! -path "*/8k/*" ! -path "*/32k/*" ! -path "*/64k/*" 2>/dev/null | sort -r | head -1)
+                fi
+            else
+                latest_json=$(find "$api_dir" -name "*-throughput-*.json" -type f | sort -r | head -1)
+            fi
             if [ -n "$latest_json" ]; then
                 echo "**File**: \`$(basename "$latest_json")\`"
                 echo ""
@@ -1780,7 +2168,15 @@ create_comparison_report() {
         echo ""
         api_dir="$RESULTS_BASE_DIR/producer-api-go-grpc"
         if [ -d "$api_dir" ]; then
-            latest_json=$(find "$api_dir" -name "*-throughput-*.json" -type f | sort -r | head -1)
+            # Find most recent JSON file (prefer root directory for default payload)
+            if [ -z "$PAYLOAD_SIZE_PARAM" ] || [ "$PAYLOAD_SIZE_PARAM" = "default" ]; then
+                latest_json=$(find "$api_dir" -maxdepth 1 -name "*-throughput-*.json" -type f 2>/dev/null | sort -r | head -1)
+                if [ -z "$latest_json" ]; then
+                    latest_json=$(find "$api_dir" -name "*-throughput-*.json" -type f ! -path "*/4k/*" ! -path "*/8k/*" ! -path "*/32k/*" ! -path "*/64k/*" 2>/dev/null | sort -r | head -1)
+                fi
+            else
+                latest_json=$(find "$api_dir" -name "*-throughput-*.json" -type f | sort -r | head -1)
+            fi
             if [ -n "$latest_json" ]; then
                 echo "**File**: \`$(basename "$latest_json")\`"
                 echo ""
@@ -1802,47 +2198,83 @@ create_comparison_report() {
         echo "## Resource Utilization Metrics"
         echo ""
         
-        # Only include resource metrics for full and saturation tests
-        if [ "$TEST_MODE" != "smoke" ]; then
-            echo "### Overall Resource Usage"
-            echo ""
-            echo "| API | Avg CPU % | Max CPU % | Avg Memory % | Max Memory % | Avg Memory (MB) | Max Memory (MB) |"
-            echo "|-----|-----------|-----------|--------------|--------------|-----------------|-----------------|"
+        # Include resource metrics for all test modes (including smoke tests)
+        echo "### Overall Resource Usage"
+        echo ""
+        echo "| API | Avg CPU % | Max CPU % | Avg Memory % | Max Memory % | Avg Memory (MB) | Max Memory (MB) |"
+        echo "|-----|-----------|-----------|--------------|--------------|-----------------|-----------------|"
+        
+        # Try to get resource metrics from database first
+        local db_resource_summary=""
+        if python3 "$SCRIPT_DIR/db_client.py" test >/dev/null 2>&1; then
+            db_resource_summary=$(python3 "$SCRIPT_DIR/db_client.py" get_all_apis_resource_summary "$TEST_MODE" "$PAYLOAD_SIZE_PARAM" 2>/dev/null || echo "")
+        fi
+        
+        for api_name in $APIS; do
+            local avg_cpu="-"
+            local max_cpu="-"
+            local avg_mem="-"
+            local max_mem="-"
+            local avg_mem_mb="-"
+            local max_mem_mb="-"
             
-            for api_name in $APIS; do
+            # Try database first
+            if [ -n "$db_resource_summary" ]; then
+                local api_data=$(echo "$db_resource_summary" | python3 -c "import sys, json; d=json.load(sys.stdin); print(json.dumps(d.get('$api_name', {})))" 2>/dev/null || echo "")
+                if [ -n "$api_data" ] && [ "$api_data" != "{}" ]; then
+                    avg_cpu=$(echo "$api_data" | python3 -c "import sys, json; d=json.load(sys.stdin); print('%.2f' % d.get('avg_cpu_percent', 0))" 2>/dev/null || echo "-")
+                    max_cpu=$(echo "$api_data" | python3 -c "import sys, json; d=json.load(sys.stdin); print('%.2f' % d.get('max_cpu_percent', 0))" 2>/dev/null || echo "-")
+                    avg_mem=$(echo "$api_data" | python3 -c "import sys, json; d=json.load(sys.stdin); print('%.2f' % d.get('avg_memory_percent', 0))" 2>/dev/null || echo "-")
+                    max_mem=$(echo "$api_data" | python3 -c "import sys, json; d=json.load(sys.stdin); print('%.2f' % d.get('max_memory_percent', 0))" 2>/dev/null || echo "-")
+                    avg_mem_mb=$(echo "$api_data" | python3 -c "import sys, json; d=json.load(sys.stdin); print('%.2f' % d.get('avg_memory_mb', 0))" 2>/dev/null || echo "-")
+                    max_mem_mb=$(echo "$api_data" | python3 -c "import sys, json; d=json.load(sys.stdin); print('%.2f' % d.get('max_memory_mb', 0))" 2>/dev/null || echo "-")
+                fi
+            fi
+            
+            # Fall back to CSV if database didn't provide data
+            if [ "$avg_cpu" = "-" ] || [ "$max_cpu" = "-" ]; then
                 local api_dir="$RESULTS_BASE_DIR/$api_name"
-                if [ ! -d "$api_dir" ]; then
-                    echo "| $api_name | - | - | - | - | - | - |"
-                    continue
-                fi
-                
-                # Find latest JSON and metrics CSV files
-                local latest_json=$(find "$api_dir" -name "*-throughput-*.json" -type f | sort -r | head -1)
-                local latest_metrics_csv=$(find "$api_dir" -name "*-throughput-*-metrics.csv" -type f | sort -r | head -1)
-                
-                if [ -z "$latest_json" ] || [ -z "$latest_metrics_csv" ]; then
-                    echo "| $api_name | - | - | - | - | - | - |"
-                    continue
-                fi
-                
-                # Analyze resource metrics
-                local resource_analysis=$(python3 "$SCRIPT_DIR/analyze-resource-metrics.py" "$latest_json" "$latest_metrics_csv" "$TEST_MODE" 2>/dev/null)
-                
-                if [ -n "$resource_analysis" ]; then
-                    local avg_cpu=$(echo "$resource_analysis" | python3 -c "import sys, json; d=json.load(sys.stdin); print('%.2f' % d['overall']['avg_cpu_percent'])" 2>/dev/null || echo "-")
-                    local max_cpu=$(echo "$resource_analysis" | python3 -c "import sys, json; d=json.load(sys.stdin); print('%.2f' % d['overall']['max_cpu_percent'])" 2>/dev/null || echo "-")
-                    local avg_mem=$(echo "$resource_analysis" | python3 -c "import sys, json; d=json.load(sys.stdin); print('%.2f' % d['overall']['avg_memory_percent'])" 2>/dev/null || echo "-")
-                    local max_mem=$(echo "$resource_analysis" | python3 -c "import sys, json; d=json.load(sys.stdin); print('%.2f' % d['overall']['max_memory_percent'])" 2>/dev/null || echo "-")
-                    local avg_mem_mb=$(echo "$resource_analysis" | python3 -c "import sys, json; d=json.load(sys.stdin); print('%.2f' % d['overall']['avg_memory_mb'])" 2>/dev/null || echo "-")
-                    local max_mem_mb=$(echo "$resource_analysis" | python3 -c "import sys, json; d=json.load(sys.stdin); print('%.2f' % d['overall']['max_memory_mb'])" 2>/dev/null || echo "-")
+                if [ -d "$api_dir" ]; then
+                    # Find latest JSON and metrics CSV files
+                    local latest_json=""
+                    local latest_metrics_csv=""
+                    if [ -z "$PAYLOAD_SIZE_PARAM" ] || [ "$PAYLOAD_SIZE_PARAM" = "default" ]; then
+                        latest_json=$(find "$api_dir" -maxdepth 1 -name "*-throughput-*.json" -type f 2>/dev/null | sort -r | head -1)
+                        if [ -z "$latest_json" ]; then
+                            latest_json=$(find "$api_dir" -name "*-throughput-*.json" -type f ! -path "*/4k/*" ! -path "*/8k/*" ! -path "*/32k/*" ! -path "*/64k/*" 2>/dev/null | sort -r | head -1)
+                        fi
+                        latest_metrics_csv=$(find "$api_dir" -maxdepth 1 -name "*-throughput-*-metrics.csv" -type f 2>/dev/null | sort -r | head -1)
+                        if [ -z "$latest_metrics_csv" ]; then
+                            latest_metrics_csv=$(find "$api_dir" -name "*-throughput-*-metrics.csv" -type f ! -path "*/4k/*" ! -path "*/8k/*" ! -path "*/32k/*" ! -path "*/64k/*" 2>/dev/null | sort -r | head -1)
+                        fi
+                    else
+                        latest_json=$(find "$api_dir" -name "*-throughput-*.json" -type f | sort -r | head -1)
+                        latest_metrics_csv=$(find "$api_dir" -name "*-throughput-*-metrics.csv" -type f | sort -r | head -1)
+                    fi
                     
-                    echo "| $api_name | $avg_cpu | $max_cpu | $avg_mem | $max_mem | $avg_mem_mb | $max_mem_mb |"
-                else
-                    echo "| $api_name | - | - | - | - | - | - |"
+                    if [ -n "$latest_json" ] && [ -n "$latest_metrics_csv" ]; then
+                        # Analyze resource metrics from CSV
+                        local resource_analysis=$(python3 "$SCRIPT_DIR/analyze-resource-metrics.py" "$latest_json" "$TEST_MODE" "$latest_metrics_csv" 2>/dev/null)
+                        
+                        if [ -n "$resource_analysis" ]; then
+                            avg_cpu=$(echo "$resource_analysis" | python3 -c "import sys, json; d=json.load(sys.stdin); print('%.2f' % d['overall']['avg_cpu_percent'])" 2>/dev/null || echo "-")
+                            max_cpu=$(echo "$resource_analysis" | python3 -c "import sys, json; d=json.load(sys.stdin); print('%.2f' % d['overall']['max_cpu_percent'])" 2>/dev/null || echo "-")
+                            avg_mem=$(echo "$resource_analysis" | python3 -c "import sys, json; d=json.load(sys.stdin); print('%.2f' % d['overall']['avg_memory_percent'])" 2>/dev/null || echo "-")
+                            max_mem=$(echo "$resource_analysis" | python3 -c "import sys, json; d=json.load(sys.stdin); print('%.2f' % d['overall']['max_memory_percent'])" 2>/dev/null || echo "-")
+                            avg_mem_mb=$(echo "$resource_analysis" | python3 -c "import sys, json; d=json.load(sys.stdin); print('%.2f' % d['overall']['avg_memory_mb'])" 2>/dev/null || echo "-")
+                            max_mem_mb=$(echo "$resource_analysis" | python3 -c "import sys, json; d=json.load(sys.stdin); print('%.2f' % d['overall']['max_memory_mb'])" 2>/dev/null || echo "-")
+                        fi
+                    fi
                 fi
-            done
+            fi
             
-            echo ""
+            echo "| $api_name | $avg_cpu | $max_cpu | $avg_mem | $max_mem | $avg_mem_mb | $max_mem_mb |"
+        done
+        
+        echo ""
+        
+        # Only include per-phase resource metrics for full and saturation tests
+        if [ "$TEST_MODE" != "smoke" ]; then
             echo "### Per-Phase Resource Usage"
             echo ""
             echo "The following tables show resource utilization for each test phase:"
@@ -1876,7 +2308,7 @@ create_comparison_report() {
                         continue
                     fi
                     
-                    local resource_analysis=$(python3 "$SCRIPT_DIR/analyze-resource-metrics.py" "$latest_json" "$latest_metrics_csv" "$TEST_MODE" 2>/dev/null)
+                    local resource_analysis=$(python3 "$SCRIPT_DIR/analyze-resource-metrics.py" "$latest_json" "$TEST_MODE" "$latest_metrics_csv" 2>/dev/null)
                     
                     if [ -n "$resource_analysis" ]; then
                         local phase_data=$(echo "$resource_analysis" | python3 -c "import sys, json; d=json.load(sys.stdin); p=d['phases'].get($phase_num, {}); print(json.dumps(p))" 2>/dev/null)
@@ -1906,9 +2338,6 @@ create_comparison_report() {
             echo ""
             echo "- **CPU %/Req**: CPU percentage-seconds per request. Lower is better - indicates efficiency."
             echo "- **RAM MB/Req**: Memory MB-seconds per request. Lower is better - indicates memory efficiency."
-            echo ""
-        else
-            echo "Resource utilization metrics are only collected for full and saturation tests."
             echo ""
         fi
         
@@ -2381,11 +2810,36 @@ main() {
     fi
     echo ""
     
-    # Step 6/7: Run tests sequentially
+    # Step 6/7: Run tests sequentially for each payload size
     mkdir -p "$RESULTS_BASE_DIR"
     local failed_apis=""
     
-    for api_name in $APIS; do
+    # Check Docker disk space before starting test runs
+    local num_apis=$(echo $APIS | wc -w | tr -d ' ')
+    print_status "Checking Docker disk space before test execution..."
+    if ! check_docker_disk_space "$TEST_MODE" "" "$num_apis"; then
+        print_error "Disk space check failed. Aborting test execution."
+        exit 1
+    fi
+    echo ""
+    
+    # Iterate over payload sizes
+    for payload_size in $PAYLOAD_SIZES; do
+        # Export payload size for use in run_k6_test function (empty for default)
+        if [ "$payload_size" = "default" ]; then
+            export PAYLOAD_SIZE=""
+        else
+            export PAYLOAD_SIZE="$payload_size"
+        fi
+        
+        if [ "$payload_size" != "default" ] && [ -n "$payload_size" ]; then
+            print_section "Testing with payload size: $payload_size"
+        else
+            print_section "Testing with default payload size (~400-500 bytes)"
+        fi
+        echo ""
+        
+        for api_name in $APIS; do
         local api_config=$(get_api_config "$api_name")
         if [ -z "$api_config" ]; then
             print_error "Unknown API: $api_name"
@@ -2461,7 +2915,18 @@ main() {
             sleep 10
         fi
         echo ""
+        done
+        
+        # Wait between payload size iterations
+        if [ "$TEST_MODE" != "smoke" ] && [ "$(echo $PAYLOAD_SIZES | wc -w)" -gt 1 ]; then
+            print_status "Waiting 5 seconds before next payload size..."
+            sleep 5
+            echo ""
+        fi
     done
+    
+    # Unset PAYLOAD_SIZE after all tests
+    unset PAYLOAD_SIZE
     
     # Step 7/8: Create comparison report
     echo ""

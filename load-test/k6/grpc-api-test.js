@@ -22,6 +22,9 @@ const serviceName = __ENV.SERVICE || 'com.example.grpc.EventService';
 const methodName = __ENV.METHOD || 'ProcessEvent';
 const protoFile = __ENV.PROTO_FILE || '/k6/proto/java-grpc/event_service.proto';
 
+// Payload size is configured via PAYLOAD_SIZE environment variable (4k, 8k, 32k, 64k)
+// If not specified, uses default small payload (~400-500 bytes)
+
 // Create gRPC client
 const client = new grpc.Client();
 
@@ -80,7 +83,7 @@ export default function () {
         return;
     }
     
-    // Generate event payload
+    // Generate event payload (size controlled by PAYLOAD_SIZE env var)
     const payload = generateGrpcEventPayload();
     console.log(`Making gRPC call to ${serviceName}/${methodName}`);
     

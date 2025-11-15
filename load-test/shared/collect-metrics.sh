@@ -97,9 +97,11 @@ start_metrics_collection() {
     local duration=${3:-300}  # Default 5 minutes
     local test_mode=${4:-""}  # Optional: test mode (full, saturation, smoke)
     local api_name=${5:-""}   # Optional: API name for metadata
+    local test_run_id=${6:-""}  # Optional: test run ID for database storage
     
     # Export variables for background process
     export METRICS_INTERVAL
+    export TEST_RUN_ID="$test_run_id"
     
     # Create CSV header with metadata if file doesn't exist
     if [ ! -f "$metrics_file" ]; then
@@ -119,6 +121,9 @@ start_metrics_collection() {
         echo "# Container: $container_name" >> "$metrics_file"
         echo "# Collection duration: ${duration}s" >> "$metrics_file"
         echo "# Collection interval: ${METRICS_INTERVAL}s" >> "$metrics_file"
+        if [ -n "$test_run_id" ]; then
+            echo "# Test run ID: $test_run_id" >> "$metrics_file"
+        fi
         echo "#" >> "$metrics_file"
         echo "timestamp,datetime,container,cpu_percent,memory_percent,memory_used_mb,memory_limit_mb,network_io,block_io" >> "$metrics_file"
     fi
@@ -152,6 +157,8 @@ start_metrics_collection() {
     export container_name
     export metrics_file
     export METRICS_INTERVAL
+    export test_run_id
+    export SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
     
     # Start collection in background
     # Use bash -c with function definitions inline to avoid sourcing issues
@@ -227,8 +234,43 @@ start_metrics_collection() {
             local mem_used_mb=\$(convert_to_mb \"\$mem_used\")
             local mem_limit_mb=\$(convert_to_mb \"\$mem_limit\")
             
-            # Write to CSV
+            # Write to CSV (backup)
             echo \"\$timestamp,\$date_str,\$container_name,\$cpu_perc,\$mem_perc,\$mem_used_mb,\$mem_limit_mb,\$net_io,\$block_io\" >> \"\$metrics_file\"
+            
+            # Write to PostgreSQL if test_run_id is provided
+            if [ -n \"\${TEST_RUN_ID}\" ] && [ \"\${TEST_RUN_ID}\" != \"\" ]; then
+                # Parse network_io (format: "1.2MB / 3.4MB" or "1.2MB/3.4MB")
+                local net_rx=\"\"
+                local net_tx=\"\"
+                if [ -n \"\$net_io\" ]; then
+                    net_rx=\$(echo \"\$net_io\" | cut -d'/' -f1 | xargs)
+                    net_tx=\$(echo \"\$net_io\" | cut -d'/' -f2 | xargs)
+                fi
+                
+                # Parse block_io (format: "1.2MB / 3.4MB" or "1.2MB/3.4MB")
+                local block_read=\"\"
+                local block_write=\"\"
+                if [ -n \"\$block_io\" ]; then
+                    block_read=\$(echo \"\$block_io\" | cut -d'/' -f1 | xargs)
+                    block_write=\$(echo \"\$block_io\" | cut -d'/' -f2 | xargs)
+                fi
+                
+                # Convert timestamp to ISO format for PostgreSQL
+                local timestamp_iso=\$(date -u -r \$timestamp '+%Y-%m-%d %H:%M:%S' 2>/dev/null || date -u '+%Y-%m-%d %H:%M:%S')
+                
+                # Use Python helper to insert into database
+                python3 \"\${SCRIPT_DIR}/db_client.py\" insert_resource_metric \
+                    \"\${TEST_RUN_ID}\" \
+                    \"\$timestamp_iso\" \
+                    \"\$cpu_perc\" \
+                    \"\$mem_perc\" \
+                    \"\$mem_used_mb\" \
+                    \"\$mem_limit_mb\" \
+                    \"\$net_rx\" \
+                    \"\$net_tx\" \
+                    \"\$block_read\" \
+                    \"\$block_write\" 2>/dev/null || true
+            fi
         }
         
         # Main collection loop
