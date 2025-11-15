@@ -5,6 +5,7 @@ Generate comprehensive HTML report from k6 test results
 import json
 import sys
 import os
+import subprocess
 from datetime import datetime
 from pathlib import Path
 
@@ -706,7 +707,231 @@ def generate_html_report(results_dir, test_mode, timestamp):
                 </ul>
             </div>
         </div>
+        
+        <div class="comparison-section">
+            <h3>📈 Performance Comparison Charts</h3>
+            
+            <div class="resource-section">
+                <h4>Throughput Comparison (req/s)</h4>
+                <div class="chart-container">
+                    <canvas id="throughputChart"></canvas>
+                </div>
+            </div>
+            
+            <div class="resource-section">
+                <h4>Average Response Time Comparison (ms)</h4>
+                <div class="chart-container">
+                    <canvas id="responseTimeChart"></canvas>
+                </div>
+            </div>
+            
+            <div class="resource-section">
+                <h4>Error Rate Comparison (%)</h4>
+                <div class="chart-container">
+                    <canvas id="errorRateChart"></canvas>
+                </div>
+            </div>
+            
+            <div class="resource-section">
+                <h4>P95 Response Time Comparison (ms)</h4>
+                <div class="chart-container">
+                    <canvas id="p95Chart"></canvas>
+                </div>
+            </div>
+        </div>
+        
+        <script>
+            // Performance metrics data
+            const performanceData = """ + json.dumps([{
+                'name': api['name'],
+                'display': api['display'],
+                'throughput': api['metrics']['throughput'] if api.get('status') == 'success' and 'metrics' in api else 0,
+                'avg_response': api['metrics']['avg_response'] if api.get('status') == 'success' and 'metrics' in api else 0,
+                'error_rate': api['metrics']['error_rate'] if api.get('status') == 'success' and 'metrics' in api else 0,
+                'p95_response': api['metrics']['p95_response'] if api.get('status') == 'success' and 'metrics' in api else 0
+            } for api in api_results]) + """;
+            
+            const colors = [
+                'rgba(54, 162, 235, 0.8)',
+                'rgba(255, 99, 132, 0.8)',
+                'rgba(75, 192, 192, 0.8)',
+                'rgba(255, 206, 86, 0.8)',
+                'rgba(153, 102, 255, 0.8)',
+                'rgba(255, 159, 64, 0.8)'
+            ];
+            
+            // Throughput Chart
+            const throughputCtx = document.getElementById('throughputChart');
+            if (throughputCtx) {
+                new Chart(throughputCtx, {
+                    type: 'bar',
+                    data: {
+                        labels: performanceData.map(d => d.display),
+                        datasets: [{
+                            label: 'Throughput (req/s)',
+                            data: performanceData.map(d => d.throughput),
+                            backgroundColor: performanceData.map((d, i) => colors[i % colors.length]),
+                            borderColor: performanceData.map((d, i) => colors[i % colors.length].replace('0.8', '1')),
+                            borderWidth: 2
+                        }]
+                    },
+                    options: {
+                        responsive: true,
+                        maintainAspectRatio: false,
+                        scales: {
+                            y: {
+                                beginAtZero: true,
+                                title: {
+                                    display: true,
+                                    text: 'Requests per Second'
+                                }
+                            }
+                        },
+                        plugins: {
+                            legend: {
+                                display: false
+                            },
+                            title: {
+                                display: true,
+                                text: 'Throughput Comparison - Higher is Better'
+                            }
+                        }
+                    }
+                });
+            }
+            
+            // Response Time Chart
+            const responseTimeCtx = document.getElementById('responseTimeChart');
+            if (responseTimeCtx) {
+                new Chart(responseTimeCtx, {
+                    type: 'bar',
+                    data: {
+                        labels: performanceData.map(d => d.display),
+                        datasets: [{
+                            label: 'Avg Response Time (ms)',
+                            data: performanceData.map(d => d.avg_response),
+                            backgroundColor: performanceData.map((d, i) => colors[i % colors.length]),
+                            borderColor: performanceData.map((d, i) => colors[i % colors.length].replace('0.8', '1')),
+                            borderWidth: 2
+                        }]
+                    },
+                    options: {
+                        responsive: true,
+                        maintainAspectRatio: false,
+                        scales: {
+                            y: {
+                                beginAtZero: true,
+                                title: {
+                                    display: true,
+                                    text: 'Response Time (ms)'
+                                }
+                            }
+                        },
+                        plugins: {
+                            legend: {
+                                display: false
+                            },
+                            title: {
+                                display: true,
+                                text: 'Average Response Time Comparison - Lower is Better'
+                            }
+                        }
+                    }
+                });
+            }
+            
+            // Error Rate Chart
+            const errorRateCtx = document.getElementById('errorRateChart');
+            if (errorRateCtx) {
+                new Chart(errorRateCtx, {
+                    type: 'bar',
+                    data: {
+                        labels: performanceData.map(d => d.display),
+                        datasets: [{
+                            label: 'Error Rate (%)',
+                            data: performanceData.map(d => d.error_rate),
+                            backgroundColor: performanceData.map((d, i) => 
+                                d.error_rate === 0 ? 'rgba(34, 197, 94, 0.8)' : 
+                                d.error_rate < 1 ? 'rgba(255, 206, 86, 0.8)' : 
+                                colors[i % colors.length]
+                            ),
+                            borderColor: performanceData.map((d, i) => 
+                                d.error_rate === 0 ? 'rgba(34, 197, 94, 1)' : 
+                                d.error_rate < 1 ? 'rgba(255, 206, 86, 1)' : 
+                                colors[i % colors.length].replace('0.8', '1')
+                            ),
+                            borderWidth: 2
+                        }]
+                    },
+                    options: {
+                        responsive: true,
+                        maintainAspectRatio: false,
+                        scales: {
+                            y: {
+                                beginAtZero: true,
+                                title: {
+                                    display: true,
+                                    text: 'Error Rate (%)'
+                                }
+                            }
+                        },
+                        plugins: {
+                            legend: {
+                                display: false
+                            },
+                            title: {
+                                display: true,
+                                text: 'Error Rate Comparison - Lower is Better'
+                            }
+                        }
+                    }
+                });
+            }
+            
+            // P95 Response Time Chart
+            const p95Ctx = document.getElementById('p95Chart');
+            if (p95Ctx) {
+                new Chart(p95Ctx, {
+                    type: 'bar',
+                    data: {
+                        labels: performanceData.map(d => d.display),
+                        datasets: [{
+                            label: 'P95 Response Time (ms)',
+                            data: performanceData.map(d => d.p95_response),
+                            backgroundColor: performanceData.map((d, i) => colors[i % colors.length]),
+                            borderColor: performanceData.map((d, i) => colors[i % colors.length].replace('0.8', '1')),
+                            borderWidth: 2
+                        }]
+                    },
+                    options: {
+                        responsive: true,
+                        maintainAspectRatio: false,
+                        scales: {
+                            y: {
+                                beginAtZero: true,
+                                title: {
+                                    display: true,
+                                    text: 'P95 Response Time (ms)'
+                                }
+                            }
+                        },
+                        plugins: {
+                            legend: {
+                                display: false
+                            },
+                            title: {
+                                display: true,
+                                text: 'P95 Response Time Comparison - Lower is Better'
+                            }
+                        }
+                    }
+                });
+            }
+        </script>
 """
+    
+    # Initialize resource_data early (will be populated later)
+    resource_data = {}
     
     # Add resource utilization section (for all test modes)
     if True:  # Always include resource metrics
@@ -714,7 +939,51 @@ def generate_html_report(results_dir, test_mode, timestamp):
         import subprocess
         resource_data = {}
         
+        # Try to load resource metrics from database first
+        try:
+            script_dir = Path(__file__).parent
+            sys.path.insert(0, str(script_dir))
+            from db_client import get_latest_test_run_per_api
+            from analyze_resource_metrics import analyze_resource_metrics
+            
+            # Get latest test runs to find test_run_ids
+            latest_test_runs = get_latest_test_run_per_api(test_mode)
+        
+            for api in apis:
+                api_name = api['name']
+                if api_name in latest_test_runs:
+                    test_run = latest_test_runs[api_name]
+                    test_run_id = test_run.get('id')
+                    
+                    if test_run_id:
+                        # Find JSON file for this API
+                        api_dir = results_path / api_name
+                        if api_dir.exists():
+                            json_files = list(api_dir.glob("*-throughput-*.json"))
+                            if json_files:
+                                latest_json = max(json_files, key=lambda p: p.stat().st_mtime)
+                                
+                                # Analyze using database
+                                try:
+                                    result = analyze_resource_metrics(
+                                        str(latest_json), 
+                                        None,  # No CSV file
+                                        test_mode,
+                                        test_run_id
+                                    )
+                                    if result:
+                                        resource_data[api_name] = result
+                                except Exception as e:
+                                    print(f"Error loading resource metrics from database for {api_name}: {e}", file=sys.stderr)
+        except Exception as e:
+            print(f"Warning: Could not load from database ({e}), falling back to CSV files", file=sys.stderr)
+            latest_test_runs = {}
+        
+        # Fall back to CSV files if database didn't provide data
         for api in apis:
+            if api['name'] in resource_data:
+                continue  # Already loaded from database
+            
             api_dir = results_path / api['name']
             if not api_dir.exists():
                 continue
@@ -752,12 +1021,12 @@ def generate_html_report(results_dir, test_mode, timestamp):
             if not latest_json or not latest_metrics_csv:
                 continue
             
-            # Analyze resource metrics
+            # Analyze resource metrics from CSV
             try:
                 script_dir = Path(__file__).parent
                 result = subprocess.run(
                     ['python3', str(script_dir / 'analyze-resource-metrics.py'), 
-                     str(latest_json), str(latest_metrics_csv), test_mode],
+                     str(latest_json), test_mode, str(latest_metrics_csv)],
                     capture_output=True,
                     text=True,
                     timeout=300  # Increased timeout for large JSON files (5 minutes)
@@ -766,6 +1035,568 @@ def generate_html_report(results_dir, test_mode, timestamp):
                     resource_data[api['name']] = json.loads(result.stdout)
             except Exception as e:
                 print(f"Error loading resource metrics for {api['name']}: {e}", file=sys.stderr)
+        
+        # Calculate AWS EKS costs after resource data is loaded
+        if successful_apis:
+            try:
+                script_dir = Path(__file__).parent
+                sys.path.insert(0, str(script_dir))
+                from calculate_aws_costs import calculate_cost_for_api
+                
+                # Load pod configuration
+                pod_config = {}
+                pod_config_path = script_dir / 'pod_config.json'
+                if pod_config_path.exists():
+                    try:
+                        with open(pod_config_path, 'r') as f:
+                            pod_config = json.load(f)
+                    except Exception as e:
+                        print(f"Warning: Could not load pod config ({e}), using defaults", file=sys.stderr)
+                
+                default_config = pod_config.get('default', {
+                    'num_pods': 1,
+                    'cpu_cores_per_pod': 1.0,
+                    'memory_gb_per_pod': 2.0,
+                    'storage_gb_per_pod': 20.0
+                })
+                api_configs = pod_config.get('apis', {})
+                
+                # Calculate costs for each API
+                cost_data = []
+                for api in successful_apis:
+                    metrics = api['metrics']
+                    api_name = api['name']
+                    
+                    # Get pod configuration for this API (or use default)
+                    api_pod_config = api_configs.get(api_name, default_config)
+                    num_pods = api_pod_config.get('num_pods', default_config['num_pods'])
+                    cpu_cores_per_pod = api_pod_config.get('cpu_cores_per_pod', default_config['cpu_cores_per_pod'])
+                    storage_gb_per_pod = api_pod_config.get('storage_gb_per_pod', default_config['storage_gb_per_pod'])
+                    
+                    # Get resource metrics if available
+                    avg_cpu = 0.0
+                    avg_memory_mb = 0.0
+                    memory_limit_mb = 2048.0  # Default 2GB limit
+                    
+                    if api_name in resource_data:
+                        overall = resource_data[api_name].get('overall', {})
+                        avg_cpu = overall.get('avg_cpu_percent', 0.0)
+                        avg_memory_mb = overall.get('avg_memory_mb', 0.0)
+                        memory_limit_mb = overall.get('max_memory_mb', 2048.0) or 2048.0
+                    
+                    # Debug: Check if resource data is missing
+                    if avg_cpu == 0.0 and avg_memory_mb == 0.0:
+                        # Resource metrics might not be available - this is common for smoke tests
+                        # or when metrics collection failed. Efficiency will show 0% in this case.
+                        pass
+                    
+                    # Use configured memory per pod, or calculate from limit
+                    memory_gb_per_pod = api_pod_config.get('memory_gb_per_pod')
+                    if memory_gb_per_pod is None:
+                        memory_gb_per_pod = memory_limit_mb / 1024.0
+                    
+                    # Estimate data transfer (rough estimate: 1KB per request)
+                    # Ensure minimum value to avoid zero costs
+                    data_transfer_gb = max((metrics['total_samples'] * 0.001) / 1024.0, 0.000001)
+                    
+                    # Calculate costs with pod configuration
+                    costs = calculate_cost_for_api(
+                        api_name=api_name,
+                        duration_seconds=metrics.get('duration_seconds', 0.0),
+                        total_requests=metrics['total_samples'],
+                        avg_cpu_percent=avg_cpu,
+                        avg_memory_mb=avg_memory_mb,
+                        memory_limit_mb=memory_limit_mb,
+                        data_transfer_gb=data_transfer_gb,
+                        num_pods=num_pods,
+                        cpu_cores_per_pod=cpu_cores_per_pod,
+                        memory_gb_per_pod=memory_gb_per_pod,
+                        storage_gb_per_pod=storage_gb_per_pod
+                    )
+                    
+                    cost_data.append({
+                        'api_name': api_name,
+                        'display': api['display'],
+                        **costs
+                    })
+                
+                # Generate cost analytics section
+                html_content += """
+        <div class="comparison-section">
+            <h2>💰 AWS EKS Cost Analytics</h2>
+            <div class="insight-box">
+                <p><strong>Cost Model:</strong> AWS EKS with EC2 instances (auto-selected based on pod requirements), Application Load Balancer, EBS storage, and data transfer costs. Costs are estimated based on actual resource utilization during tests.</p>
+                <p><strong>Note:</strong> These are estimated costs for running on AWS EKS. Actual costs may vary based on instance types, regions, reserved instances, and other factors.</p>
+            </div>
+            
+            <h3>Cost Summary Table</h3>
+            <div style="margin-bottom: 15px; padding: 10px; background-color: #f8f9fa; border-left: 4px solid #007bff; border-radius: 4px;">
+                <p style="margin: 0 0 10px 0; color: #333; font-size: 14px;">
+                    <strong>Pod Configuration:</strong> The cost calculator automatically selects the most cost-effective EC2 instance type based on pod requirements. Configured values:
+                </p>
+                <table style="width: 100%; border-collapse: collapse; font-size: 13px; margin-top: 5px;">
+                    <thead>
+                        <tr style="background-color: #e9ecef;">
+                            <th style="padding: 6px; text-align: left; border: 1px solid #dee2e6;">API</th>
+                            <th style="padding: 6px; text-align: center; border: 1px solid #dee2e6;">Pods</th>
+                            <th style="padding: 6px; text-align: center; border: 1px solid #dee2e6;">CPU/Pod</th>
+                            <th style="padding: 6px; text-align: center; border: 1px solid #dee2e6;">Memory/Pod</th>
+                            <th style="padding: 6px; text-align: center; border: 1px solid #dee2e6;">Storage/Pod</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+"""
+                
+                # Add pod configuration rows
+                for api in successful_apis:
+                    api_name = api['name']
+                    api_display = api['display']
+                    api_pod_config = api_configs.get(api_name, default_config)
+                    num_pods = api_pod_config.get('num_pods', default_config['num_pods'])
+                    cpu_cores = api_pod_config.get('cpu_cores_per_pod', default_config['cpu_cores_per_pod'])
+                    memory_gb = api_pod_config.get('memory_gb_per_pod', default_config['memory_gb_per_pod'])
+                    storage_gb = api_pod_config.get('storage_gb_per_pod', default_config['storage_gb_per_pod'])
+                    
+                    html_content += f"""
+                        <tr>
+                            <td style="padding: 6px; border: 1px solid #dee2e6;"><strong>{api_display}</strong></td>
+                            <td style="padding: 6px; text-align: center; border: 1px solid #dee2e6;">{num_pods}</td>
+                            <td style="padding: 6px; text-align: center; border: 1px solid #dee2e6;">{cpu_cores:.1f} cores</td>
+                            <td style="padding: 6px; text-align: center; border: 1px solid #dee2e6;">{memory_gb:.1f} GB</td>
+                            <td style="padding: 6px; text-align: center; border: 1px solid #dee2e6;">{storage_gb:.1f} GB</td>
+                        </tr>
+"""
+                
+                html_content += """
+                    </tbody>
+                </table>
+            </div>
+            <table style="width: 100%; table-layout: auto;">
+                <thead>
+                    <tr>
+                        <th style="text-align: left;">API</th>
+                        <th style="text-align: center;">Pods</th>
+                        <th style="text-align: left;">Pod Size</th>
+                        <th style="text-align: center;">Instance Type</th>
+                        <th style="text-align: center;">Instances</th>
+                        <th style="text-align: right;">Total Cost ($)</th>
+                        <th style="text-align: right;">Cost/1K Requests ($)</th>
+                        <th style="text-align: right;">Instance Cost ($)</th>
+                        <th style="text-align: right;">Cluster Cost ($)</th>
+                        <th style="text-align: right;">ALB Cost ($)</th>
+                        <th style="text-align: right;">Storage Cost ($)</th>
+                        <th style="text-align: right;">Network Cost ($)</th>
+                        <th style="text-align: right;">CPU Efficiency</th>
+                        <th style="text-align: right;">Memory Efficiency</th>
+                    </tr>
+                </thead>
+                <tbody>
+"""
+                
+                for cost_info in cost_data:
+                    # Format costs as dollar-cent amounts rounded to 6 decimal places
+                    def format_cost(cost):
+                        # Round to 6 decimal places and format as currency
+                        # Ensure minimum display value to avoid showing zero (must be >= 0.000001 to show 6 decimals)
+                        rounded = round(max(cost, 0.000001), 6)
+                        return f"${rounded:.6f}"
+                    
+                    # Format efficiency percentages
+                    def format_percentage(value):
+                        if value == 0.0:
+                            return "0.0%"
+                        elif value < 0.1:
+                            return f"{value:.2f}%"
+                        else:
+                            return f"{value:.1f}%"
+                    
+                    # Format pod size
+                    pod_size = f"{cost_info['cpu_cores_per_pod']:.1f} CPU, {cost_info['memory_gb_per_pod']:.1f}GB RAM"
+                    
+                    # Ensure all cost values are non-zero (use 0.000001 minimum to show 6 decimals)
+                    instance_cost_val = cost_info.get('instance_effective_cost')
+                    instance_cost = max(instance_cost_val if instance_cost_val is not None else 0, 0.000001)
+                    
+                    cluster_cost_val = cost_info.get('cluster_cost')
+                    cluster_cost = max(cluster_cost_val if cluster_cost_val is not None else 0, 0.000001)
+                    
+                    alb_cost_val = cost_info.get('alb_cost')
+                    alb_cost = max(alb_cost_val if alb_cost_val is not None else 0, 0.000001)
+                    
+                    storage_cost_val = cost_info.get('storage_cost')
+                    storage_cost = max(storage_cost_val if storage_cost_val is not None else 0, 0.000001)
+                    
+                    network_cost_val = cost_info.get('network_cost')
+                    network_cost = max(network_cost_val if network_cost_val is not None else 0, 0.000001)
+                    
+                    html_content += f"""
+                    <tr>
+                        <td><strong>{cost_info['display']}</strong></td>
+                        <td style="text-align: center;">{cost_info['num_pods']}</td>
+                        <td>{pod_size}</td>
+                        <td style="text-align: center;">{cost_info['instance_type']}</td>
+                        <td style="text-align: center;">{cost_info['instances_needed']}</td>
+                        <td style="text-align: right;">{format_cost(cost_info['total_cost'])}</td>
+                        <td style="text-align: right;">{format_cost(cost_info['cost_per_1000_requests'])}</td>
+                        <td style="text-align: right;">{format_cost(instance_cost)}</td>
+                        <td style="text-align: right;">{format_cost(cluster_cost)}</td>
+                        <td style="text-align: right;">{format_cost(alb_cost)}</td>
+                        <td style="text-align: right;">{format_cost(storage_cost)}</td>
+                        <td style="text-align: right;">{format_cost(network_cost)}</td>
+                        <td style="text-align: right;">{format_percentage(cost_info['cpu_efficiency']*100)}</td>
+                        <td style="text-align: right;">{format_percentage(cost_info['memory_efficiency']*100)}</td>
+                    </tr>
+"""
+                
+                html_content += """
+                </tbody>
+            </table>
+            
+            <div style="margin-top: 20px; padding: 15px; background-color: #f8f9fa; border-left: 4px solid #007bff; border-radius: 4px;">
+                <h4 style="margin-top: 0; color: #333;">Column Definitions</h4>
+                <table style="width: 100%; border-collapse: collapse; font-size: 13px;">
+                    <thead>
+                        <tr style="background-color: #e9ecef;">
+                            <th style="padding: 8px; text-align: left; border: 1px solid #dee2e6; width: 20%;">Column</th>
+                            <th style="padding: 8px; text-align: left; border: 1px solid #dee2e6; width: 40%;">Meaning</th>
+                            <th style="padding: 8px; text-align: left; border: 1px solid #dee2e6; width: 40%;">Calculation</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <tr>
+                            <td style="padding: 8px; border: 1px solid #dee2e6;"><strong>Pods</strong></td>
+                            <td style="padding: 8px; border: 1px solid #dee2e6;">Number of pod replicas configured for this API</td>
+                            <td style="padding: 8px; border: 1px solid #dee2e6;">Configured in <code>pod_config.json</code> (currently all APIs use 1 pod for fair comparison)</td>
+                        </tr>
+                        <tr>
+                            <td style="padding: 8px; border: 1px solid #dee2e6;"><strong>Pod Size</strong></td>
+                            <td style="padding: 8px; border: 1px solid #dee2e6;">CPU cores and memory allocated per pod</td>
+                            <td style="padding: 8px; border: 1px solid #dee2e6;">From <code>pod_config.json</code>: CPU cores per pod and memory (GB) per pod</td>
+                        </tr>
+                        <tr>
+                            <td style="padding: 8px; border: 1px solid #dee2e6;"><strong>Instance Type</strong></td>
+                            <td style="padding: 8px; border: 1px solid #dee2e6;">EC2 instance type automatically selected based on pod requirements</td>
+                            <td style="padding: 8px; border: 1px solid #dee2e6;">Smallest cost-effective instance type that can fit all pods (considers 20% overhead for system/kubelet). Selected from t3.small, t3.medium, t3.large, t3.xlarge, t3.2xlarge.</td>
+                        </tr>
+                        <tr>
+                            <td style="padding: 8px; border: 1px solid #dee2e6;"><strong>Instances</strong></td>
+                            <td style="padding: 8px; border: 1px solid #dee2e6;">Number of EC2 instances needed to run all pods</td>
+                            <td style="padding: 8px; border: 1px solid #dee2e6;">Calculated as: <code>ceil(num_pods / pods_per_instance)</code> where pods_per_instance is limited by CPU and memory capacity of the instance type</td>
+                        </tr>
+                        <tr>
+                            <td style="padding: 8px; border: 1px solid #dee2e6;"><strong>Total Cost ($)</strong></td>
+                            <td style="padding: 8px; border: 1px solid #dee2e6;">Total cost for running this API during the test duration</td>
+                            <td style="padding: 8px; border: 1px solid #dee2e6;">Sum of: Instance Cost + Cluster Cost + ALB Cost + Storage Cost + Network Cost</td>
+                        </tr>
+                        <tr>
+                            <td style="padding: 8px; border: 1px solid #dee2e6;"><strong>Cost/1K Requests ($)</strong></td>
+                            <td style="padding: 8px; border: 1px solid #dee2e6;">Cost per 1,000 requests processed</td>
+                            <td style="padding: 8px; border: 1px solid #dee2e6;">Calculated as: <code>(Total Cost / total_requests) × 1000</code>. Useful for comparing cost efficiency across APIs.</td>
+                        </tr>
+                        <tr>
+                            <td style="padding: 8px; border: 1px solid #dee2e6;"><strong>Instance Cost ($)</strong></td>
+                            <td style="padding: 8px; border: 1px solid #dee2e6;">EC2 instance compute cost (adjusted for resource utilization)</td>
+                            <td style="padding: 8px; border: 1px solid #dee2e6;">Formula: <code>instance_hourly_cost × instances_needed × duration_hours × max(cpu_efficiency, memory_efficiency)</code>. If efficiency is 0% (no metrics), uses base cost. Efficiency = actual_utilization / allocated_resources.</td>
+                        </tr>
+                        <tr>
+                            <td style="padding: 8px; border: 1px solid #dee2e6;"><strong>Cluster Cost ($)</strong></td>
+                            <td style="padding: 8px; border: 1px solid #dee2e6;">EKS cluster management cost</td>
+                            <td style="padding: 8px; border: 1px solid #dee2e6;">Calculated as: <code>$0.10/hour × duration_hours</code>. Fixed cost for EKS cluster management regardless of workload size.</td>
+                        </tr>
+                        <tr>
+                            <td style="padding: 8px; border: 1px solid #dee2e6;"><strong>ALB Cost ($)</strong></td>
+                            <td style="padding: 8px; border: 1px solid #dee2e6;">Application Load Balancer cost</td>
+                            <td style="padding: 8px; border: 1px solid #dee2e6;">Calculated as: <code>($0.0225/hour × duration_hours) + ($0.008/GB × data_processed_gb)</code>. Includes base hourly cost and LCU (Load Balancer Capacity Unit) charges for data processed.</td>
+                        </tr>
+                        <tr>
+                            <td style="padding: 8px; border: 1px solid #dee2e6;"><strong>Storage Cost ($)</strong></td>
+                            <td style="padding: 8px; border: 1px solid #dee2e6;">EBS storage cost for pod volumes</td>
+                            <td style="padding: 8px; border: 1px solid #dee2e6;">Calculated as: <code>$0.08/GB/month × (storage_gb_per_pod × num_pods) × (duration_hours / 720)</code>. Based on gp3 EBS storage pricing (converted to hourly rate).</td>
+                        </tr>
+                        <tr>
+                            <td style="padding: 8px; border: 1px solid #dee2e6;"><strong>Network Cost ($)</strong></td>
+                            <td style="padding: 8px; border: 1px solid #dee2e6;">Data transfer out cost</td>
+                            <td style="padding: 8px; border: 1px solid #dee2e6;">Calculated as: <code>$0.09/GB × data_transfer_gb</code>. Estimated from request count (1KB per request). Only outbound data transfer is charged.</td>
+                        </tr>
+                        <tr>
+                            <td style="padding: 8px; border: 1px solid #dee2e6;"><strong>CPU Efficiency</strong></td>
+                            <td style="padding: 8px; border: 1px solid #dee2e6;">Percentage of allocated CPU actually utilized</td>
+                            <td style="padding: 8px; border: 1px solid #dee2e6;">Calculated as: <code>(avg_cpu_percent / 100) × 100%</code>. Shows how efficiently CPU resources are used. 0% means no resource metrics were collected (common for short smoke tests).</td>
+                        </tr>
+                        <tr>
+                            <td style="padding: 8px; border: 1px solid #dee2e6;"><strong>Memory Efficiency</strong></td>
+                            <td style="padding: 8px; border: 1px solid #dee2e6;">Percentage of allocated memory actually utilized</td>
+                            <td style="padding: 8px; border: 1px solid #dee2e6;">Calculated as: <code>(avg_memory_mb / memory_limit_mb) × 100%</code>. Shows how efficiently memory resources are used. 0% means no resource metrics were collected (common for short smoke tests).</td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+            
+            <p style="margin-top: 15px; color: #666; font-size: 12px; font-style: italic;">
+                <strong>Note on Efficiency:</strong> CPU and Memory efficiency are calculated based on actual resource utilization during the test. 
+                If efficiency shows 0%, it means resource metrics were not collected or the API had minimal resource usage during the test. 
+                This is common for very short smoke tests. For accurate efficiency metrics, run longer tests (full or saturation mode) with resource monitoring enabled.
+            </p>
+            
+            <p style="margin-top: 10px; color: #666; font-size: 12px; font-style: italic;">
+                <strong>Note on Pricing:</strong> All costs are estimated based on AWS us-east-1 on-demand pricing as of 2024. 
+                Actual costs may vary based on instance types, regions, reserved instances, spot instances, and other factors. 
+                These estimates assume a single EKS cluster shared across all APIs.
+            </p>
+            
+            <div class="resource-section">
+                <h4>Total Cost Comparison</h4>
+                <div class="chart-container">
+                    <canvas id="totalCostChart"></canvas>
+                </div>
+            </div>
+            
+            <div class="resource-section">
+                <h4>Cost per 1,000 Requests Comparison</h4>
+                <div class="chart-container">
+                    <canvas id="costPerRequestChart"></canvas>
+                </div>
+            </div>
+            
+            <div class="resource-section">
+                <h4>Cost Breakdown by Component</h4>
+                <div class="chart-container">
+                    <canvas id="costBreakdownChart"></canvas>
+                </div>
+            </div>
+            
+            <div class="resource-section">
+                <h4>Resource Efficiency vs Cost</h4>
+                <div class="chart-container">
+                    <canvas id="efficiencyCostChart"></canvas>
+                </div>
+            </div>
+            
+            <script>
+                // Cost data
+                const costData = """ + json.dumps(cost_data) + """;
+                
+                // Total Cost Chart
+                const totalCostCtx = document.getElementById('totalCostChart');
+                if (totalCostCtx) {
+                    new Chart(totalCostCtx, {
+                        type: 'bar',
+                        data: {
+                            labels: costData.map(d => d.display),
+                            datasets: [{
+                                label: 'Total Cost ($)',
+                                data: costData.map(d => d.total_cost),
+                                backgroundColor: costData.map((d, i) => colors[i % colors.length]),
+                                borderColor: costData.map((d, i) => colors[i % colors.length].replace('0.8', '1')),
+                                borderWidth: 2
+                            }]
+                        },
+                        options: {
+                            responsive: true,
+                            maintainAspectRatio: false,
+                            scales: {
+                                y: {
+                                    beginAtZero: true,
+                                    title: {
+                                        display: true,
+                                        text: 'Total Cost (USD)'
+                                    }
+                                }
+                            },
+                            plugins: {
+                                legend: {
+                                    display: false
+                                },
+                                title: {
+                                    display: true,
+                                    text: 'Total AWS EKS Cost per API - Lower is Better'
+                                }
+                            }
+                        }
+                    });
+                }
+                
+                // Cost per Request Chart
+                const costPerRequestCtx = document.getElementById('costPerRequestChart');
+                if (costPerRequestCtx) {
+                    new Chart(costPerRequestCtx, {
+                        type: 'bar',
+                        data: {
+                            labels: costData.map(d => d.display),
+                            datasets: [{
+                                label: 'Cost per 1,000 Requests ($)',
+                                data: costData.map(d => d.cost_per_1000_requests),
+                                backgroundColor: costData.map((d, i) => colors[i % colors.length]),
+                                borderColor: costData.map((d, i) => colors[i % colors.length].replace('0.8', '1')),
+                                borderWidth: 2
+                            }]
+                        },
+                        options: {
+                            responsive: true,
+                            maintainAspectRatio: false,
+                            scales: {
+                                y: {
+                                    beginAtZero: true,
+                                    title: {
+                                        display: true,
+                                        text: 'Cost per 1,000 Requests (USD)'
+                                    }
+                                }
+                            },
+                            plugins: {
+                                legend: {
+                                    display: false
+                                },
+                                title: {
+                                    display: true,
+                                    text: 'Cost Efficiency: Cost per 1,000 Requests - Lower is Better'
+                                }
+                            }
+                        }
+                    });
+                }
+                
+                // Cost Breakdown Chart
+                const costBreakdownCtx = document.getElementById('costBreakdownChart');
+                if (costBreakdownCtx) {
+                    new Chart(costBreakdownCtx, {
+                        type: 'bar',
+                        data: {
+                            labels: costData.map(d => d.display),
+                            datasets: [
+                                {
+                                    label: 'Instance',
+                                    data: costData.map(d => d.instance_effective_cost),
+                                    backgroundColor: 'rgba(54, 162, 235, 0.8)'
+                                },
+                                {
+                                    label: 'Cluster',
+                                    data: costData.map(d => d.cluster_cost),
+                                    backgroundColor: 'rgba(255, 99, 132, 0.8)'
+                                },
+                                {
+                                    label: 'ALB',
+                                    data: costData.map(d => d.alb_cost),
+                                    backgroundColor: 'rgba(75, 192, 192, 0.8)'
+                                },
+                                {
+                                    label: 'Storage',
+                                    data: costData.map(d => d.storage_cost),
+                                    backgroundColor: 'rgba(255, 206, 86, 0.8)'
+                                },
+                                {
+                                    label: 'Network',
+                                    data: costData.map(d => d.network_cost),
+                                    backgroundColor: 'rgba(153, 102, 255, 0.8)'
+                                }
+                            ]
+                        },
+                        options: {
+                            responsive: true,
+                            maintainAspectRatio: false,
+                            scales: {
+                                x: {
+                                    stacked: true
+                                },
+                                y: {
+                                    stacked: true,
+                                    beginAtZero: true,
+                                    title: {
+                                        display: true,
+                                        text: 'Cost (USD)'
+                                    }
+                                }
+                            },
+                            plugins: {
+                                legend: {
+                                    display: true,
+                                    position: 'top'
+                                },
+                                title: {
+                                    display: true,
+                                    text: 'Cost Breakdown by Component'
+                                }
+                            }
+                        }
+                    });
+                }
+                
+                // Efficiency vs Cost Chart
+                const efficiencyCostCtx = document.getElementById('efficiencyCostChart');
+                if (efficiencyCostCtx) {
+                    new Chart(efficiencyCostCtx, {
+                        type: 'scatter',
+                        data: {
+                            datasets: [{
+                                label: 'APIs',
+                                data: costData.map(d => ({
+                                    x: (d.cpu_efficiency + d.memory_efficiency) / 2 * 100,
+                                    y: d.cost_per_1000_requests,
+                                    label: d.display
+                                })),
+                                backgroundColor: costData.map((d, i) => colors[i % colors.length]),
+                                borderColor: costData.map((d, i) => colors[i % colors.length].replace('0.8', '1')),
+                                borderWidth: 2,
+                                pointRadius: 8
+                            }]
+                        },
+                        options: {
+                            responsive: true,
+                            maintainAspectRatio: false,
+                            scales: {
+                                x: {
+                                    title: {
+                                        display: true,
+                                        text: 'Average Resource Efficiency (%)'
+                                    },
+                                    min: 0,
+                                    max: 100
+                                },
+                                y: {
+                                    title: {
+                                        display: true,
+                                        text: 'Cost per 1,000 Requests (USD)'
+                                    },
+                                    beginAtZero: true
+                                }
+                            },
+                            plugins: {
+                                legend: {
+                                    display: false
+                                },
+                                title: {
+                                    display: true,
+                                    text: 'Resource Efficiency vs Cost Efficiency'
+                                },
+                                tooltip: {
+                                    callbacks: {
+                                        label: function(context) {
+                                            const point = context.raw;
+                                            const api = costData.find(d => 
+                                                Math.abs((d.cpu_efficiency + d.memory_efficiency) / 2 * 100 - point.x) < 0.1 &&
+                                                Math.abs(d.cost_per_1000_requests - point.y) < 0.0001
+                                            );
+                                            return api ? `${api.display}: ${point.y.toFixed(4)} $/1K req, ${point.x.toFixed(1)}% efficiency` : '';
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    });
+                }
+            </script>
+        </div>
+"""
+            except Exception as e:
+                print(f"Warning: Could not calculate AWS costs ({e})", file=sys.stderr)
+                html_content += """
+        <div class="comparison-section">
+            <h2>💰 AWS EKS Cost Analytics</h2>
+            <div class="insight-box">
+                <p>Cost analytics are currently unavailable. Please ensure the cost calculation module is available.</p>
+            </div>
+        </div>
+"""
         
         if resource_data:
             html_content += """

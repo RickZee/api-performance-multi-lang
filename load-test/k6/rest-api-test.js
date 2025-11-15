@@ -21,8 +21,11 @@ const apiPort = __ENV.PORT || 8081;
 const apiPath = __ENV.PATH || '/api/v1/events';
 const apiUrl = `http://${apiHost}:${apiPort}${apiPath}`;
 
+// Payload size is configured via PAYLOAD_SIZE environment variable (4k, 8k, 32k, 64k)
+// If not specified, uses default small payload (~400-500 bytes)
+
 export default function () {
-    // Generate event payload
+    // Generate event payload (size controlled by PAYLOAD_SIZE env var)
     const payload = generateEventPayload();
     
     // Set headers

@@ -56,3 +56,11 @@ Thumbs.db
 # Generated data (if applicable)
 load-test/shared/data/generated/
 
+# Python cache files
+__pycache__/
+**/__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+

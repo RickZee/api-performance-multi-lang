@@ -49,6 +49,36 @@ services:
           memory: 1G
           cpus: '1.0'
 
+  # PostgreSQL Metrics Database
+  postgres-metrics:
+    image: postgres:15-alpine
+    container_name: postgres_metrics
+    environment:
+      POSTGRES_DB: performance_metrics
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: password
+      POSTGRES_INITDB_ARGS: "-E UTF8 --locale=C"
+    ports:
+      - "5433:5432"
+    volumes:
+      - postgres_data_metrics:/var/lib/postgresql/data
+      - ./load-test/shared/migrations:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d performance_metrics"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - car_network
+    deploy:
+      resources:
+        limits:
+          memory: 1G
+          cpus: '1.0'
+        reservations:
+          memory: 256M
+          cpus: '0.5'
+
   # Producer API - Spring Boot REST
   producer-api-java-rest:
     build: ./producer-api-java-rest
@@ -245,6 +275,7 @@ services:
 
 volumes:
   postgres_data_large:
+  postgres_data_metrics:
 
 networks:
   car_network:

@@ -10,7 +10,13 @@ RUN apk add --no-cache \
     netcat-openbsd \
     python3 \
     py3-pip \
+    postgresql-dev \
+    gcc \
+    musl-dev \
     && rm -rf /var/cache/apk/*
+
+# Install Python dependencies
+RUN pip3 install --no-cache-dir psycopg2-binary
 
 # Create directories for test scripts and results
 RUN mkdir -p /k6/scripts /k6/results /k6/proto

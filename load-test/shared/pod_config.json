@@ -1,0 +1,47 @@
+{
+  "default": {
+    "num_pods": 1,
+    "cpu_cores_per_pod": 1.0,
+    "memory_gb_per_pod": 2.0,
+    "storage_gb_per_pod": 20.0
+  },
+  "apis": {
+    "producer-api-java-rest": {
+      "num_pods": 1,
+      "cpu_cores_per_pod": 1.0,
+      "memory_gb_per_pod": 2.0,
+      "storage_gb_per_pod": 20.0
+    },
+    "producer-api-java-grpc": {
+      "num_pods": 1,
+      "cpu_cores_per_pod": 1.0,
+      "memory_gb_per_pod": 2.0,
+      "storage_gb_per_pod": 20.0
+    },
+    "producer-api-rust-rest": {
+      "num_pods": 1,
+      "cpu_cores_per_pod": 1.0,
+      "memory_gb_per_pod": 2.0,
+      "storage_gb_per_pod": 20.0
+    },
+    "producer-api-rust-grpc": {
+      "num_pods": 1,
+      "cpu_cores_per_pod": 1.0,
+      "memory_gb_per_pod": 2.0,
+      "storage_gb_per_pod": 20.0
+    },
+    "producer-api-go-rest": {
+      "num_pods": 1,
+      "cpu_cores_per_pod": 1.0,
+      "memory_gb_per_pod": 2.0,
+      "storage_gb_per_pod": 20.0
+    },
+    "producer-api-go-grpc": {
+      "num_pods": 1,
+      "cpu_cores_per_pod": 1.0,
+      "memory_gb_per_pod": 2.0,
+      "storage_gb_per_pod": 20.0
+    }
+  }
+}
+
