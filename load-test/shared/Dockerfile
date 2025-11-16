@@ -16,7 +16,8 @@ RUN apk add --no-cache \
     && rm -rf /var/cache/apk/*
 
 # Install Python dependencies
-RUN pip3 install --no-cache-dir psycopg2-binary
+# Use --break-system-packages flag for Alpine Linux Python PEP 668 protection
+RUN pip3 install --no-cache-dir --break-system-packages psycopg2-binary
 
 # Create directories for test scripts and results
 RUN mkdir -p /k6/scripts /k6/results /k6/proto
