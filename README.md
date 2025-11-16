@@ -29,6 +29,7 @@ All APIs implement the same event processing functionality, allowing for fair pe
 - Java 17+ (for Java APIs)
 - Rust 1.70+ (for Rust APIs)
 - PostgreSQL 15+ (via Docker)
+- **Disk Space**: See [System Requirements](#infrastructure-and-requirements) section for disk space requirements by test type
 
 ### Start Services
 
@@ -845,6 +846,54 @@ All services run in Docker containers on local infrastructure. The following res
 - **k6 Test Runner**: 2GB memory limit, 2 CPUs (512MB memory and 0.5 CPU reserved)
 
 All services communicate via a Docker bridge network, providing isolated container-to-container communication. These are local Docker containers running on your development machine, not production-grade infrastructure. Performance results should be interpreted in this context and may differ significantly in production environments with different hardware, network topology, and resource constraints.
+
+### Disk Space Requirements
+
+The test suite automatically checks Docker disk space before running tests and warns if insufficient space is available. The following are estimated disk space requirements per API test run:
+
+#### Smoke Tests
+
+- **Per API**: ~5MB
+- **All 6 APIs**: ~36MB
+- **Recommended free space**: ~50MB
+
+Smoke tests are quick validation tests with minimal data generation.
+
+#### Full Tests
+
+- **Per API (default payload)**: ~150MB
+- **Per API (4k payload)**: ~200MB
+- **Per API (8k payload)**: ~300MB
+- **Per API (32k payload)**: ~500MB
+- **Per API (64k payload)**: ~800MB
+- **All 6 APIs (default payload)**: ~1.1GB
+- **All 6 APIs (all payload sizes)**: ~10.8GB
+- **Recommended free space**: ~15GB (for all payload sizes)
+
+Full tests run for approximately 11 minutes per API and generate moderate amounts of test data, database records, JSON result files, and metrics.
+
+#### Saturation Tests
+
+- **Per API (default payload)**: ~200MB
+- **Per API (4k payload)**: ~300MB
+- **Per API (8k payload)**: ~500MB
+- **Per API (32k payload)**: ~1GB
+- **Per API (64k payload)**: ~1.5GB
+- **All 6 APIs (default payload)**: ~1.4GB
+- **All 6 APIs (all payload sizes)**: ~21.6GB
+- **Recommended free space**: ~30GB (for all payload sizes)
+
+Saturation tests run for approximately 14 minutes per API and generate the highest volume of test data as they push APIs to their maximum throughput capacity.
+
+**Note:** These estimates include:
+
+- Database data growth during test execution
+- JSON result files from k6
+- Metrics CSV files
+- Container logs
+- Temporary Docker build artifacts
+
+The test script includes a 50% safety margin when checking available space. If you encounter "No space left on device" errors, see the [Docker Disk Space Cleanup](#docker-disk-space-cleanup) section for cleanup instructions.
 
 ## Databases
 
