@@ -479,7 +479,7 @@ def insert_resource_metric_cli(
 if __name__ == '__main__':
     if len(sys.argv) < 2:
         print("Usage: db_client.py <command> [args...]")
-        print("Commands: test, create_test_run, get_latest, insert_resource_metric, insert_performance_metrics, update_test_run_completion")
+        print("Commands: test, create_test_run, get_latest, insert_resource_metric, insert_performance_metrics, insert_test_phase, update_test_run_completion")
         sys.exit(1)
     
     command = sys.argv[1]
@@ -541,6 +541,25 @@ if __name__ == '__main__':
             float(sys.argv[12]) if len(sys.argv) > 12 and sys.argv[12] else None,
             float(sys.argv[13]) if len(sys.argv) > 13 and sys.argv[13] else None,
             float(sys.argv[14]) if len(sys.argv) > 14 and sys.argv[14] else None
+        )
+        sys.exit(0 if success else 1)
+    elif command == 'insert_test_phase':
+        if len(sys.argv) < 13:
+            print("Usage: db_client.py insert_test_phase <test_run_id> <phase_number> <phase_name> <target_vus> <duration_seconds> <requests_count> <avg_cpu_percent> <max_cpu_percent> <avg_memory_mb> <max_memory_mb> <cpu_percent_per_request> <ram_mb_per_request>")
+            sys.exit(1)
+        success = insert_test_phase(
+            int(sys.argv[2]),
+            int(sys.argv[3]),
+            sys.argv[4] if sys.argv[4] != 'null' and sys.argv[4] != '' else None,
+            int(sys.argv[5]),
+            int(sys.argv[6]),
+            int(sys.argv[7]),
+            float(sys.argv[8]),
+            float(sys.argv[9]),
+            float(sys.argv[10]),
+            float(sys.argv[11]),
+            float(sys.argv[12]),
+            float(sys.argv[13])
         )
         sys.exit(0 if success else 1)
     elif command == 'update_test_run_completion':

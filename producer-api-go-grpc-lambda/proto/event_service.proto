@@ -1,0 +1,56 @@
+syntax = "proto3";
+
+package com.example.grpc;
+
+option go_package = "producer-api-go-grpc-lambda/proto";
+
+// Event processing service
+service EventService {
+  rpc ProcessEvent(EventRequest) returns (EventResponse);
+  rpc HealthCheck(HealthRequest) returns (HealthResponse);
+}
+
+// Request message for event processing
+message EventRequest {
+  EventHeader event_header = 1;
+  EventBody event_body = 2;
+}
+
+// Response message for event processing
+message EventResponse {
+  bool success = 1;
+  string message = 2;
+}
+
+// Event header
+message EventHeader {
+  string uuid = 1;
+  string event_name = 2;
+  string created_date = 3;
+  string saved_date = 4;
+  string event_type = 5;
+}
+
+// Event body containing entity updates
+message EventBody {
+  repeated EntityUpdate entities = 1;
+}
+
+// Entity update information
+message EntityUpdate {
+  string entity_type = 1;
+  string entity_id = 2;
+  map<string, string> updated_attributes = 3;
+}
+
+// Health check request
+message HealthRequest {
+  string service = 1;
+}
+
+// Health check response
+message HealthResponse {
+  bool healthy = 1;
+  string message = 2;
+}
+

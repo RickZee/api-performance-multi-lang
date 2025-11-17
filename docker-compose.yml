@@ -262,6 +262,14 @@ services:
     restart: "no"
     profiles:
       - k6-test
+    # Increase ephemeral port range to handle high connection counts
+    # This helps prevent "cannot assign requested address" errors with many VUs
+    sysctls:
+      - net.ipv4.ip_local_port_range=10000 65535
+      - net.core.somaxconn=4096
+      - net.ipv4.tcp_max_syn_backlog=4096
+      - net.ipv4.tcp_tw_reuse=1
+      - net.ipv4.tcp_fin_timeout=30
     deploy:
       resources:
         limits:

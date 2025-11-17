@@ -1,0 +1,40 @@
+# Terraform Variables Example
+# Copy this file to terraform.tfvars and customize for your environment
+# terraform.tfvars is in .gitignore and should not be committed
+
+# Project configuration
+project_name = "producer-api"
+aws_region   = "us-east-1"
+log_level    = "info"
+
+# Database configuration
+# Option 1: Full connection string (takes precedence if provided)
+# database_url = "postgresql://user:password@host:5432/dbname"
+
+# Option 2: Aurora endpoint with separate credentials
+# aurora_endpoint   = "your-aurora-endpoint.cluster-xxxxx.us-east-1.rds.amazonaws.com"
+# database_name     = "car_entities"
+# database_user     = "postgres"
+# database_password = "your-secure-password"
+
+# VPC configuration (optional, required if enable_vpc = true)
+# enable_vpc = false
+# vpc_id     = "vpc-xxxxx"
+# subnet_ids = ["subnet-xxxxx", "subnet-yyyyy"]
+
+# Database creation (optional)
+# enable_database = false
+
+# Lambda configuration
+# lambda_memory_size = 512
+# lambda_timeout     = 30
+
+# S3 bucket name (optional, will be auto-generated if not provided)
+# s3_bucket_name = ""
+
+# Tags
+# tags = {
+#   Environment = "dev"
+#   Project     = "api-performance"
+# }
+
