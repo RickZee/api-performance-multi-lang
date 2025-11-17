@@ -1,0 +1,157 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+Description: Producer API Go gRPC - Lambda Serverless Deployment with gRPC-Web
+
+Parameters:
+  DatabaseURL:
+    Type: String
+    Description: PostgreSQL database connection string
+    Default: postgresql://postgres:password@localhost:5432/car_entities
+  AuroraEndpoint:
+    Type: String
+    Description: Aurora Serverless endpoint (optional, used if DATABASE_URL not provided)
+    Default: ""
+  DatabaseName:
+    Type: String
+    Description: Database name (optional, used with AuroraEndpoint)
+    Default: car_entities
+  DatabaseUser:
+    Type: String
+    Description: Database user (optional, used with AuroraEndpoint)
+    Default: postgres
+  DatabasePassword:
+    Type: String
+    Description: Database password (optional, used with AuroraEndpoint)
+    NoEcho: true
+    Default: ""
+  LogLevel:
+    Type: String
+    Description: Logging level
+    Default: info
+    AllowedValues:
+      - debug
+      - info
+      - warn
+      - error
+  VpcId:
+    Type: AWS::EC2::VPC::Id
+    Description: VPC ID for Aurora Serverless access (optional)
+    Default: ""
+  SubnetIds:
+    Type: CommaDelimitedList
+    Description: Subnet IDs for Aurora Serverless access (optional)
+    Default: ""
+
+Globals:
+  Function:
+    Timeout: 30
+    MemorySize: 512
+    Runtime: provided.al2023
+    Architectures:
+      - x86_64
+    Environment:
+      Variables:
+        LOG_LEVEL: !Ref LogLevel
+
+Resources:
+  ProducerApiGrpcFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: producer-api-go-grpc-lambda
+      CodeUri: ./
+      Handler: bootstrap
+      Runtime: provided.al2023
+      Architectures:
+        - x86_64
+      MemorySize: 512
+      Timeout: 30
+      Environment:
+        Variables:
+          DATABASE_URL: !If
+            - HasDatabaseURL
+            - !Ref DatabaseURL
+            - !Sub "postgresql://${DatabaseUser}:${DatabasePassword}@${AuroraEndpoint}:5432/${DatabaseName}"
+          AURORA_ENDPOINT: !Ref AuroraEndpoint
+          DATABASE_NAME: !Ref DatabaseName
+          DATABASE_USER: !Ref DatabaseUser
+          DATABASE_PASSWORD: !Ref DatabasePassword
+          LOG_LEVEL: !Ref LogLevel
+      Policies:
+        - Version: '2012-10-17'
+          Statement:
+            - Effect: Allow
+              Action:
+                - logs:CreateLogGroup
+                - logs:CreateLogStream
+                - logs:PutLogEvents
+              Resource: '*'
+      VpcConfig: !If
+        - HasVpcConfig
+        - SecurityGroupIds:
+            - !Ref LambdaSecurityGroup
+          SubnetIds: !Ref SubnetIds
+        - !Ref AWS::NoValue
+      Events:
+        ApiEvent:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref ProducerApiHttpApi
+            Path: /{proxy+}
+            Method: ANY
+            PayloadFormatVersion: "2.0"
+
+  ProducerApiHttpApi:
+    Type: AWS::Serverless::HttpApi
+    Properties:
+      Name: producer-api-go-grpc-http-api
+      Description: HTTP API for Producer API Go gRPC Lambda with gRPC-Web support
+      CorsConfiguration:
+        AllowOrigins:
+          - "*"
+        AllowMethods:
+          - POST
+          - OPTIONS
+        AllowHeaders:
+          - Content-Type
+          - x-grpc-web
+          - Authorization
+        MaxAge: 300
+
+  LambdaSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Condition: HasVpcConfig
+    Properties:
+      GroupDescription: Security group for Lambda function to access Aurora Serverless
+      VpcId: !Ref VpcId
+      SecurityGroupEgress:
+        - IpProtocol: tcp
+          FromPort: 5432
+          ToPort: 5432
+          CidrIp: 0.0.0.0/0
+          Description: Allow outbound to Aurora Serverless
+
+Conditions:
+  HasDatabaseURL: !Not [!Equals [!Ref DatabaseURL, ""]]
+  HasVpcConfig: !And
+    - !Not [!Equals [!Ref VpcId, ""]]
+    - !Not [!Equals [!Join ["", !Ref SubnetIds], ""]]
+
+Outputs:
+  ApiUrl:
+    Description: API Gateway HTTP API endpoint URL for gRPC-Web
+    Value: !Sub "https://${ProducerApiHttpApi}.execute-api.${AWS::Region}.amazonaws.com"
+    Export:
+      Name: !Sub "${AWS::StackName}-ApiUrl"
+  
+  FunctionName:
+    Description: Lambda function name
+    Value: !Ref ProducerApiGrpcFunction
+    Export:
+      Name: !Sub "${AWS::StackName}-FunctionName"
+  
+  FunctionArn:
+    Description: Lambda function ARN
+    Value: !GetAtt ProducerApiGrpcFunction.Arn
+    Export:
+      Name: !Sub "${AWS::StackName}-FunctionArn"
+

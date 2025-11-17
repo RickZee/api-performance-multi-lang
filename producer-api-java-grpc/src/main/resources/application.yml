@@ -21,6 +21,20 @@ spring:
 grpc:
   server:
     port: 9090
+    # Netty configuration for better connection handling
+    netty:
+      # Maximum number of concurrent calls per connection
+      # HTTP/2 supports multiplexing, so multiple calls can share one connection
+      max-concurrent-calls-per-connection: 100
+      # Keep-alive settings to maintain connections and detect dead connections
+      keep-alive-time: 30s
+      keep-alive-timeout: 5s
+      # Allow keep-alive pings even when there are no active calls
+      permit-keep-alive-without-calls: true
+      # Maximum inbound message size (default: 4MB)
+      max-inbound-message-size: 4194304
+      # Maximum inbound metadata size (default: 8KB)
+      max-inbound-metadata-size: 8192
 
 logging:
   level:

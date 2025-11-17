@@ -234,10 +234,7 @@ start_metrics_collection() {
             local mem_used_mb=\$(convert_to_mb \"\$mem_used\")
             local mem_limit_mb=\$(convert_to_mb \"\$mem_limit\")
             
-            # Write to CSV (backup)
-            echo \"\$timestamp,\$date_str,\$container_name,\$cpu_perc,\$mem_perc,\$mem_used_mb,\$mem_limit_mb,\$net_io,\$block_io\" >> \"\$metrics_file\"
-            
-            # Write to PostgreSQL if test_run_id is provided
+            # Write to PostgreSQL if test_run_id is provided (primary storage)
             if [ -n \"\${TEST_RUN_ID}\" ] && [ \"\${TEST_RUN_ID}\" != \"\" ]; then
                 # Parse network_io (format: "1.2MB / 3.4MB" or "1.2MB/3.4MB")
                 local net_rx=\"\"
@@ -258,7 +255,7 @@ start_metrics_collection() {
                 # Convert timestamp to ISO format for PostgreSQL
                 local timestamp_iso=\$(date -u -r \$timestamp '+%Y-%m-%d %H:%M:%S' 2>/dev/null || date -u '+%Y-%m-%d %H:%M:%S')
                 
-                # Use Python helper to insert into database
+                # Use Python helper to insert into database (primary storage)
                 python3 \"\${SCRIPT_DIR}/db_client.py\" insert_resource_metric \
                     \"\${TEST_RUN_ID}\" \
                     \"\$timestamp_iso\" \
@@ -270,6 +267,11 @@ start_metrics_collection() {
                     \"\$net_tx\" \
                     \"\$block_read\" \
                     \"\$block_write\" 2>/dev/null || true
+            fi
+            
+            # Write to CSV as backup (only if database write failed or test_run_id not provided)
+            if [ -z \"\${TEST_RUN_ID}\" ] || [ \"\${TEST_RUN_ID}\" = \"\" ]; then
+                echo \"\$timestamp,\$date_str,\$container_name,\$cpu_perc,\$mem_perc,\$mem_used_mb,\$mem_limit_mb,\$net_io,\$block_io\" >> \"\$metrics_file\"
             fi
         }
         

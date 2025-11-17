@@ -11,9 +11,18 @@ import { getTestOptions } from './config.js';
 
 // Custom metrics
 const errorRate = new Rate('errors');
+const connectionAttempts = new Rate('connection_attempts');
+const connectionFailures = new Rate('connection_failures');
+const connectionRetries = new Rate('connection_retries');
 
 // Test configuration
 export const options = getTestOptions();
+
+// Connection configuration
+const MAX_RETRIES = 5;
+const INITIAL_RETRY_DELAY_MS = 100;
+const MAX_RETRY_DELAY_MS = 2000;
+const CONNECTION_TIMEOUT_MS = 5000;
 
 // Get API configuration from environment
 const apiHost = __ENV.HOST || 'producer-api-java-grpc';
@@ -67,29 +76,137 @@ try {
     }
 }
 
-export default function () {
-    // Connect to gRPC server (connection is reused across iterations)
+/**
+ * Generate exponential backoff delay with jitter
+ * @param {number} attempt - Current retry attempt (0-indexed)
+ * @returns {number} Delay in seconds
+ */
+function getRetryDelay(attempt) {
+    const baseDelay = Math.min(INITIAL_RETRY_DELAY_MS * Math.pow(2, attempt), MAX_RETRY_DELAY_MS);
+    // Add jitter: random value between 0 and 20% of base delay
+    const jitter = baseDelay * 0.2 * Math.random();
+    return (baseDelay + jitter) / 1000; // Convert to seconds for sleep()
+}
+
+// Initialize connection once per VU (k6 gRPC client is lazy - connection happens on first invoke)
+let connectionInitialized = false;
+
+/**
+ * Initialize gRPC connection (lazy - actual connection happens on first invoke)
+ * k6's gRPC client.connect() is lazy and doesn't actually connect until first invoke()
+ */
+function initializeConnection() {
+    if (connectionInitialized) {
+        return true;
+    }
+    
+    const vuId = __VU || 'unknown';
     try {
-        if (!client.connected) {
-            console.log(`Connecting to gRPC server: ${apiHost}:${apiPort}`);
-            client.connect(`${apiHost}:${apiPort}`, {
-                plaintext: true,  // Use insecure connection (no TLS)
-            });
-            console.log(`Connected to gRPC server: ${client.connected}`);
-        }
+        // Call connect() - this is lazy, actual connection happens on first invoke
+        client.connect(`${apiHost}:${apiPort}`, {
+            plaintext: true,  // Use insecure connection (no TLS)
+            timeout: CONNECTION_TIMEOUT_MS / 1000, // Convert to seconds
+        });
+        connectionInitialized = true;
+        console.log(`[TCP] VU ${vuId}: Connection initialized (lazy) to ${apiHost}:${apiPort}`);
+        return true;
     } catch (e) {
-        console.error(`Failed to connect to ${apiHost}:${apiPort}: ${e}`);
+        const errorMsg = e.toString();
+        console.error(`[TCP] VU ${vuId}: Failed to initialize connection: ${errorMsg}`);
+        connectionFailures.add(1);
+        return false;
+    }
+}
+
+export default function () {
+    const vuId = __VU || 'unknown';
+    const iterId = __ITER || 'unknown';
+    
+    // Initialize connection (lazy - actual connection happens on first invoke)
+    if (!initializeConnection()) {
+        console.error(`[TCP] VU ${vuId} Iter ${iterId}: Cannot initialize connection, skipping request`);
         errorRate.add(1);
         return;
     }
     
     // Generate event payload (size controlled by PAYLOAD_SIZE env var)
     const payload = generateGrpcEventPayload();
-    console.log(`Making gRPC call to ${serviceName}/${methodName}`);
     
-    // Make gRPC call
-    const response = client.invoke(`${serviceName}/${methodName}`, payload);
-    console.log(`gRPC response received: status=${response ? response.status : 'null'}`);
+    // Make gRPC call with retry logic
+    // k6's gRPC client.connect() is lazy - actual connection happens on first invoke()
+    let response;
+    
+    // Track connection attempt once per iteration
+    connectionAttempts.add(1);
+    
+    for (let attempt = 0; attempt < MAX_RETRIES; attempt++) {
+        try {
+            if (attempt > 0) {
+                connectionRetries.add(1);
+                const delay = getRetryDelay(attempt - 1);
+                console.log(`[TCP] VU ${vuId} Iter ${iterId}: Retry attempt ${attempt}/${MAX_RETRIES} after ${(delay * 1000).toFixed(0)}ms delay`);
+                sleep(delay);
+                
+                // Reset connection on retry
+                try {
+                    if (client.connected) {
+                        client.close();
+                    }
+                } catch (e) {
+                    // Ignore close errors
+                }
+                connectionInitialized = false;
+                if (!initializeConnection()) {
+                    continue;
+                }
+            }
+            
+            console.log(`[TCP] VU ${vuId} Iter ${iterId}: Invoking gRPC method (attempt ${attempt + 1}/${MAX_RETRIES})...`);
+            response = client.invoke(`${serviceName}/${methodName}`, payload);
+            
+            // Success - break out of retry loop
+            break;
+        } catch (e) {
+            const errorMsg = e.toString();
+            console.error(`[TCP] VU ${vuId} Iter ${iterId}: gRPC invoke attempt ${attempt + 1} failed: ${errorMsg}`);
+            
+            // Check if it's a connection exhaustion error
+            if (errorMsg.includes('cannot assign requested address') || 
+                errorMsg.includes('address already in use') ||
+                errorMsg.includes('EADDRNOTAVAIL') ||
+                errorMsg.includes('EADDRINUSE')) {
+                
+                console.error(`[TCP] VU ${vuId} Iter ${iterId}: PORT EXHAUSTION DETECTED - ${errorMsg}`);
+                
+                // For connection exhaustion, use longer backoff
+                if (attempt < MAX_RETRIES - 1) {
+                    const delay = getRetryDelay(attempt) * 2; // Double delay for port exhaustion
+                    console.log(`[TCP] VU ${vuId} Iter ${iterId}: Using extended backoff ${(delay * 1000).toFixed(0)}ms for port exhaustion`);
+                    sleep(delay);
+                    continue;
+                }
+            }
+            
+            // For other errors, continue retry loop
+            if (attempt < MAX_RETRIES - 1) {
+                continue;
+            } else {
+                // Last attempt failed
+                connectionFailures.add(1);
+                console.error(`[TCP] VU ${vuId} Iter ${iterId}: FAILED after ${MAX_RETRIES} attempts: ${errorMsg}`);
+                errorRate.add(1);
+                return;
+            }
+        }
+    }
+    
+    // If we get here without a response, it's an error
+    if (!response) {
+        connectionFailures.add(1);
+        console.error(`[TCP] VU ${vuId} Iter ${iterId}: No response after all retries`);
+        errorRate.add(1);
+        return;
+    }
     
     // Check response
     const success = check(response, {
@@ -108,7 +225,18 @@ export default function () {
 }
 
 export function teardown(data) {
-    client.close();
+    const vuId = __VU || 'unknown';
+    try {
+        if (client && client.connected) {
+            console.log(`[TCP] VU ${vuId}: Closing connection during teardown`);
+            client.close();
+        } else {
+            console.log(`[TCP] VU ${vuId}: No active connection to close during teardown`);
+        }
+    } catch (e) {
+        console.log(`[TCP] VU ${vuId}: Error during teardown (ignored): ${e}`);
+        // Ignore errors during teardown
+    }
 }
 
 export function handleSummary(data) {
@@ -152,6 +280,25 @@ function textSummary(data, options) {
     if (data.metrics.grpc_req_failed) {
         const failed = data.metrics.grpc_req_failed;
         summary += `${indent}Error Rate: ${(failed.values.rate * 100).toFixed(2)}%\n`;
+    }
+    
+    // Connection metrics
+    if (data.metrics.connection_attempts) {
+        const attempts = data.metrics.connection_attempts;
+        summary += `${indent}Connection Attempts: ${attempts.values.count}\n`;
+    }
+    
+    if (data.metrics.connection_failures) {
+        const failures = data.metrics.connection_failures;
+        summary += `${indent}Connection Failures: ${failures.values.count}\n`;
+        if (failures.values.count > 0) {
+            summary += `${indent}Connection Failure Rate: ${(failures.values.rate * 100).toFixed(2)}%\n`;
+        }
+    }
+    
+    if (data.metrics.connection_retries) {
+        const retries = data.metrics.connection_retries;
+        summary += `${indent}Connection Retries: ${retries.values.count}\n`;
     }
     
     summary += '\n';

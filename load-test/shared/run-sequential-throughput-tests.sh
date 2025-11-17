@@ -49,6 +49,189 @@ print_progress() {
     echo -e "${GREEN}[${bar}]${NC} ${percent}%"
 }
 
+# Function to print formatted test statistics table
+print_test_stats() {
+    local total_samples=$1
+    local success_samples=$2
+    local error_samples=$3
+    local throughput=$4
+    local avg_response=$5
+    local p95_response=$6
+    local p99_response=$7
+    local error_rate=$8
+    
+    echo ""
+    echo -e "${CYAN}┌─────────────────────────────────────────────────────────────────────────┐${NC}"
+    echo -e "${CYAN}│${NC} ${BOLD_BLUE}Test Statistics${NC}                                                          ${CYAN}│${NC}"
+    echo -e "${CYAN}├─────────────────────────────────────────────────────────────────────────┤${NC}"
+    printf "${CYAN}│${NC} %-30s ${CYAN}:${NC} %-30s ${CYAN}│${NC}\n" "Total Requests" "$total_samples"
+    printf "${CYAN}│${NC} %-30s ${CYAN}:${NC} ${GREEN}%-30s${NC} ${CYAN}│${NC}\n" "Successful" "$success_samples"
+    if [ "$error_samples" -gt 0 ]; then
+        printf "${CYAN}│${NC} %-30s ${CYAN}:${NC} ${RED}%-30s${NC} ${CYAN}│${NC}\n" "Failed" "$error_samples"
+    else
+        printf "${CYAN}│${NC} %-30s ${CYAN}:${NC} %-30s ${CYAN}│${NC}\n" "Failed" "$error_samples"
+    fi
+    printf "${CYAN}│${NC} %-30s ${CYAN}:${NC} %-30s ${CYAN}│${NC}\n" "Throughput" "$(printf "%.2f req/s" "$throughput")"
+    printf "${CYAN}│${NC} %-30s ${CYAN}:${NC} %-30s ${CYAN}│${NC}\n" "Avg Response Time" "$(printf "%.2f ms" "$avg_response")"
+    if [ -n "$p95_response" ] && [ "$p95_response" != "" ]; then
+        printf "${CYAN}│${NC} %-30s ${CYAN}:${NC} %-30s ${CYAN}│${NC}\n" "P95 Response Time" "$(printf "%.2f ms" "$p95_response")"
+    fi
+    if [ -n "$p99_response" ] && [ "$p99_response" != "" ]; then
+        printf "${CYAN}│${NC} %-30s ${CYAN}:${NC} %-30s ${CYAN}│${NC}\n" "P99 Response Time" "$(printf "%.2f ms" "$p99_response")"
+    fi
+    if [ "$(echo "$error_rate > 0" | bc -l 2>/dev/null || echo "0")" = "1" ]; then
+        printf "${CYAN}│${NC} %-30s ${CYAN}:${NC} ${RED}%-30s${NC} ${CYAN}│${NC}\n" "Error Rate" "$(printf "%.2f%%" "$error_rate")"
+    else
+        printf "${CYAN}│${NC} %-30s ${CYAN}:${NC} ${GREEN}%-30s${NC} ${CYAN}│${NC}\n" "Error Rate" "$(printf "%.2f%%" "$error_rate")"
+    fi
+    echo -e "${CYAN}└─────────────────────────────────────────────────────────────────────────┘${NC}"
+    echo ""
+}
+
+# Function to print phase progress for full/saturation tests
+print_phase_progress() {
+    local phase_num=$1
+    local total_phases=$2
+    local phase_name=$3
+    local vus=$4
+    
+    echo ""
+    echo -e "${BLUE}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+    echo -e "${BOLD_BLUE}Phase ${phase_num}/${total_phases}: ${phase_name}${NC} (${vus} VUs)"
+    echo -e "${BLUE}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+    echo ""
+}
+
+# Function to print test summary after completion
+print_test_summary() {
+    local api_name=$1
+    local json_file=$2
+    
+    if [ ! -f "$json_file" ]; then
+        print_warning "JSON file not found, cannot display summary"
+        return 1
+    fi
+    
+    # Extract metrics
+    local metrics=$(extract_k6_metrics "$json_file")
+    IFS='|' read -r total_samples success_samples error_samples duration_seconds throughput avg_response min_response max_response <<< "$metrics"
+    
+    # Extract percentiles from JSON
+    local p50_response="" p90_response="" p95_response="" p99_response=""
+    if command -v python3 >/dev/null 2>&1; then
+        local percentiles=$(python3 -c "
+import json
+import sys
+try:
+    with open('$json_file', 'r') as f:
+        data = json.load(f)
+        metrics = data.get('metrics', {})
+        duration_metric = metrics.get('http_req_duration') or metrics.get('grpc_req_duration')
+        if duration_metric:
+            values = duration_metric.get('values', {})
+            p50 = values.get('med', values.get('p(50)', ''))
+            p90 = values.get('p(90)', '')
+            p95 = values.get('p(95)', '')
+            p99 = values.get('p(99)', '')
+            print(f'{p50}|{p90}|{p95}|{p99}')
+except:
+    pass
+" 2>/dev/null || echo "|||")
+        IFS='|' read -r p50_response p90_response p95_response p99_response <<< "$percentiles"
+    fi
+    
+    # Calculate error rate
+    local error_rate=0.0
+    if [ "$total_samples" -gt 0 ] 2>/dev/null; then
+        error_rate=$(awk "BEGIN {printf \"%.2f\", ($error_samples / $total_samples) * 100}" 2>/dev/null || echo "0.0")
+    fi
+    
+    # Display summary
+    echo ""
+    print_section "Test Summary: $api_name"
+    print_test_stats "$total_samples" "$success_samples" "$error_samples" "$throughput" "$avg_response" "$p95_response" "$p99_response" "$error_rate"
+}
+
+# Function to parse k6 output for phase detection and real-time stats
+# This function processes k6 output line by line to detect phases and extract stats
+parse_k6_output_for_stats() {
+    local api_name=$1
+    local test_mode=$2
+    local last_stats_time=0
+    local current_phase=0
+    local total_phases=0
+    
+    # Determine total phases based on test mode
+    if [ "$test_mode" = "full" ]; then
+        total_phases=4
+    elif [ "$test_mode" = "saturation" ]; then
+        total_phases=7
+    else
+        total_phases=1
+    fi
+    
+    # Phase names for full test
+    local phase_names_full=("Baseline" "Mid-load" "High-load" "Higher-load")
+    local phase_vus_full=(10 50 100 200)
+    
+    # Phase names for saturation test
+    local phase_names_sat=("Baseline" "Mid-load" "High-load" "Very High" "Extreme" "Maximum" "Saturation")
+    local phase_vus_sat=(10 50 100 200 500 1000 2000)
+    
+    while IFS= read -r line; do
+        # Output the line (for logging)
+        echo "$line"
+        
+        # Detect phase transitions (k6 outputs stage information)
+        if echo "$line" | grep -qE "(running|stage|phase|VUs)" 2>/dev/null; then
+            # Try to detect VU changes which indicate phase transitions
+            local detected_vus=$(echo "$line" | grep -oE "[0-9]+ VUs" | grep -oE "[0-9]+" | head -1 || echo "")
+            if [ -n "$detected_vus" ]; then
+                # Determine which phase based on VU count
+                if [ "$test_mode" = "full" ]; then
+                    for i in "${!phase_vus_full[@]}"; do
+                        if [ "${phase_vus_full[$i]}" = "$detected_vus" ]; then
+                            if [ "$current_phase" -ne "$((i + 1))" ]; then
+                                current_phase=$((i + 1))
+                                print_phase_progress "$current_phase" "$total_phases" "${phase_names_full[$i]}" "$detected_vus"
+                            fi
+                            break
+                        fi
+                    done
+                elif [ "$test_mode" = "saturation" ]; then
+                    for i in "${!phase_vus_sat[@]}"; do
+                        if [ "${phase_vus_sat[$i]}" = "$detected_vus" ]; then
+                            if [ "$current_phase" -ne "$((i + 1))" ]; then
+                                current_phase=$((i + 1))
+                                print_phase_progress "$current_phase" "$total_phases" "${phase_names_sat[$i]}" "$detected_vus"
+                            fi
+                            break
+                        fi
+                    done
+                fi
+            fi
+        fi
+        
+        # Extract and display periodic stats (every 30-60 seconds)
+        local current_time=$(date +%s)
+        if [ $((current_time - last_stats_time)) -ge 30 ]; then
+            # Try to extract stats from k6 output line
+            # k6 outputs stats in format like: "http_reqs: 1234, http_req_duration: avg=123.45ms"
+            if echo "$line" | grep -qE "(http_reqs|grpc_reqs|req/s|duration)" 2>/dev/null; then
+                local reqs=$(echo "$line" | grep -oE "[0-9]+ reqs" | grep -oE "[0-9]+" | head -1 || echo "")
+                local throughput=$(echo "$line" | grep -oE "[0-9]+\.[0-9]+ req/s" | grep -oE "[0-9]+\.[0-9]+" | head -1 || echo "")
+                if [ -n "$reqs" ] || [ -n "$throughput" ]; then
+                    last_stats_time=$current_time
+                    # Display a brief stats update (non-intrusive)
+                    if [ -n "$throughput" ]; then
+                        echo -e "${CYAN}[Live Stats]${NC} Throughput: ${GREEN}${throughput} req/s${NC}" >&2
+                    fi
+                fi
+            fi
+        fi
+    done
+}
+
 # Function to prefix log lines with API name
 # Usage: command | prefix_logs "api-name"
 prefix_logs() {
@@ -1351,6 +1534,13 @@ run_k6_test() {
     local log_file="$RESULT_DIR/${api_name}-${test_suffix}${payload_suffix}-${TIMESTAMP}.log"
     local metrics_file="$RESULT_DIR/${api_name}-${test_suffix}${payload_suffix}-${TIMESTAMP}-metrics.csv"
     
+    # Determine JSON file path for progress display (container mount path)
+    local progress_json_file="$BASE_DIR/load-test/results/throughput-sequential/$api_name"
+    if [ -n "$payload_size" ]; then
+        progress_json_file="$progress_json_file/$payload_size"
+    fi
+    progress_json_file="$progress_json_file/$(basename $json_file)"
+    
     # Build k6 command
     local k6_script="/k6/scripts/$test_file"
     local json_file_in_container="/k6/results/throughput-sequential/$api_name"
@@ -1457,16 +1647,84 @@ run_k6_test() {
         print_warning "Failed to start metrics collection, continuing without resource metrics..."
     fi
     
+    # Display test phase information for full/saturation tests
+    if [ "$TEST_MODE" = "full" ]; then
+        echo ""
+        print_status "Test will run in 4 phases:"
+        print_status "  Phase 1: Baseline (10 VUs, 2 min)"
+        print_status "  Phase 2: Mid-load (50 VUs, 2 min)"
+        print_status "  Phase 3: High-load (100 VUs, 2 min)"
+        print_status "  Phase 4: Higher-load (200 VUs, 5 min)"
+        echo ""
+    elif [ "$TEST_MODE" = "saturation" ]; then
+        echo ""
+        print_status "Test will run in 7 phases:"
+        print_status "  Phase 1: Baseline (10 VUs, 2 min)"
+        print_status "  Phase 2: Mid-load (50 VUs, 2 min)"
+        print_status "  Phase 3: High-load (100 VUs, 2 min)"
+        print_status "  Phase 4: Very High (200 VUs, 2 min)"
+        print_status "  Phase 5: Extreme (500 VUs, 2 min)"
+        print_status "  Phase 6: Maximum (1000 VUs, 2 min)"
+        print_status "  Phase 7: Saturation (2000 VUs, 2 min)"
+        echo ""
+    fi
+    
+    # Start progress display in background if available and enabled
+    local progress_display_pid=""
+    local progress_display_script="$db_script_dir/test-progress-display.py"
+    local enable_progress_display="${ENABLE_PROGRESS_DISPLAY:-true}"
+    
+    if [ "$enable_progress_display" = "true" ] && [ -f "$progress_display_script" ] && command -v python3 >/dev/null 2>&1 && [ -t 1 ]; then
+        # Start progress display in background (works with or without rich library)
+        # Note: Only run if stdout is a TTY (interactive terminal)
+        # JSON file will be created by k6, so we start monitoring it
+        # The script will wait for the file to exist
+        (
+            # Wait for JSON file to be created (k6 creates it when it starts)
+            local wait_count=0
+            while [ $wait_count -lt 30 ] && [ ! -f "$progress_json_file" ]; do
+                sleep 0.5
+                wait_count=$((wait_count + 1))
+            done
+            
+            # If file exists, start monitoring
+            if [ -f "$progress_json_file" ]; then
+                # The progress display script uses rich's Live display which manages its own screen
+                # It will use alternate screen buffer (with rich) to avoid interfering with main output
+                # When rich is not available, it falls back to basic mode with screen clearing
+                # Run without output redirection to allow rich to control the terminal
+                python3 "$progress_display_script" \
+                    "$progress_json_file" \
+                    --api-name "$api_name" \
+                    --test-mode "$TEST_MODE" \
+                    --payload-size "${payload_size:-default}" \
+                    --update-interval 1.0 >/dev/tty 2>&1 || true
+            fi
+        ) &
+        progress_display_pid=$!
+    fi
+    
     # Run k6 in Docker container
     # Note: k6 image has k6 as entrypoint, so we need to override it to run shell commands
     # Use unbuffered output and prefix each line with API name for real-time visibility
     cd "$BASE_DIR"
     local test_exit_code=0
     # Use prefix_logs function which handles cross-platform compatibility
+    # Note: k6 output is captured and displayed in real-time, with phase detection happening in post-processing
+    # Progress display runs in background to show animated dashboard
     if docker-compose --profile k6-test run --rm --entrypoint /bin/sh k6-throughput -c "$k6_cmd" 2>&1 | prefix_logs "$api_name" | tee "$summary_file"; then
         test_exit_code=0
     else
         test_exit_code=1
+    fi
+    
+    # Stop progress display if it was started
+    if [ -n "$progress_display_pid" ]; then
+        # Wait a moment for final updates
+        sleep 1
+        # Kill progress display process
+        kill "$progress_display_pid" 2>/dev/null || true
+        wait "$progress_display_pid" 2>/dev/null || true
     fi
     
     # Stop metrics collection if it was started
@@ -1497,7 +1755,7 @@ run_k6_test() {
         cp "$summary_file" "$log_file"
     fi
     
-    # Store performance metrics in database if test_run_id exists
+    # Store performance metrics in database directly (primary storage)
     if [ -n "$test_run_id" ] && [ -f "$json_file" ]; then
         print_status "Storing performance metrics in database..."
         local metrics_output=$(python3 "$db_script_dir/extract_k6_metrics.py" "$json_file" 2>/dev/null || echo "")
@@ -1510,12 +1768,45 @@ run_k6_test() {
                 error_rate=$(awk "BEGIN {printf \"%.2f\", ($error_samples / $total_samples) * 100}" 2>/dev/null || echo "0.0")
             fi
             
-            # Insert performance metrics
-            python3 "$db_script_dir/db_client.py" insert_performance_metrics \
-                "$test_run_id" \
-                "$total_samples" "$success_samples" "$error_samples" \
-                "$throughput" "$avg_response" "$min_response" "$max_response" \
-                "$error_rate" >/dev/null 2>&1 || true
+            # Extract percentiles from JSON if available
+            local p50_response="" p90_response="" p95_response="" p99_response=""
+            if command -v python3 >/dev/null 2>&1; then
+                local percentiles=$(python3 -c "
+import json
+import sys
+try:
+    with open('$json_file', 'r') as f:
+        data = json.load(f)
+        metrics = data.get('metrics', {})
+        duration_metric = metrics.get('http_req_duration') or metrics.get('grpc_req_duration')
+        if duration_metric:
+            values = duration_metric.get('values', {})
+            p50 = values.get('med', values.get('p(50)', ''))
+            p90 = values.get('p(90)', '')
+            p95 = values.get('p(95)', '')
+            p99 = values.get('p(99)', '')
+            print(f'{p50}|{p90}|{p95}|{p99}')
+except:
+    pass
+" 2>/dev/null || echo "|||")
+                IFS='|' read -r p50_response p90_response p95_response p99_response <<< "$percentiles"
+            fi
+            
+            # Insert performance metrics directly to database
+            if [ -n "$p50_response" ] && [ "$p50_response" != "" ]; then
+                python3 "$db_script_dir/db_client.py" insert_performance_metrics \
+                    "$test_run_id" \
+                    "$total_samples" "$success_samples" "$error_samples" \
+                    "$throughput" "$avg_response" "$min_response" "$max_response" \
+                    "$p50_response" "$p90_response" "$p95_response" "$p99_response" \
+                    "$error_rate" >/dev/null 2>&1 || true
+            else
+                python3 "$db_script_dir/db_client.py" insert_performance_metrics \
+                    "$test_run_id" \
+                    "$total_samples" "$success_samples" "$error_samples" \
+                    "$throughput" "$avg_response" "$min_response" "$max_response" \
+                    "$error_rate" >/dev/null 2>&1 || true
+            fi
             
             # Update test run completion
             python3 "$db_script_dir/db_client.py" update_test_run_completion \
@@ -1527,20 +1818,126 @@ run_k6_test() {
         fi
     fi
     
-    # Store phase metrics if available (for full/saturation tests)
-    if [ -n "$test_run_id" ] && [ "$TEST_MODE" != "smoke" ] && [ -f "$metrics_file" ]; then
+    # Store phase metrics if available (for all test modes)
+    if [ -n "$test_run_id" ] && [ -f "$metrics_file" ]; then
+        print_status "Analyzing and storing phase metrics..."
         local phase_analysis=$(python3 "$db_script_dir/analyze-resource-metrics.py" \
-            "$json_file" "$TEST_MODE" "$metrics_file" 2>/dev/null || echo "")
+            "$json_file" "$TEST_MODE" "$metrics_file" "$test_run_id" 2>/dev/null || echo "")
         if [ -n "$phase_analysis" ]; then
-            # Parse phase data and insert (this would require more complex parsing)
-            # For now, we'll skip phase insertion as it requires JSON parsing
-            # This can be enhanced later
-            true
+            # Parse JSON and insert each phase using Python script
+            local phases_inserted=0
+            if command -v python3 >/dev/null 2>&1; then
+                # Use Python to parse JSON and insert phases
+                # Write phase analysis to temp file to avoid shell escaping issues
+                local temp_phase_file=$(mktemp)
+                echo "$phase_analysis" > "$temp_phase_file"
+                
+                python3 << PYTHON_SCRIPT
+import json
+import sys
+import subprocess
+import os
+
+temp_file = '$temp_phase_file'
+try:
+    # Read phase analysis from temp file
+    with open(temp_file, 'r') as f:
+        phase_data = json.load(f)
+    
+    phases = phase_data.get('phases', {})
+    
+    # Get phase names based on test mode
+    test_mode = '$TEST_MODE'
+    phase_names = []
+    if test_mode == 'smoke':
+        phase_names = ['Smoke Test']
+    elif test_mode == 'full':
+        phase_names = ['Baseline', 'Mid-load', 'High-load', 'Higher-load']
+    elif test_mode == 'saturation':
+        phase_names = ['Baseline', 'Mid-load', 'High-load', 'Very High', 'Extreme', 'Maximum', 'Saturation']
+    
+    db_script_dir = '$db_script_dir'
+    test_run_id = $test_run_id
+    
+    phases_inserted = 0
+    for phase_num_str in sorted(phases.keys(), key=int):
+        phase_num = int(phase_num_str)
+        phase = phases[phase_num_str]
+        
+        # Get phase name (use index-1 since phase_num is 1-based)
+        phase_name = phase_names[phase_num - 1] if phase_num <= len(phase_names) else f"Phase {phase_num}"
+        
+        # Extract all required fields with defaults
+        target_vus = phase.get('target_vus', 0)
+        duration_seconds = phase.get('duration_seconds', 0)
+        requests_count = phase.get('requests', 0)
+        avg_cpu_percent = phase.get('avg_cpu_percent', 0.0)
+        max_cpu_percent = phase.get('max_cpu_percent', 0.0)
+        avg_memory_mb = phase.get('avg_memory_mb', 0.0)
+        max_memory_mb = phase.get('max_memory_mb', 0.0)
+        cpu_percent_per_request = phase.get('cpu_percent_per_request', 0.0)
+        ram_mb_per_request = phase.get('ram_mb_per_request', 0.0)
+        
+        # Call db_client.py to insert phase
+        cmd = [
+            'python3', os.path.join(db_script_dir, 'db_client.py'), 'insert_test_phase',
+            str(test_run_id),
+            str(phase_num),
+            phase_name,
+            str(target_vus),
+            str(duration_seconds),
+            str(requests_count),
+            str(avg_cpu_percent),
+            str(max_cpu_percent),
+            str(avg_memory_mb),
+            str(max_memory_mb),
+            str(cpu_percent_per_request),
+            str(ram_mb_per_request)
+        ]
+        
+        result = subprocess.run(cmd, capture_output=True, text=True)
+        if result.returncode == 0:
+            print(f"Phase {phase_num} ({phase_name}) inserted successfully", file=sys.stderr)
+            phases_inserted += 1
+        else:
+            print(f"Error inserting phase {phase_num}: {result.stderr}", file=sys.stderr)
+    
+    sys.exit(0 if phases_inserted > 0 else 1)
+except Exception as e:
+    print(f"Error parsing phase data: {e}", file=sys.stderr)
+    sys.exit(1)
+finally:
+    # Clean up temp file
+    try:
+        if os.path.exists(temp_file):
+            os.unlink(temp_file)
+    except:
+        pass
+PYTHON_SCRIPT
+                phases_inserted=$?
+                # Ensure temp file is cleaned up even if Python script fails
+                [ -f "$temp_phase_file" ] && rm -f "$temp_phase_file" || true
+                if [ $phases_inserted -eq 0 ]; then
+                    print_success "Phase metrics stored in database"
+                else
+                    print_warning "Some phase metrics may not have been stored"
+                fi
+            else
+                print_warning "Python3 not available, skipping phase metrics insertion"
+            fi
+        else
+            print_warning "No phase analysis data available"
         fi
     fi
     
     if [ $test_exit_code -eq 0 ]; then
         print_success "Test completed for $api_name"
+        
+        # Display formatted test summary if JSON file exists
+        if [ -f "$json_file" ]; then
+            print_test_summary "$api_name" "$json_file"
+        fi
+        
         print_status "Results saved to: $RESULT_DIR"
         print_status "  - JSON: $json_file"
         print_status "  - Summary: $summary_file"
@@ -1901,6 +2298,49 @@ clear_previous_test_results() {
     echo ""
 }
 
+# Helper function to find JSON file for an API matching this test run
+find_json_for_test_run() {
+    local api_dir=$1
+    local json_pattern=""
+    
+    # Build pattern based on test mode and timestamp
+    if [ "$TEST_MODE" = "smoke" ]; then
+        json_pattern="*-throughput-smoke-${TIMESTAMP}.json"
+    elif [ "$TEST_MODE" = "saturation" ]; then
+        json_pattern="*-throughput-saturation-${TIMESTAMP}.json"
+    else
+        # Full test: exclude smoke and saturation files
+        json_pattern="*-throughput-${TIMESTAMP}.json"
+    fi
+    
+    local latest_json=""
+    if [ -z "$PAYLOAD_SIZE_PARAM" ] || [ "$PAYLOAD_SIZE_PARAM" = "default" ]; then
+        # Default payload: prefer files in root directory, exclude payload size subdirectories
+        latest_json=$(find "$api_dir" -maxdepth 1 -name "$json_pattern" -type f 2>/dev/null | head -1)
+        # If not found in root, search subdirectories but exclude payload size dirs
+        if [ -z "$latest_json" ]; then
+            latest_json=$(find "$api_dir" -name "$json_pattern" -type f ! -path "*/4k/*" ! -path "*/8k/*" ! -path "*/32k/*" ! -path "*/64k/*" 2>/dev/null | head -1)
+        fi
+    else
+        # Specific payload size: search in that subdirectory
+        latest_json=$(find "$api_dir" -name "$json_pattern" -type f | head -1)
+    fi
+    
+    # Fallback: if timestamp match not found, use latest file (but warn)
+    if [ -z "$latest_json" ]; then
+        if [ -z "$PAYLOAD_SIZE_PARAM" ] || [ "$PAYLOAD_SIZE_PARAM" = "default" ]; then
+            latest_json=$(find "$api_dir" -maxdepth 1 -name "*-throughput-*.json" -type f ! -name "*-smoke-*.json" ! -name "*-saturation-*.json" 2>/dev/null | sort -r | head -1)
+            if [ -z "$latest_json" ]; then
+                latest_json=$(find "$api_dir" -name "*-throughput-*.json" -type f ! -name "*-smoke-*.json" ! -name "*-saturation-*.json" ! -path "*/4k/*" ! -path "*/8k/*" ! -path "*/32k/*" ! -path "*/64k/*" 2>/dev/null | sort -r | head -1)
+            fi
+        else
+            latest_json=$(find "$api_dir" -name "*-throughput-*.json" -type f ! -name "*-smoke-*.json" ! -name "*-saturation-*.json" | sort -r | head -1)
+        fi
+    fi
+    
+    echo "$latest_json"
+}
+
 # Function to create comparison report
 create_comparison_report() {
     print_status "=========================================="
@@ -1965,21 +2405,9 @@ create_comparison_report() {
                 continue
             fi
             
-            # Find the most recent k6 JSON file
-            # For default payload, look in root directory first, then subdirectories
-            # For specific payload sizes, look in that subdirectory
-            local latest_json=""
-            if [ -z "$PAYLOAD_SIZE_PARAM" ] || [ "$PAYLOAD_SIZE_PARAM" = "default" ]; then
-                # Default payload: prefer files in root directory, exclude payload size subdirectories
-                latest_json=$(find "$api_dir" -maxdepth 1 -name "*-throughput-*.json" -type f 2>/dev/null | sort -r | head -1)
-                # If not found in root, search subdirectories but exclude payload size dirs
-                if [ -z "$latest_json" ]; then
-                    latest_json=$(find "$api_dir" -name "*-throughput-*.json" -type f ! -path "*/4k/*" ! -path "*/8k/*" ! -path "*/32k/*" ! -path "*/64k/*" 2>/dev/null | sort -r | head -1)
-                fi
-            else
-                # Specific payload size: search in that subdirectory
-                latest_json=$(find "$api_dir" -name "*-throughput-*.json" -type f | sort -r | head -1)
-            fi
+            # Find the k6 JSON file matching this test run's TIMESTAMP and TEST_MODE
+            # This ensures we use the same test run for all APIs
+            local latest_json=$(find_json_for_test_run "$api_dir")
             if [ -z "$latest_json" ]; then
                 echo "| $api_name | ❌ No JSON file | - | - | - | - | - |"
                 continue
@@ -2235,21 +2663,39 @@ create_comparison_report() {
             if [ "$avg_cpu" = "-" ] || [ "$max_cpu" = "-" ]; then
                 local api_dir="$RESULTS_BASE_DIR/$api_name"
                 if [ -d "$api_dir" ]; then
-                    # Find latest JSON and metrics CSV files
-                    local latest_json=""
+                    # Find JSON and metrics CSV files matching this test run's timestamp
+                    local latest_json=$(find_json_for_test_run "$api_dir")
                     local latest_metrics_csv=""
+                    
+                    # Find matching metrics CSV file
+                    local csv_pattern=""
+                    if [ "$TEST_MODE" = "smoke" ]; then
+                        csv_pattern="*-throughput-smoke-${TIMESTAMP}-metrics.csv"
+                    elif [ "$TEST_MODE" = "saturation" ]; then
+                        csv_pattern="*-throughput-saturation-${TIMESTAMP}-metrics.csv"
+                    else
+                        csv_pattern="*-throughput-${TIMESTAMP}-metrics.csv"
+                    fi
+                    
                     if [ -z "$PAYLOAD_SIZE_PARAM" ] || [ "$PAYLOAD_SIZE_PARAM" = "default" ]; then
-                        latest_json=$(find "$api_dir" -maxdepth 1 -name "*-throughput-*.json" -type f 2>/dev/null | sort -r | head -1)
-                        if [ -z "$latest_json" ]; then
-                            latest_json=$(find "$api_dir" -name "*-throughput-*.json" -type f ! -path "*/4k/*" ! -path "*/8k/*" ! -path "*/32k/*" ! -path "*/64k/*" 2>/dev/null | sort -r | head -1)
-                        fi
-                        latest_metrics_csv=$(find "$api_dir" -maxdepth 1 -name "*-throughput-*-metrics.csv" -type f 2>/dev/null | sort -r | head -1)
+                        latest_metrics_csv=$(find "$api_dir" -maxdepth 1 -name "$csv_pattern" -type f 2>/dev/null | head -1)
                         if [ -z "$latest_metrics_csv" ]; then
-                            latest_metrics_csv=$(find "$api_dir" -name "*-throughput-*-metrics.csv" -type f ! -path "*/4k/*" ! -path "*/8k/*" ! -path "*/32k/*" ! -path "*/64k/*" 2>/dev/null | sort -r | head -1)
+                            latest_metrics_csv=$(find "$api_dir" -name "$csv_pattern" -type f ! -path "*/4k/*" ! -path "*/8k/*" ! -path "*/32k/*" ! -path "*/64k/*" 2>/dev/null | head -1)
                         fi
                     else
-                        latest_json=$(find "$api_dir" -name "*-throughput-*.json" -type f | sort -r | head -1)
-                        latest_metrics_csv=$(find "$api_dir" -name "*-throughput-*-metrics.csv" -type f | sort -r | head -1)
+                        latest_metrics_csv=$(find "$api_dir" -name "$csv_pattern" -type f | head -1)
+                    fi
+                    
+                    # Fallback to latest if timestamp match not found
+                    if [ -z "$latest_metrics_csv" ]; then
+                        if [ -z "$PAYLOAD_SIZE_PARAM" ] || [ "$PAYLOAD_SIZE_PARAM" = "default" ]; then
+                            latest_metrics_csv=$(find "$api_dir" -maxdepth 1 -name "*-throughput-*-metrics.csv" -type f ! -name "*-smoke-*-metrics.csv" ! -name "*-saturation-*-metrics.csv" 2>/dev/null | sort -r | head -1)
+                            if [ -z "$latest_metrics_csv" ]; then
+                                latest_metrics_csv=$(find "$api_dir" -name "*-throughput-*-metrics.csv" -type f ! -name "*-smoke-*-metrics.csv" ! -name "*-saturation-*-metrics.csv" ! -path "*/4k/*" ! -path "*/8k/*" ! -path "*/32k/*" ! -path "*/64k/*" 2>/dev/null | sort -r | head -1)
+                            fi
+                        else
+                            latest_metrics_csv=$(find "$api_dir" -name "*-throughput-*-metrics.csv" -type f ! -name "*-smoke-*-metrics.csv" ! -name "*-saturation-*-metrics.csv" | sort -r | head -1)
+                        fi
                     fi
                     
                     if [ -n "$latest_json" ] && [ -n "$latest_metrics_csv" ]; then
@@ -2300,8 +2746,39 @@ create_comparison_report() {
                         continue
                     fi
                     
-                    local latest_json=$(find "$api_dir" -name "*-throughput-*.json" -type f | sort -r | head -1)
-                    local latest_metrics_csv=$(find "$api_dir" -name "*-throughput-*-metrics.csv" -type f | sort -r | head -1)
+                    local latest_json=$(find_json_for_test_run "$api_dir")
+                    local latest_metrics_csv=""
+                    
+                    # Find matching metrics CSV file
+                    local csv_pattern=""
+                    if [ "$TEST_MODE" = "smoke" ]; then
+                        csv_pattern="*-throughput-smoke-${TIMESTAMP}-metrics.csv"
+                    elif [ "$TEST_MODE" = "saturation" ]; then
+                        csv_pattern="*-throughput-saturation-${TIMESTAMP}-metrics.csv"
+                    else
+                        csv_pattern="*-throughput-${TIMESTAMP}-metrics.csv"
+                    fi
+                    
+                    if [ -z "$PAYLOAD_SIZE_PARAM" ] || [ "$PAYLOAD_SIZE_PARAM" = "default" ]; then
+                        latest_metrics_csv=$(find "$api_dir" -maxdepth 1 -name "$csv_pattern" -type f 2>/dev/null | head -1)
+                        if [ -z "$latest_metrics_csv" ]; then
+                            latest_metrics_csv=$(find "$api_dir" -name "$csv_pattern" -type f ! -path "*/4k/*" ! -path "*/8k/*" ! -path "*/32k/*" ! -path "*/64k/*" 2>/dev/null | head -1)
+                        fi
+                    else
+                        latest_metrics_csv=$(find "$api_dir" -name "$csv_pattern" -type f | head -1)
+                    fi
+                    
+                    # Fallback to latest if timestamp match not found
+                    if [ -z "$latest_metrics_csv" ]; then
+                        if [ -z "$PAYLOAD_SIZE_PARAM" ] || [ "$PAYLOAD_SIZE_PARAM" = "default" ]; then
+                            latest_metrics_csv=$(find "$api_dir" -maxdepth 1 -name "*-throughput-*-metrics.csv" -type f ! -name "*-smoke-*-metrics.csv" ! -name "*-saturation-*-metrics.csv" 2>/dev/null | sort -r | head -1)
+                            if [ -z "$latest_metrics_csv" ]; then
+                                latest_metrics_csv=$(find "$api_dir" -name "*-throughput-*-metrics.csv" -type f ! -name "*-smoke-*-metrics.csv" ! -name "*-saturation-*-metrics.csv" ! -path "*/4k/*" ! -path "*/8k/*" ! -path "*/32k/*" ! -path "*/64k/*" 2>/dev/null | sort -r | head -1)
+                            fi
+                        else
+                            latest_metrics_csv=$(find "$api_dir" -name "*-throughput-*-metrics.csv" -type f ! -name "*-smoke-*-metrics.csv" ! -name "*-saturation-*-metrics.csv" | sort -r | head -1)
+                        fi
+                    fi
                     
                     if [ -z "$latest_json" ] || [ -z "$latest_metrics_csv" ]; then
                         echo "| $api_name | - | - | - | - | - | - | - |"
@@ -2823,6 +3300,17 @@ main() {
     fi
     echo ""
     
+    # Calculate total number of tests for progress tracking
+    local num_apis=$(echo $APIS | wc -w | tr -d ' ')
+    local num_payload_sizes=$(echo $PAYLOAD_SIZES | wc -w | tr -d ' ')
+    local total_tests=$((num_apis * num_payload_sizes))
+    local current_test=0
+    local start_time=$(date +%s)
+    
+    print_section "Test Execution Progress"
+    print_status "Total tests to run: $total_tests (${num_apis} APIs × ${num_payload_sizes} payload sizes)"
+    echo ""
+    
     # Iterate over payload sizes
     for payload_size in $PAYLOAD_SIZES; do
         # Export payload size for use in run_k6_test function (empty for default)
@@ -2840,6 +3328,39 @@ main() {
         echo ""
         
         for api_name in $APIS; do
+        current_test=$((current_test + 1))
+        
+        # Calculate elapsed time and estimate remaining
+        local elapsed_time=$(($(date +%s) - start_time))
+        local avg_time_per_test=0
+        local estimated_remaining=0
+        if [ $current_test -gt 0 ]; then
+            avg_time_per_test=$((elapsed_time / current_test))
+            estimated_remaining=$((avg_time_per_test * (total_tests - current_test)))
+        fi
+        
+        # Format time
+        local elapsed_min=$((elapsed_time / 60))
+        local elapsed_sec=$((elapsed_time % 60))
+        local remaining_min=$((estimated_remaining / 60))
+        local remaining_sec=$((estimated_remaining % 60))
+        
+        # Display enhanced progress with visual separator
+        echo ""
+        print_subsection "Test ${current_test}/${total_tests}: $api_name"
+        if [ "$payload_size" != "default" ] && [ -n "$payload_size" ]; then
+            print_status "Payload Size: $payload_size"
+        else
+            print_status "Payload Size: default (~400-500 bytes)"
+        fi
+        print_status "Test Mode: $TEST_MODE"
+        print_status "Elapsed Time: ${elapsed_min}m ${elapsed_sec}s"
+        print_status "Estimated Remaining: ${remaining_min}m ${remaining_sec}s"
+        echo ""
+        
+        # Display progress bar
+        print_progress "$current_test" "$total_tests" "Testing: $api_name (${payload_size:-default})"
+        echo ""
         local api_config=$(get_api_config "$api_name")
         if [ -z "$api_config" ]; then
             print_error "Unknown API: $api_name"
