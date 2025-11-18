@@ -162,13 +162,19 @@ parse_k6_output_for_stats() {
     local total_phases=0
     
     # Determine total phases based on test mode
-    if [ "$test_mode" = "full" ]; then
+    if [ "$test_mode" = "smoke" ]; then
+        total_phases=1
+    elif [ "$test_mode" = "full" ]; then
         total_phases=4
     elif [ "$test_mode" = "saturation" ]; then
         total_phases=7
     else
         total_phases=1
     fi
+    
+    # Phase names for smoke test (single phase)
+    local phase_names_smoke=("Smoke Test")
+    local phase_vus_smoke=(1)
     
     # Phase names for full test
     local phase_names_full=("Baseline" "Mid-load" "High-load" "Higher-load")
@@ -188,7 +194,17 @@ parse_k6_output_for_stats() {
             local detected_vus=$(echo "$line" | grep -oE "[0-9]+ VUs" | grep -oE "[0-9]+" | head -1 || echo "")
             if [ -n "$detected_vus" ]; then
                 # Determine which phase based on VU count
-                if [ "$test_mode" = "full" ]; then
+                if [ "$test_mode" = "smoke" ]; then
+                    for i in "${!phase_vus_smoke[@]}"; do
+                        if [ "${phase_vus_smoke[$i]}" = "$detected_vus" ]; then
+                            if [ "$current_phase" -ne "$((i + 1))" ]; then
+                                current_phase=$((i + 1))
+                                print_phase_progress "$current_phase" "$total_phases" "${phase_names_smoke[$i]}" "$detected_vus"
+                            fi
+                            break
+                        fi
+                    done
+                elif [ "$test_mode" = "full" ]; then
                     for i in "${!phase_vus_full[@]}"; do
                         if [ "${phase_vus_full[$i]}" = "$detected_vus" ]; then
                             if [ "$current_phase" -ne "$((i + 1))" ]; then
@@ -324,9 +340,21 @@ elif [ "$PAYLOAD_SIZE_PARAM" = "4k" ] || [ "$PAYLOAD_SIZE_PARAM" = "8k" ] || [ "
     # Run single payload size
     PAYLOAD_SIZES="$PAYLOAD_SIZE_PARAM"
     echo "Running tests with payload size: $PAYLOAD_SIZES"
+elif echo "$PAYLOAD_SIZE_PARAM" | grep -q ","; then
+    # Comma-separated list of payload sizes (e.g., "4k,8k")
+    PAYLOAD_SIZES=$(echo "$PAYLOAD_SIZE_PARAM" | tr ',' ' ')
+    # Validate each payload size
+    for size in $PAYLOAD_SIZES; do
+        if [ "$size" != "4k" ] && [ "$size" != "8k" ] && [ "$size" != "32k" ] && [ "$size" != "64k" ]; then
+            echo "Error: Invalid payload size in list: '$size'"
+            echo "Valid options: 4k, 8k, 32k, 64k"
+            exit 1
+        fi
+    done
+    echo "Running tests with payload sizes: $PAYLOAD_SIZES"
 else
     echo "Error: Invalid PAYLOAD_SIZE parameter: '$PAYLOAD_SIZE_PARAM'"
-    echo "Valid options: 4k, 8k, 32k, 64k, all, or empty for default"
+    echo "Valid options: 4k, 8k, 32k, 64k, comma-separated list (e.g., '4k,8k'), all, or empty for default"
     exit 1
 fi
 
@@ -1058,15 +1086,18 @@ wait_and_verify_event_processing() {
     local api_name=$1
     local port=$2
     local protocol=$3
-    # For smoke tests, use shorter wait time (15 seconds)
+    # For smoke tests, use shorter wait time (8 seconds)
     # For full tests, use full wait time (60 seconds)
     local wait_seconds=60
     if [ "$TEST_MODE" = "smoke" ]; then
-        wait_seconds=15  # Shorter wait for smoke tests
+        wait_seconds=8  # Reduced from 15 seconds for smoke tests
     fi
-    local check_interval=5
+    local check_interval=2  # Check every 2 seconds for faster response
     local elapsed=0
     local patterns_found=0
+    local last_log_size=0
+    local no_log_activity_count=0
+    local max_no_activity_checks=3  # Stop if no log activity for 3 consecutive checks (6 seconds)
     
     print_status "=========================================="
     print_status "Waiting and verifying event processing for $api_name"
@@ -1078,14 +1109,38 @@ wait_and_verify_event_processing() {
     # For REST APIs, send a test request first to trigger event processing
     if [ "$protocol" = "http" ]; then
         send_test_request "$api_name" "$port" "$protocol"
-        # Wait a few seconds for the request to be processed
-        sleep 3
+        # Wait for the request to be processed (reduced for smoke tests)
+        if [ "$TEST_MODE" = "smoke" ]; then
+            sleep 1  # Reduced from 3 seconds for smoke tests
+        else
+            sleep 3
+        fi
     fi
+    
+    # Get initial log size
+    last_log_size=$(docker logs "$api_name" 2>&1 | wc -l | tr -d ' ')
     
     # Wait and check logs periodically
     while [ $elapsed -lt $wait_seconds ]; do
         # Get container logs (check last 200 lines to catch recent activity)
         local logs=$(docker logs "$api_name" 2>&1 | tail -200)
+        local current_log_size=$(echo "$logs" | wc -l | tr -d ' ')
+        
+        # Check if logs are growing (indicates activity)
+        if [ "$current_log_size" -eq "$last_log_size" ]; then
+            no_log_activity_count=$((no_log_activity_count + 1))
+        else
+            no_log_activity_count=0  # Reset counter if logs are growing
+            last_log_size=$current_log_size
+        fi
+        
+        # If no log activity for several checks, don't wait further (unless we're very early)
+        if [ $no_log_activity_count -ge $max_no_activity_checks ] && [ $elapsed -ge 6 ]; then
+            print_warning "No log activity detected for ${elapsed}s, checking for existing event patterns..."
+            log_step "$api_name" "EVENT_VERIFY" "No log activity detected, checking existing patterns" "warning"
+            # Break out of loop to check one final time
+            break
+        fi
         
         # Check for event processing log patterns (case-insensitive)
         local persisted_pattern=$(echo "$logs" | grep -i "Persisted events count" | tail -1)
@@ -1127,8 +1182,8 @@ wait_and_verify_event_processing() {
             return 0
         fi
         
-        # Show progress every 15 seconds
-        if [ $((elapsed % 15)) -eq 0 ] && [ $elapsed -gt 0 ]; then
+        # Show progress every 10 seconds
+        if [ $((elapsed % 10)) -eq 0 ] && [ $elapsed -gt 0 ]; then
             print_status "Still waiting for event processing logs... (${elapsed}s/${wait_seconds}s)"
             log_step "$api_name" "EVENT_VERIFY" "Still waiting for event processing logs (${elapsed}s/${wait_seconds}s)" "info"
         fi
@@ -1136,6 +1191,30 @@ wait_and_verify_event_processing() {
         sleep $check_interval
         elapsed=$((elapsed + check_interval))
     done
+    
+    # Final check after loop (in case we broke early due to no activity)
+    local logs=$(docker logs "$api_name" 2>&1 | tail -200)
+    local persisted_pattern=$(echo "$logs" | grep -i "Persisted events count" | tail -1)
+    local processing_pattern=$(echo "$logs" | grep -i "Processing event" | tail -1)
+    local created_pattern=$(echo "$logs" | grep -i "Successfully created entity" | tail -1)
+    
+    patterns_found=0
+    if [ -n "$persisted_pattern" ]; then
+        patterns_found=$((patterns_found + 1))
+    fi
+    if [ -n "$processing_pattern" ]; then
+        patterns_found=$((patterns_found + 1))
+    fi
+    if [ -n "$created_pattern" ]; then
+        patterns_found=$((patterns_found + 1))
+    fi
+    
+    if [ $patterns_found -gt 0 ]; then
+        print_success "Event processing logs detected for $api_name"
+        log_step "$api_name" "EVENT_VERIFY" "Event processing logs found" "success"
+        echo ""
+        return 0
+    fi
     
     # If we get here, no patterns were found
     # For gRPC APIs, this might be expected if we didn't send a test request
@@ -1166,13 +1245,27 @@ wait_and_verify_event_processing() {
 # Function to check API logs for event count
 check_api_logs() {
     local api_name=$1
+    local timeout_seconds=10  # Don't wait more than 10 seconds for log check
     
     print_status "Checking logs for $api_name..."
     log_step "$api_name" "LOG_CHECK" "Checking API logs for event count" "info"
     cd "$BASE_DIR"
     
-    # Get container logs (check last 200 lines)
-    local logs=$(docker logs "$api_name" 2>&1 | tail -200)
+    # Get container logs with timeout (check last 200 lines)
+    local logs=""
+    if command -v timeout >/dev/null 2>&1; then
+        logs=$(timeout "$timeout_seconds" docker logs "$api_name" 2>&1 | tail -200 || echo "")
+    elif command -v gtimeout >/dev/null 2>&1; then
+        logs=$(gtimeout "$timeout_seconds" docker logs "$api_name" 2>&1 | tail -200 || echo "")
+    else
+        # No timeout available, but docker logs should be fast
+        logs=$(docker logs "$api_name" 2>&1 | tail -200 || echo "")
+    fi
+    
+    # If logs are empty, try one more time without timeout
+    if [ -z "$logs" ]; then
+        logs=$(docker logs "$api_name" 2>&1 | tail -200 || echo "")
+    fi
     
     # Check for multiple event processing patterns (case-insensitive)
     local persisted_pattern=$(echo "$logs" | grep -i "Persisted events count" | tail -1)
@@ -1469,8 +1562,9 @@ calculate_test_duration() {
     local duration=0
     
     if [ "$test_mode" = "smoke" ]; then
-        # Smoke test: 1 VU, 5 iterations, ~5-10 seconds
-        duration=15
+        # Smoke test: 1 VU, 5 iterations, ~0.5-1 second actual test time
+        # Use 10 seconds for timeout protection (actual test completes much faster)
+        duration=10
     elif [ "$test_mode" = "full" ]; then
         # Full test: 5m = 5 minutes = 300 seconds (single phase for quick testing)
         duration=300
@@ -1482,8 +1576,13 @@ calculate_test_duration() {
         duration=900
     fi
     
-    # Add buffer time (30 seconds) for test startup and completion
-    echo $((duration + 30))
+    # Add buffer time (30 seconds) for test startup and completion (only for full/saturation)
+    if [ "$test_mode" = "smoke" ]; then
+        # For smoke tests, no additional buffer needed - test completes quickly
+        echo $duration
+    else
+        echo $((duration + 30))
+    fi
 }
 
 # Function to run k6 test
@@ -1704,18 +1803,55 @@ run_k6_test() {
         progress_display_pid=$!
     fi
     
-    # Run k6 in Docker container
+    # Run k6 in Docker container with timeout
     # Note: k6 image has k6 as entrypoint, so we need to override it to run shell commands
     # Use unbuffered output and prefix each line with API name for real-time visibility
     cd "$BASE_DIR"
     local test_exit_code=0
+    
+    # Calculate timeout: test duration + 5 minutes buffer
+    local timeout_seconds=$((test_duration + 300))
+    
     # Use prefix_logs function which handles cross-platform compatibility
     # Note: k6 output is captured and displayed in real-time, with phase detection happening in post-processing
     # Progress display runs in background to show animated dashboard
-    if docker-compose --profile k6-test run --rm --entrypoint /bin/sh k6-throughput -c "$k6_cmd" 2>&1 | prefix_logs "$api_name" | tee "$summary_file"; then
-        test_exit_code=0
+    # Use timeout to prevent hanging (available on Linux and macOS with coreutils)
+    if command -v timeout >/dev/null 2>&1; then
+        # Linux timeout command
+        if timeout "$timeout_seconds" docker-compose --profile k6-test run --rm --entrypoint /bin/sh k6-throughput -c "$k6_cmd" 2>&1 | prefix_logs "$api_name" | tee "$summary_file"; then
+            test_exit_code=0
+        else
+            local timeout_exit=$?
+            if [ $timeout_exit -eq 124 ]; then
+                print_error "k6 test timed out after ${timeout_seconds}s"
+                log_step "$api_name" "TEST" "k6 test timed out after ${timeout_seconds}s" "error"
+                test_exit_code=1
+            else
+                test_exit_code=$timeout_exit
+            fi
+        fi
+    elif command -v gtimeout >/dev/null 2>&1; then
+        # macOS timeout command (from coreutils)
+        if gtimeout "$timeout_seconds" docker-compose --profile k6-test run --rm --entrypoint /bin/sh k6-throughput -c "$k6_cmd" 2>&1 | prefix_logs "$api_name" | tee "$summary_file"; then
+            test_exit_code=0
+        else
+            local timeout_exit=$?
+            if [ $timeout_exit -eq 124 ]; then
+                print_error "k6 test timed out after ${timeout_seconds}s"
+                log_step "$api_name" "TEST" "k6 test timed out after ${timeout_seconds}s" "error"
+                test_exit_code=1
+            else
+                test_exit_code=$timeout_exit
+            fi
+        fi
     else
-        test_exit_code=1
+        # No timeout command available, run without timeout (but log warning)
+        print_warning "timeout command not available, running without timeout protection"
+        if docker-compose --profile k6-test run --rm --entrypoint /bin/sh k6-throughput -c "$k6_cmd" 2>&1 | prefix_logs "$api_name" | tee "$summary_file"; then
+            test_exit_code=0
+        else
+            test_exit_code=1
+        fi
     fi
     
     # Stop progress display if it was started
@@ -1727,12 +1863,16 @@ run_k6_test() {
         wait "$progress_display_pid" 2>/dev/null || true
     fi
     
-    # Stop metrics collection if it was started
+    # Stop metrics collection immediately after k6 test completes (don't wait for full duration)
     if [ -n "$metrics_pid" ]; then
         print_status "Stopping metrics collection..."
         stop_metrics_collection "$metrics_pid"
-        # Wait a moment for final metrics to be written
-        sleep 2
+        # For smoke tests, use shorter wait; for full/saturation, allow more time for final metrics
+        if [ "$TEST_MODE" = "smoke" ]; then
+            sleep 1  # Reduced from 2 seconds for smoke tests
+        else
+            sleep 2
+        fi
         if [ -f "$metrics_file" ]; then
             print_success "Metrics collection completed: $metrics_file"
         else
@@ -1753,6 +1893,13 @@ run_k6_test() {
     # Copy summary to log file
     if [ -f "$summary_file" ]; then
         cp "$summary_file" "$log_file"
+    fi
+    
+    # Validate that JSON file exists and test completed successfully
+    if [ ! -f "$json_file" ]; then
+        print_error "Test JSON file not found: $json_file"
+        log_step "$api_name" "TEST" "JSON file not found after test completion" "error"
+        return 1
     fi
     
     # Store performance metrics in database directly (primary storage)
@@ -1813,8 +1960,71 @@ except:
                 "$test_run_id" "completed" "$duration_seconds" >/dev/null 2>&1 || true
             
             print_success "Performance metrics stored in database"
+            
+            # Validate test results - check if there are errors
+            if [ "$total_samples" -gt 0 ] && [ "$error_samples" -gt 0 ]; then
+                local error_rate_pct=$(awk "BEGIN {printf \"%.2f\", ($error_samples / $total_samples) * 100}" 2>/dev/null || echo "0.0")
+                if (( $(echo "$error_rate_pct > 0" | bc -l 2>/dev/null || echo "0") )); then
+                    print_error "Test completed but had ${error_rate_pct}% error rate ($error_samples/$total_samples requests failed)"
+                    log_step "$api_name" "TEST" "Test had ${error_rate_pct}% error rate" "error"
+                    # For smoke tests, any errors should fail the test
+                    if [ "$TEST_MODE" = "smoke" ]; then
+                        print_error "Smoke test failed for $api_name due to request failures"
+                        return 1
+                    fi
+                    # For full/saturation tests, warn but continue if error rate is acceptable (< 5%)
+                    if (( $(echo "$error_rate_pct >= 5" | bc -l 2>/dev/null || echo "0") )); then
+                        print_error "Error rate ${error_rate_pct}% exceeds acceptable threshold (5%)"
+                        return 1
+                    else
+                        print_warning "Error rate ${error_rate_pct}% is below threshold, continuing..."
+                    fi
+                fi
+            elif [ "$total_samples" -eq 0 ]; then
+                print_error "Test completed but no requests were made"
+                log_step "$api_name" "TEST" "No requests made during test" "error"
+                return 1
+            fi
         else
-            print_warning "Could not extract metrics from JSON file"
+            print_error "Could not extract metrics from JSON file - test may have failed"
+            log_step "$api_name" "TEST" "Failed to extract metrics from JSON file" "error"
+            return 1
+        fi
+    elif [ -f "$json_file" ]; then
+        # JSON file exists but no test_run_id - still validate metrics
+        print_status "Validating test results..."
+        local metrics_output=$(python3 "$db_script_dir/extract_k6_metrics.py" "$json_file" 2>/dev/null || echo "")
+        if [ -n "$metrics_output" ]; then
+            IFS='|' read -r total_samples success_samples error_samples duration_seconds throughput avg_response min_response max_response <<< "$metrics_output"
+            
+            # Validate test results - check if there are errors
+            if [ "$total_samples" -gt 0 ] && [ "$error_samples" -gt 0 ]; then
+                local error_rate_pct=$(awk "BEGIN {printf \"%.2f\", ($error_samples / $total_samples) * 100}" 2>/dev/null || echo "0.0")
+                if (( $(echo "$error_rate_pct > 0" | bc -l 2>/dev/null || echo "0") )); then
+                    print_error "Test completed but had ${error_rate_pct}% error rate ($error_samples/$total_samples requests failed)"
+                    log_step "$api_name" "TEST" "Test had ${error_rate_pct}% error rate" "error"
+                    # For smoke tests, any errors should fail the test
+                    if [ "$TEST_MODE" = "smoke" ]; then
+                        print_error "Smoke test failed for $api_name due to request failures"
+                        return 1
+                    fi
+                    # For full/saturation tests, warn but continue if error rate is acceptable (< 5%)
+                    if (( $(echo "$error_rate_pct >= 5" | bc -l 2>/dev/null || echo "0") )); then
+                        print_error "Error rate ${error_rate_pct}% exceeds acceptable threshold (5%)"
+                        return 1
+                    else
+                        print_warning "Error rate ${error_rate_pct}% is below threshold, continuing..."
+                    fi
+                fi
+            elif [ "$total_samples" -eq 0 ]; then
+                print_error "Test completed but no requests were made"
+                log_step "$api_name" "TEST" "No requests made during test" "error"
+                return 1
+            fi
+        else
+            print_error "Could not extract metrics from JSON file - test may have failed"
+            log_step "$api_name" "TEST" "Failed to extract metrics from JSON file" "error"
+            return 1
         fi
     fi
     
@@ -3420,8 +3630,15 @@ main() {
         if ! run_throughput_test "$api_name" "$test_file" "$port" "$protocol" "$docker_host" "$proto_file" "$service_name" "$method_name"; then
             failed_apis="$failed_apis $api_name"
         else
-            # Check API logs for event count
-            check_api_logs "$api_name"
+            # Validate events were processed after test completion
+            print_status "Validating event processing after test completion..."
+            if ! check_api_logs "$api_name"; then
+                print_warning "Event processing validation had warnings for $api_name"
+                log_step "$api_name" "TEST" "Event processing validation had warnings" "warning"
+            else
+                print_success "Event processing validated successfully for $api_name"
+                log_step "$api_name" "TEST" "Event processing validated successfully" "success"
+            fi
         fi
         
         # Stop this API
@@ -3429,8 +3646,8 @@ main() {
         
         # Wait before next test (reduced for smoke tests)
         if [ "$TEST_MODE" = "smoke" ]; then
-            print_status "Waiting 2 seconds before next API test..."
-            sleep 2
+            print_status "Waiting 1 second before next API test..."
+            sleep 1  # Reduced from 2 seconds for smoke tests
         else
             print_status "Waiting 10 seconds before next API test..."
             sleep 10

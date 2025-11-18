@@ -54,6 +54,12 @@ export const API_CONFIG = {
 
 // Test phases configuration
 export const TEST_PHASES = {
+    smoke: [
+        { duration: '10s', target: 5 },    // Phase 1: Baseline
+        { duration: '10s', target: 10 },   // Phase 2: Mid-load
+        { duration: '10s', target: 20 },   // Phase 3: High-load
+        { duration: '10s', target: 30 },   // Phase 4: Higher-load
+    ],
     full: [
         { duration: '2m', target: 10 },   // Phase 1: Baseline
         { duration: '2m', target: 50 },   // Phase 2: Mid-load
@@ -62,12 +68,10 @@ export const TEST_PHASES = {
     ],
     saturation: [
         { duration: '2m', target: 10 },    // Phase 1: Baseline
-        { duration: '2m', target: 50 },    // Phase 2: Mid-load
-        { duration: '2m', target: 100 },   // Phase 3: High-load
-        { duration: '2m', target: 200 },   // Phase 4: Very High
-        { duration: '2m', target: 500 },   // Phase 5: Extreme
-        { duration: '2m', target: 1000 },  // Phase 6: Maximum
-        { duration: '2m', target: 2000 },  // Phase 7: Saturation
+        { duration: '2m', target: 100 },   // Phase 2: High-load
+        { duration: '2m', target: 500 },   // Phase 3: Extreme
+        { duration: '2m', target: 1000 },  // Phase 4: Maximum
+        { duration: '2m', target: 2000 },  // Phase 5: Saturation
     ],
 };
 
@@ -93,12 +97,12 @@ export function getTestOptions() {
     
     const options = {};
     
-    // For smoke tests, use 1 VU with 5 iterations (quick validation)
+    // For smoke tests, use 1 VU with 5 iterations (exactly 5 events)
+    // For full and saturation tests, use stages to enable phase-based metrics collection
     if (TEST_MODE === 'smoke') {
         options.vus = 1;
         options.iterations = 5;
     } else {
-        // For full and saturation tests, use stages
         options.stages = TEST_PHASES[TEST_MODE] || TEST_PHASES.full;
     }
     

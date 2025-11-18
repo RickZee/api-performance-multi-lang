@@ -1,5 +1,65 @@
 # Load Test Documentation
 
+## HTML Report Structure and Testing
+
+### Report Structure
+
+The HTML performance test report (`comparison-report-{timestamp}.html`) contains the following sections:
+
+1. **Header Section**: Test metadata (mode, date, type, duration, payload sizes)
+2. **Data Validation Warnings**: Alerts for data quality issues (if any)
+3. **Executive Summary Table**: Overview of all APIs with key metrics
+4. **Comparison Analysis**: 
+   - Statistical Analysis (mean, std dev, confidence intervals, coefficient of variation)
+   - Performance Rankings (highest throughput, lowest latency, most reliable)
+   - Protocol Comparison (REST vs gRPC)
+   - Language Comparison (Java vs Rust vs Go)
+   - Key Insights
+   - Recommendations
+5. **Performance Comparison Charts**: Interactive Chart.js visualizations
+6. **AWS EKS Cost Analytics**: Cost breakdown and efficiency metrics (if resource data available)
+7. **Resource Utilization Metrics**: CPU and memory usage (if resource data available)
+8. **Detailed Results**: Expanded metrics table per API
+9. **Footer**: Generation timestamp and framework info
+
+### Data Sources
+
+- **Primary**: PostgreSQL database via `db_client.py` (`test_runs` and `resource_metrics` tables)
+- **Fallback**: JSON files from k6 test results
+- **Cost Calculations**: `calculate_aws_costs.py` module
+- **Resource Metrics**: Database `resource_metrics` table (optional)
+
+### Testing the Report
+
+A comprehensive test suite is available to validate report completeness:
+
+```bash
+# Run tests with default report location
+pytest load-test/shared/test_html_report.py -v
+
+# Run tests with specific report file
+pytest load-test/shared/test_html_report.py --report-path=/path/to/report.html -v
+```
+
+The test suite validates:
+- All sections are present
+- Tables contain data
+- Numeric values are valid
+- Charts are properly configured
+- Required elements exist
+
+See `load-test/shared/test_html_report.py` for detailed test coverage.
+
+### Report Improvements
+
+The report includes several enhancements:
+
+1. **Data Validation**: Automatic detection of data quality issues
+2. **Statistical Analysis**: Mean, standard deviation, confidence intervals, coefficient of variation
+3. **Export Capabilities**: CSV and JSON export buttons
+4. **Enhanced Chart Tooltips**: Detailed information on hover
+5. **Error Handling**: Graceful degradation when optional data is missing
+
 ## AWS EKS Cost Analytics - Column Definitions
 
 This document explains the columns in the AWS EKS Cost Analytics section of the performance test reports.
