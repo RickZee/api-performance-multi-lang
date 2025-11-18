@@ -34,9 +34,10 @@ def get_phase_boundaries(test_mode: str) -> List[Tuple[int, int, int]]:
     phases = []
     
     if test_mode == 'smoke':
-        # Smoke test: single phase, ~30 seconds, 10 VUs
+        # Smoke test: single phase, 1 VU, 5 iterations (~5-10 seconds)
+        # Treat the entire test as one phase for metrics collection
         phases = [
-            (1, 30, 10),   # Single phase: 30s at 10 VUs
+            (1, 10, 1),    # Phase 1: ~10s at 1 VU (5 iterations)
         ]
     elif test_mode == 'full':
         phases = [
