@@ -9,6 +9,7 @@ import (
 	"producer-api-go/internal/config"
 	"producer-api-go/internal/constants"
 	"producer-api-go/internal/handlers"
+	"producer-api-go/internal/middleware"
 	"producer-api-go/internal/repository"
 	"producer-api-go/internal/service"
 	"time"
@@ -80,11 +81,17 @@ func main() {
 
 	// Register routes
 	api := router.Group("/api/v1/events")
+	
+	// Apply auth middleware if enabled (health check is always public)
+	api.Use(middleware.JWTAuthMiddleware(logger, cfg.AuthEnabled))
+	
 	{
 		api.POST("", eventHandler.ProcessEvent)
 		api.POST("/bulk", eventHandler.ProcessBulkEvents)
-		api.GET("/health", healthHandler.HealthCheck)
 	}
+	
+	// Health check is always public (no auth required)
+	router.GET("/api/v1/events/health", healthHandler.HealthCheck)
 
 	// Start server
 	addr := fmt.Sprintf(":%d", cfg.ServerPort)

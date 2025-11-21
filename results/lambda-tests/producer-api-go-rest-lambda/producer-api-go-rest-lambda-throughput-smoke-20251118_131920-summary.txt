@@ -1,0 +1,33 @@
+
+         /\      Grafana   /‾‾/  
+    /\  /  \     |\  __   /  /   
+   /  \/    \    | |/ /  /   ‾‾\ 
+  /          \   |   (  |  (‾)  |
+ / __________ \  |_|\_\  \_____/ 
+
+     execution: local
+        script: /k6/load-test/k6/lambda-rest-api-test.js
+        output: json (/k6//Users/rickzakharov/dev/github/api-performance-multi-lang/results/lambda-tests/producer-api-go-rest-lambda/producer-api-go-rest-lambda-throughput-smoke-20251118_131920.json)
+
+     scenarios: (100.00%) 1 scenario, 1 max VUs, 10m30s max duration (incl. graceful stop):
+              * default: 5 iterations shared among 1 VUs (maxDuration: 10m0s, gracefulStop: 30s)
+
+
+ Lambda REST API Test Summary
+ ===========================
+
+ HTTP Requests:
+   Total: 5
+   Rate: 7.46 req/s
+ Response Time:
+   Avg: 30.79ms
+   Min: 22.35ms
+   Max: 42.14ms
+   P95: 40.74ms
+ Error Rate: 0.00%
+ Potential Cold Starts: undefined (0.00%)
+   Note: Actual cold starts should be verified via CloudWatch Logs
+
+
+running (00m00.7s), 0/1 VUs, 5 complete and 0 interrupted iterations
+default ✓ [ 100% ] 1 VUs  00m00.7s/10m0s  5/5 shared iters

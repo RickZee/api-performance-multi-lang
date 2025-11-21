@@ -16,7 +16,7 @@ import (
 	"time"
 
 	"github.com/aws/aws-lambda-go/events"
-	"github.com/aws/aws-lambda-go/lambda"
+	awslambda "github.com/aws/aws-lambda-go/lambda"
 	"go.uber.org/zap"
 )
 
@@ -58,7 +58,7 @@ func init() {
 }
 
 func main() {
-	lambda.Start(handler)
+	awslambda.Start(handler)
 }
 
 func handler(ctx context.Context, request events.APIGatewayV2HTTPRequest) (events.APIGatewayV2HTTPResponse, error) {

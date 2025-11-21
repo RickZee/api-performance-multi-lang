@@ -15,6 +15,27 @@ echo "Building Lambda function for producer-api-go-grpc-lambda..."
 rm -rf "$BUILD_DIR"
 mkdir -p "$BUILD_DIR"
 
+# Generate proto files if needed
+if [ -d "$PROJECT_ROOT/proto" ] && [ -f "$PROJECT_ROOT/proto"/*.proto ] 2>/dev/null; then
+    echo "Generating proto files..."
+    if command -v protoc >/dev/null 2>&1; then
+        cd "$PROJECT_ROOT"
+        # Ensure PATH includes Go bin for protoc-gen-go
+        export PATH="${HOME}/go/bin:/opt/homebrew/bin:${PATH}"
+        # Generate proto files in the proto directory
+        protoc --proto_path=proto --go_out=proto --go_opt=paths=source_relative \
+               --go-grpc_out=proto --go-grpc_opt=paths=source_relative \
+               proto/*.proto
+        if [ $? -eq 0 ]; then
+            echo "Proto files generated successfully"
+        else
+            echo "Warning: Proto generation failed, but continuing..."
+        fi
+    else
+        echo "Warning: protoc not found, proto files may not be generated"
+    fi
+fi
+
 # Build for Linux (Lambda runs on Amazon Linux)
 echo "Compiling Go binary for Linux..."
 GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build \

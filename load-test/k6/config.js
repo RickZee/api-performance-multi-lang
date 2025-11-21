@@ -6,6 +6,11 @@
 // Test mode: 'smoke', 'full', or 'saturation'
 export const TEST_MODE = __ENV.TEST_MODE || 'smoke';
 
+// Authentication and secrets configuration
+export const AUTH_ENABLED = __ENV.AUTH_ENABLED === 'true' || __ENV.AUTH_ENABLED === '1';
+export const SECRETS_MODE = __ENV.SECRETS_MODE || 'local'; // 'local' or 'remote'
+export const JWT_TOKEN = __ENV.JWT_TOKEN || ''; // Pre-generated JWT token for testing
+
 // API configurations
 export const API_CONFIG = {
     'producer-api-java-rest': {
@@ -50,16 +55,45 @@ export const API_CONFIG = {
         method: 'ProcessEvent',
         protoFile: '/k6/proto/go-grpc/event_service.proto',
     },
+    // Lambda API configurations
+    'producer-api-go-rest-lambda': {
+        protocol: 'http',
+        apiUrl: __ENV.API_URL || __ENV.LAMBDA_API_URL || __ENV.LAMBDA_GO_REST_API_URL,
+        path: '/api/v1/events',
+        isLambda: true,
+    },
+    'producer-api-go-grpc-lambda': {
+        protocol: 'grpc-web',
+        apiUrl: __ENV.API_URL || __ENV.LAMBDA_API_URL || __ENV.LAMBDA_GO_GRPC_API_URL,
+        service: 'com.example.grpc.EventService',
+        method: 'ProcessEvent',
+        isLambda: true,
+    },
+    'producer-api-java-rest-lambda': {
+        protocol: 'http',
+        apiUrl: __ENV.API_URL || __ENV.LAMBDA_API_URL || __ENV.LAMBDA_JAVA_REST_API_URL,
+        path: '/api/v1/events',
+        isLambda: true,
+    },
+    'producer-api-java-grpc-lambda': {
+        protocol: 'grpc-web',
+        apiUrl: __ENV.API_URL || __ENV.LAMBDA_API_URL || __ENV.LAMBDA_JAVA_GRPC_API_URL,
+        service: 'com.example.grpc.EventService',
+        method: 'ProcessEvent',
+        isLambda: true,
+    },
 };
 
 // Test phases configuration
+// Note: Duration-based stages are used instead of iterations for performance testing because:
+// 1. They test sustained load over time (more realistic for production scenarios)
+// 2. They allow observation of system behavior over time (memory leaks, connection pool exhaustion)
+// 3. They enable phase-based metrics collection for resource utilization analysis
+// 4. They provide consistent test duration regardless of API performance
 export const TEST_PHASES = {
-    smoke: [
-        { duration: '10s', target: 5 },    // Phase 1: Baseline
-        { duration: '10s', target: 10 },   // Phase 2: Mid-load
-        { duration: '10s', target: 20 },   // Phase 3: High-load
-        { duration: '10s', target: 30 },   // Phase 4: Higher-load
-    ],
+    // Smoke test uses iterations: 5 (see getTestOptions), not stages
+    // These phases are not used but kept for reference
+    smoke: [],
     full: [
         { duration: '2m', target: 10 },   // Phase 1: Baseline
         { duration: '2m', target: 50 },   // Phase 2: Mid-load
@@ -68,10 +102,12 @@ export const TEST_PHASES = {
     ],
     saturation: [
         { duration: '2m', target: 10 },    // Phase 1: Baseline
-        { duration: '2m', target: 100 },   // Phase 2: High-load
-        { duration: '2m', target: 500 },   // Phase 3: Extreme
-        { duration: '2m', target: 1000 },  // Phase 4: Maximum
-        { duration: '2m', target: 2000 },  // Phase 5: Saturation
+        { duration: '2m', target: 50 },    // Phase 2: Mid-load
+        { duration: '2m', target: 100 },   // Phase 3: High-load
+        { duration: '2m', target: 200 },   // Phase 4: Very High
+        { duration: '2m', target: 500 },   // Phase 5: Extreme
+        { duration: '2m', target: 1000 },  // Phase 6: Maximum
+        { duration: '2m', target: 2000 },  // Phase 7: Saturation
     ],
 };
 

@@ -36,3 +36,7 @@ go build -o producer-api-go ./cmd/server    # Build binary
 ```
 
 For Docker usage, see the main [README.md](../README.md).
+
+## Lambda Version
+
+A serverless Lambda version is also available: **[Producer API - Go REST Lambda](../producer-api-go-rest-lambda/README.md)**

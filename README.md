@@ -4,11 +4,13 @@
 
 Discover as many aspects of different implementations of an event ingestion API using multiple infrastructure, language and protocols options.
 
-A comprehensive performance comparison of 6 producer API implementations using k6 load testing. This repository focuses on comparing throughput, latency, and scalability across different technology stacks and protocols.
+A comprehensive performance comparison of producer API implementations using k6 load testing. This repository focuses on comparing throughput, latency, and scalability across different technology stacks, protocols, and deployment models (containerized and serverless).
 
 ## Overview
 
-This project compares the performance characteristics of 6 different producer API implementations:
+This project compares the performance characteristics of multiple producer API implementations:
+
+### Containerized APIs (6 implementations)
 
 1. **producer-api-java-rest** - Spring Boot REST API (Java, Spring WebFlux, R2DBC)
 2. **producer-api-java-grpc** - Java gRPC API (Java, Spring Boot, R2DBC)
@@ -17,9 +19,14 @@ This project compares the performance characteristics of 6 different producer AP
 5. **producer-api-go-rest** - Go REST API (Go, Gin, pgx)
 6. **producer-api-go-grpc** - Go gRPC API (Go, gRPC, pgx)
 
-All APIs implement the same event processing functionality, allowing for fair performance comparison across different technology stacks and protocols.
+### Serverless Lambda APIs (2 implementations)
 
-**Important:** This is a simple, non-production experiment that lacks logging, authentication and authorization.
+7. **producer-api-go-rest-lambda** - AWS Lambda REST API (Go, API Gateway HTTP API)
+8. **producer-api-go-grpc-lambda** - AWS Lambda gRPC API (Go, API Gateway HTTP API, gRPC-Web)
+
+All APIs implement the same event processing functionality, allowing for fair performance comparison across different technology stacks, protocols, and deployment models.
+
+**Note:** This is a performance testing experiment. While basic authentication infrastructure is available (see [Authentication & Secrets](#authentication--secrets) section), it is not fully implemented across all APIs. The focus remains on performance comparison rather than production-ready security features.
 
 ## Quick Start
 
@@ -29,7 +36,17 @@ All APIs implement the same event processing functionality, allowing for fair pe
 - Java 17+ (for Java APIs)
 - Rust 1.70+ (for Rust APIs)
 - PostgreSQL 15+ (via Docker)
+- Python 3.7+ (for test scripts and utilities)
 - **Disk Space**: See [System Requirements](#infrastructure-and-requirements) section for disk space requirements by test type
+
+**Python Dependencies:**
+- `psycopg2` - PostgreSQL adapter (for metrics database)
+- `PyJWT` - JWT token generation (optional, for auth testing)
+
+Install Python dependencies:
+```bash
+pip install psycopg2-binary PyJWT
+```
 
 ### Start Services
 
@@ -53,6 +70,27 @@ docker-compose --profile producer-java-rest --profile producer-java-grpc --profi
 
 ### Run Performance Tests
 
+The test runner features a beautiful Rich-based UI with live metrics, progress tracking, and color-coded API names:
+
+![Test Runner Demo](docs/test-runner-all-apis-demo.gif)
+
+**Using the Python Test Runner (Recommended):**
+
+```bash
+cd load-test/shared
+
+# Run smoke tests for all APIs with multiple payload sizes
+python run-tests.py smoke --payload-size 400b --payload-size 4k --payload-size 8k
+
+# Run full tests for a specific API
+python run-tests.py full --api producer-api-go-rest
+
+# Run saturation tests
+python run-tests.py saturation
+```
+
+**Using the Shell Script (Legacy):**
+
 ```bash
 cd load-test/shared
 
@@ -66,9 +104,47 @@ cd load-test/shared
 ./run-sequential-throughput-tests.sh saturation
 ```
 
+### Lambda API Testing
+
+Lambda APIs can be tested both locally (using SAM Local) and in AWS:
+
+**Local Lambda Testing:**
+
+```bash
+cd load-test/shared
+
+# Start local Lambda functions
+./start-local-lambdas.sh
+
+# Run Lambda tests (local execution)
+./run-lambda-tests.sh smoke local
+
+# Stop local Lambda functions
+./stop-local-lambdas.sh
+```
+
+**AWS Lambda Testing:**
+
+```bash
+cd load-test/shared
+
+# Deploy Lambda functions to AWS
+./deploy-all-lambdas.sh
+
+# Run Lambda tests (cloud execution)
+./run-lambda-tests.sh smoke cloud
+```
+
+For detailed Lambda deployment and testing instructions, see:
+- [Lambda REST API README](producer-api-go-rest-lambda/README.md)
+- [Lambda gRPC API README](producer-api-go-grpc-lambda/README.md)
+- [Terraform README](terraform/README.md) for infrastructure deployment
+
 ## API Implementations
 
 ### Summary
+
+#### Containerized APIs
 
 | API | Protocol | Port | Language | Framework | Database Driver |
 |-----|----------|------|----------|-----------|-----------------|
@@ -78,6 +154,13 @@ cd load-test/shared
 | producer-api-rust-grpc | gRPC | 9090 | Rust | Tonic | sqlx |
 | producer-api-go-rest | REST | 9083 | Go | Gin | pgx |
 | producer-api-go-grpc | gRPC | 9092 | Go | gRPC | pgx |
+
+#### Serverless Lambda APIs
+
+| API | Protocol | Deployment | Language | Framework | Database Driver |
+|-----|----------|------------|----------|-----------|-----------------|
+| producer-api-go-rest-lambda | REST | AWS Lambda + API Gateway | Go | API Gateway HTTP API | pgx |
+| producer-api-go-grpc-lambda | gRPC | AWS Lambda + API Gateway | Go | API Gateway HTTP API (gRPC-Web) | pgx |
 
 ### Common API Information
 
@@ -101,12 +184,17 @@ All REST APIs provide the following endpoints:
 
 Each API has its own README with detailed information:
 
+**Containerized APIs:**
 - **[Producer API - Java REST](producer-api-java-rest/README.md)** - Spring Boot REST API (WebFlux, R2DBC)
 - **[Producer API - Java gRPC](producer-api-java-grpc/README.md)** - Java gRPC API (Spring Boot, R2DBC)
 - **[Producer API - Rust REST](producer-api-rust-rest/README.md)** - Rust REST API (Axum, sqlx)
 - **[Producer API - Rust gRPC](producer-api-rust-grpc/README.md)** - Rust gRPC API (Tonic, sqlx)
-- **[Producer API - Go REST](producer-api-go-rest/README.md)** - Go REST API (Gin, pgx)
-- **[Producer API - Go gRPC](producer-api-go-grpc/README.md)** - Go gRPC API (gRPC, pgx)
+- **[Producer API - Go REST](producer-api-go-rest/README.md)** - Go REST API (Gin, pgx) - *Also available as [Lambda version](producer-api-go-rest-lambda/README.md)*
+- **[Producer API - Go gRPC](producer-api-go-grpc/README.md)** - Go gRPC API (gRPC, pgx) - *Also available as [Lambda version](producer-api-go-grpc-lambda/README.md)*
+
+**Serverless Lambda APIs:**
+- **[Producer API - Go REST Lambda](producer-api-go-rest-lambda/README.md)** - AWS Lambda REST API (API Gateway HTTP API)
+- **[Producer API - Go gRPC Lambda](producer-api-go-grpc-lambda/README.md)** - AWS Lambda gRPC API (API Gateway HTTP API, gRPC-Web)
 
 ## Performance Testing
 
@@ -121,22 +209,73 @@ This repository uses **k6** as the primary performance testing tool. k6 is a mod
 
 ### Test Types
 
-1. **Smoke Tests**: Quick validation (1 VU, 5 iterations, ~5-10 seconds)
-2. **Full Tests**: Baseline performance (10 → 50 → 100 → 200 VUs, ~11 minutes)
-3. **Saturation Tests**: Maximum throughput (10 → 50 → 100 → 200 → 500 → 1000 → 2000 VUs, ~14 minutes)
+1. **Smoke Tests**: Quick validation (1 VU, 5 iterations, ~0.5-1 second k6 execution, ~22-30 seconds total per API)
+2. **Full Tests**: Baseline performance (10 → 50 → 100 → 200 VUs, ~11 minutes k6 execution, ~12-13 minutes total per API)
+3. **Saturation Tests**: Maximum throughput (10 → 50 → 100 → 200 → 500 → 1000 → 2000 VUs, ~14 minutes k6 execution, ~15-16 minutes total per API)
 
 **Approximate Test Timings:**
 
 | Test Type | Per API Duration | Total (All 6 APIs) | With All Payload Sizes (4k, 8k, 32k, 64k) |
 |-----------|------------------|-------------------|-------------------------------------------|
-| Smoke Tests | ~5-10 seconds | ~5-10 minutes | ~20-40 minutes |
-| Full Tests | ~11 minutes | ~75-80 minutes | ~5-5.5 hours |
-| Saturation Tests | ~14 minutes | ~90-100 minutes | ~6-6.5 hours |
+| Smoke Tests | ~22-30 seconds | ~2-3 minutes | ~10-15 minutes |
+| Full Tests | ~12-13 minutes | ~72-78 minutes | ~6-6.5 hours |
+| Saturation Tests | ~15-16 minutes | ~90-96 minutes | ~7.5-8 hours |
+
+**Calculation Details:**
+
+- **Smoke Tests**:
+  - **k6 execution**: 1 VU × 5 iterations = ~0.5-1 second (5 API calls × ~50-200ms each + 0.1s sleep per call)
+  - **Overhead per API**: ~22-30 seconds
+    - Stop previous API: ~2-3s
+    - Clear database: ~1-2s
+    - Start API: ~5-10s
+    - Wait for startup: 3s
+    - Health check: ~1-2s
+    - Event verification: 8s
+    - Test request wait: 1s (REST only)
+    - Stop API: ~2-3s
+  - **Total per API**: ~22-30 seconds (k6 execution is negligible compared to overhead)
+  - **Total (6 APIs)**: ~2-3 minutes (not 5-10 minutes as previously estimated)
+  - **With all payload sizes**: 5 payload sizes × ~2-3 minutes = ~10-15 minutes
+
+- **Full Tests**:
+  - **k6 execution**: 2m + 2m + 2m + 5m = 11 minutes (sum of all phase durations)
+  - **Overhead per API**: ~70-80 seconds
+    - Stop previous API: ~2-3s
+    - Clear database: ~1-2s
+    - Start API: ~5-10s
+    - Wait for startup: 5s
+    - Health check: ~1-2s
+    - Event verification: 60s
+    - Test request wait: 3s (REST only)
+    - k6 buffer: 30s
+    - Stop API: ~2-3s
+  - **Total per API**: ~12-13 minutes (11 minutes k6 + ~1-1.5 minutes overhead)
+  - **Total (6 APIs)**: ~72-78 minutes (11 minutes × 6 = 66 minutes + ~12-18 minutes overhead)
+  - **With all payload sizes**: 5 payload sizes × ~72-78 minutes = ~6-6.5 hours
+
+- **Saturation Tests**:
+  - **k6 execution**: 2m × 7 phases = 14 minutes (sum of all phase durations)
+  - **Overhead per API**: ~70-80 seconds (same as full tests)
+    - Stop previous API: ~2-3s
+    - Clear database: ~1-2s
+    - Start API: ~5-10s
+    - Wait for startup: 5s
+    - Health check: ~1-2s
+    - Event verification: 60s
+    - Test request wait: 3s (REST only)
+    - k6 buffer: 30s
+    - Stop API: ~2-3s
+  - **Total per API**: ~15-16 minutes (14 minutes k6 + ~1-1.5 minutes overhead)
+  - **Total (6 APIs)**: ~90-96 minutes (14 minutes × 6 = 84 minutes + ~12-18 minutes overhead)
+  - **With all payload sizes**: 5 payload sizes × ~90-96 minutes = ~7.5-8 hours
 
 **Notes:**
-- **Per-API duration**: Actual k6 test execution time
-- **Total duration**: Includes setup, teardown, health checks, and event verification overhead (~2-3 minutes per API)
+- **k6 execution time**: The actual time k6 spends running the test (sum of all phase durations for full/saturation tests, or iterations for smoke tests)
+- **Overhead**: Time spent on setup, teardown, health checks, event verification, and other infrastructure operations
+- **Total duration**: k6 execution time + overhead per API
 - **With all payload sizes**: Tests run sequentially for each payload size (default, 4k, 8k, 32k, 64k), multiplying the time by 5
+- **Important**: For smoke tests, the k6 execution time (~0.5-1 second) is negligible compared to overhead (~22-30 seconds). For full and saturation tests, overhead is relatively small (~1-1.5 minutes) compared to k6 execution time (11-14 minutes)
 
 ### Test Phases (Stages)
 
@@ -275,9 +414,96 @@ Resource utilization metrics are included in:
 - **Markdown Reports**: Tables showing overall and per-phase resource usage
 - **HTML Reports**: Interactive charts using Chart.js showing per-phase CPU usage, memory usage, and derived metrics
 
+**Database Query Performance Metrics:**
+
+Database query performance metrics are automatically collected during **full** and **saturation** tests (not smoke tests). These metrics provide insights into database query efficiency and connection pool utilization.
+
+**Collection Details:**
+- **Collection Method**: PostgreSQL `pg_stat_statements` extension
+- **When Collected**: After test completion (snapshot of query statistics)
+- **Metrics Collected**:
+  - Top queries by total execution time
+  - Query execution statistics (mean, min, max, stddev)
+  - Cache hit ratios
+  - Connection pool statistics (active, idle, waiting connections)
+- **Storage**: Stored in `performance_metrics` database and displayed in HTML reports
+
+**Metrics Analyzed:**
+- **Top Queries**: Top 10 queries per API by total execution time
+- **Query Performance**: Mean execution time, min/max execution times, standard deviation
+- **Cache Efficiency**: Cache hit ratio percentage (higher is better)
+- **Connection Pool**: Total, active, idle, and waiting connections
+
+Database query metrics are included in:
+- **HTML Reports**: "Database Query Performance Metrics" section showing top queries and connection pool statistics per API
+
+**Note**: Database metrics collection requires `pg_stat_statements` extension to be enabled in PostgreSQL (configured automatically in `docker-compose.yml`). Metrics are reset before each test run to ensure accurate per-test statistics.
+
 ### Test Limitations
 
 These tests do not account for networking infrastructure overhead. All services communicate within an isolated Docker bridge network, which provides minimal latency and no external network factors. The performance results reflect application-level performance in this controlled environment and do not represent real-world network conditions, including WAN latency, network congestion, load balancers, API gateways, or other production networking infrastructure that would typically be present in a deployed system.
+
+## Authentication & Secrets
+
+The test framework includes infrastructure for testing authentication and secrets management performance impact, though full implementation is still in progress.
+
+### Authentication Infrastructure
+
+**JWT Authentication Support:**
+- **k6 Test Scripts**: Support for JWT tokens via `AUTH_ENABLED` and `JWT_TOKEN` environment variables
+- **Go REST API**: Basic JWT authentication middleware (placeholder for full validation)
+- **Test Helper**: `load-test/shared/jwt-test-helper.py` for generating test JWT tokens
+
+**Usage:**
+```bash
+# Generate a test JWT token
+TOKEN=$(python3 load-test/shared/jwt-test-helper.py generate)
+
+# Run tests with authentication enabled
+AUTH_ENABLED=true JWT_TOKEN=$TOKEN ./run-sequential-throughput-tests.sh smoke
+```
+
+**Configuration:**
+- Set `AUTH_ENABLED=true` in k6 test environment to enable JWT token validation
+- Set `JWT_TOKEN=<token>` to provide the JWT token for requests
+- Go REST API reads `AUTH_ENABLED` and `JWT_SECRET_KEY` environment variables
+
+### Secrets Management Infrastructure
+
+**Mock Secrets Service:**
+- **Service**: `load-test/shared/secrets-mock-service.py` - HTTP server simulating remote secrets store
+- **Features**: Configurable delays, failure rates, and timeouts for testing resilience
+- **API**: REST API at `/secrets/{name}` endpoint
+
+**Usage:**
+```bash
+# Start mock secrets service
+python3 load-test/shared/secrets-mock-service.py 8080 &
+
+# Configure service behavior via environment variables
+SECRETS_SERVICE_DELAY_MS=100 \
+SECRETS_SERVICE_FAILURE_RATE=0.1 \
+SECRETS_SERVICE_TIMEOUT_RATE=0.05 \
+python3 load-test/shared/secrets-mock-service.py 8080
+```
+
+**Configuration Options:**
+- `SECRETS_SERVICE_DELAY_MS`: Artificial delay in milliseconds (default: 0)
+- `SECRETS_SERVICE_FAILURE_RATE`: Failure rate 0.0-1.0 (default: 0.0)
+- `SECRETS_SERVICE_TIMEOUT_RATE`: Timeout rate 0.0-1.0 (default: 0.0)
+
+**Note**: Full integration of secrets management into APIs is pending. The infrastructure is ready for testing once APIs implement secrets abstraction.
+
+### Future Enhancements
+
+Planned enhancements include:
+- Complete JWT validation implementation (signature verification, expiration checks)
+- Secrets abstraction in APIs (environment variables vs remote secrets store)
+- Test profiles for different auth/secrets modes (no-auth, auth-only, auth+secrets)
+- Metrics collection for auth/secrets timing overhead
+- Fault injection scenarios for resilience testing
+
+See `load-test/EXPANDED_TESTING_STRATEGY.md` for detailed implementation status and roadmap.
 
 ### Troubleshooting
 
@@ -385,11 +611,25 @@ producer-api-performance/
 ├── producer-api-rust-grpc/    # Rust gRPC API
 ├── producer-api-go-rest/      # Go REST API
 ├── producer-api-go-grpc/      # Go gRPC API
+├── producer-api-go-rest-lambda/   # AWS Lambda REST API
+├── producer-api-go-grpc-lambda/   # AWS Lambda gRPC API
 ├── load-test/                 # k6 performance testing framework
 │   ├── k6/                    # k6 test scripts
+│   │   ├── rest-api-test.js           # REST API test script
+│   │   ├── grpc-api-test.js           # gRPC API test script
+│   │   ├── lambda-rest-api-test.js    # Lambda REST test script
+│   │   └── lambda-grpc-api-test.js    # Lambda gRPC test script
 │   ├── shared/                # Test execution scripts
+│   │   ├── collect-db-metrics.py      # DB query metrics collection
+│   │   ├── secrets-mock-service.py    # Mock secrets store
+│   │   ├── jwt-test-helper.py         # JWT token generation
+│   │   ├── run-lambda-tests.sh        # Lambda test execution
+│   │   ├── start-local-lambdas.sh     # Start local Lambda functions
+│   │   ├── deploy-all-lambdas.sh      # Deploy Lambda functions
+│   │   └── migrations/                # Database schema migrations
 │   └── results/               # Test results
 ├── postgres/                  # Database initialization scripts
+├── terraform/                 # Terraform infrastructure as code
 ├── docker-compose.yml         # Docker services configuration
 └── README.md                  # This file
 ```

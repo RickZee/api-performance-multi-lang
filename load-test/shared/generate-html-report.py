@@ -334,12 +334,15 @@ def generate_html_report(results_dir, test_mode, timestamp):
     
     # API configurations
     apis = [
-        {'name': 'producer-api-java-rest', 'display': 'Java REST', 'port': 9081, 'protocol': 'REST'},
-        {'name': 'producer-api-java-grpc', 'display': 'Java gRPC', 'port': 9090, 'protocol': 'gRPC'},
-        {'name': 'producer-api-rust-rest', 'display': 'Rust REST', 'port': 9082, 'protocol': 'REST'},
-        {'name': 'producer-api-rust-grpc', 'display': 'Rust gRPC', 'port': 9091, 'protocol': 'gRPC'},
-        {'name': 'producer-api-go-rest', 'display': 'Go REST', 'port': 9083, 'protocol': 'REST'},
-        {'name': 'producer-api-go-grpc', 'display': 'Go gRPC', 'port': 9092, 'protocol': 'gRPC'},
+        {'name': 'producer-api-java-rest', 'display': 'EKS Java REST', 'port': 9081, 'protocol': 'REST', 'infrastructure': 'container'},
+        {'name': 'producer-api-java-grpc', 'display': 'EKS Java gRPC', 'port': 9090, 'protocol': 'gRPC', 'infrastructure': 'container'},
+        {'name': 'producer-api-rust-rest', 'display': 'EKS Rust REST', 'port': 9082, 'protocol': 'REST', 'infrastructure': 'container'},
+        {'name': 'producer-api-rust-grpc', 'display': 'EKS Rust gRPC', 'port': 9091, 'protocol': 'gRPC', 'infrastructure': 'container'},
+        {'name': 'producer-api-go-rest', 'display': 'EKS Go REST', 'port': 9083, 'protocol': 'REST', 'infrastructure': 'container'},
+        {'name': 'producer-api-go-grpc', 'display': 'EKS Go gRPC', 'port': 9092, 'protocol': 'gRPC', 'infrastructure': 'container'},
+        # Lambda APIs (only Go implementations exist)
+        {'name': 'producer-api-go-rest-lambda', 'display': 'Lambda Go REST', 'port': None, 'protocol': 'REST', 'infrastructure': 'lambda'},
+        {'name': 'producer-api-go-grpc-lambda', 'display': 'Lambda Go gRPC', 'port': None, 'protocol': 'gRPC', 'infrastructure': 'lambda'},
     ]
     
     # Collect metrics for all APIs from database
@@ -395,8 +398,9 @@ def generate_html_report(results_dir, test_mode, timestamp):
             api_name = test_run['api_name']
             payload_size = test_run.get('payload_size', 'default')
             
-            # Skip "default" payload size - we only want explicit payload sizes
-            if payload_size == 'default' or not payload_size or payload_size == '':
+            # For Lambda APIs, include default payload size; for containerized APIs, skip default
+            is_lambda = any(api['name'] == api_name and api.get('infrastructure') == 'lambda' for api in apis)
+            if not is_lambda and (payload_size == 'default' or not payload_size or payload_size == ''):
                 continue
             
             # If timestamp is provided, verify it matches
@@ -536,18 +540,47 @@ def generate_html_report(results_dir, test_mode, timestamp):
                         'payload_size': payload_size
                     })
         
-        # If we got results from database, skip file-based fallback
-        if api_results:
-            pass  # Continue to resource metrics collection
-        else:
-            raise Exception("No test runs found in database")
+        # If we got results from database, check if we need to add Lambda results from JSON files
+        # Lambda results might not be in database, so always check JSON files for Lambda APIs
+        lambda_apis_in_db = {api['name'] for api in api_results if api.get('infrastructure') == 'lambda'}
+        lambda_apis_expected = {api['name'] for api in apis if api.get('infrastructure') == 'lambda'}
+        missing_lambda_apis = lambda_apis_expected - lambda_apis_in_db
+        
+        if missing_lambda_apis:
+            # Add missing Lambda APIs from JSON files
+            for api in apis:
+                if api['name'] in missing_lambda_apis:
+                    api_dir = results_path.parent / 'lambda-tests' / api['name']
+                    if api_dir.exists():
+                        json_pattern = f"*-throughput-{test_mode}-{timestamp}.json"
+                        json_files = list(api_dir.glob(json_pattern))
+                        if json_files:
+                            latest_json = json_files[0]
+                            metrics = extract_metrics_from_json(str(latest_json))
+                            if metrics:
+                                api_results.append({
+                                    **api,
+                                    'status': 'success',
+                                    'metrics': metrics,
+                                    'json_file': latest_json.name,
+                                    'payload_size': 'default'
+                                })
+        
+        if not api_results:
+            raise Exception("No test runs found in database or JSON files")
             
     except Exception as e:
         print(f"Warning: Could not load from database ({e}), falling back to JSON files", file=sys.stderr)
         # Fallback to JSON file parsing
         # Try to extract payload size from directory structure or filename
         for api in apis:
+            # Check both throughput-sequential and lambda-tests directories
             api_dir = results_path / api['name']
+            if api.get('infrastructure') == 'lambda':
+                # Lambda APIs are in lambda-tests directory
+                lambda_results_path = results_path.parent / 'lambda-tests'
+                api_dir = lambda_results_path / api['name']
+            
             if not api_dir.exists():
                 api_results.append({**api, 'status': 'no_results', 'payload_size': 'default'})
                 continue
@@ -558,10 +591,19 @@ def generate_html_report(results_dir, test_mode, timestamp):
                 if item.is_dir() and item.name in ['4k', '8k', '32k', '64k']:
                     payload_dirs.append(item)
             
+            # For Lambda APIs without payload subdirectories, check main directory
+            if not payload_dirs and api.get('infrastructure') == 'lambda':
+                # Lambda tests might be in the main directory without payload subdirectories
+                payload_dirs = [api_dir]  # Treat main directory as payload directory
+            
             if payload_dirs:
                 # Process each payload size directory
                 for payload_dir in payload_dirs:
-                    payload_size = payload_dir.name
+                    # For Lambda APIs in main directory, use 'default' as payload size
+                    if api.get('infrastructure') == 'lambda' and payload_dir == api_dir:
+                        payload_size = 'default'
+                    else:
+                        payload_size = payload_dir.name
                     unique_payload_sizes.add(payload_size)
                     
                     # Find JSON file matching timestamp and test mode in this payload directory
@@ -576,10 +618,33 @@ def generate_html_report(results_dir, test_mode, timestamp):
                             json_pattern = f"*-throughput-*-{timestamp}.json"
                             json_pattern2 = f"*-throughput-{timestamp}.json"
                         
-                        json_files = list(payload_dir.rglob(json_pattern))
-                        json_files.extend(list(payload_dir.rglob(json_pattern2)))
+                        # Use glob instead of rglob for main directory (Lambda APIs)
+                        if api.get('infrastructure') == 'lambda' and payload_dir == api_dir:
+                            json_files = list(payload_dir.glob(json_pattern))
+                            json_files.extend(list(payload_dir.glob(json_pattern2)))
+                        else:
+                            json_files = list(payload_dir.rglob(json_pattern))
+                            json_files.extend(list(payload_dir.rglob(json_pattern2)))
                     else:
-                        json_files = list(payload_dir.rglob("*-throughput-*.json"))
+                        # Use glob instead of rglob for main directory (Lambda APIs)
+                        if api.get('infrastructure') == 'lambda' and payload_dir == api_dir:
+                            json_files = list(payload_dir.glob("*-throughput-*.json"))
+                        else:
+                            json_files = list(payload_dir.rglob("*-throughput-*.json"))
+                    
+                    # For Lambda APIs, also check in the main directory (no payload subdirectory)
+                    if not json_files and api.get('infrastructure') == 'lambda':
+                        if timestamp:
+                            if test_mode == 'smoke':
+                                json_pattern = f"*-throughput-smoke-*-{timestamp}.json"
+                                json_pattern2 = f"*-throughput-smoke-{timestamp}.json"
+                            else:
+                                json_pattern = f"*-throughput-*-{timestamp}.json"
+                                json_pattern2 = f"*-throughput-{timestamp}.json"
+                            json_files = list(api_dir.rglob(json_pattern))
+                            json_files.extend(list(api_dir.rglob(json_pattern2)))
+                        else:
+                            json_files = list(api_dir.rglob("*-throughput-*.json"))
                     
                     if not json_files:
                         continue
@@ -623,11 +688,21 @@ def generate_html_report(results_dir, test_mode, timestamp):
                 metrics = extract_metrics_from_json(latest_json)
                 
                 if metrics:
-                    # Skip default payload - we only want explicit payload sizes
-                    # This code path is for when there's no payload subdirectory, so skip it
-                    continue
+                    # For Lambda APIs, include default payload results
+                    if api.get('infrastructure') == 'lambda':
+                        total_duration_seconds += metrics.get('duration_seconds', 0.0)
+                        api_results.append({
+                            **api, 
+                            'status': 'success', 
+                            'metrics': metrics, 
+                            'json_file': latest_json.name,
+                            'payload_size': 'default'
+                        })
+                    else:
+                        # Skip default payload for containerized APIs - we only want explicit payload sizes
+                        continue
                 else:
-                    # Skip parse errors for default payload
+                    # Skip parse errors
                     continue
     
     # Collect validation warnings
@@ -1033,6 +1108,8 @@ def generate_html_report(results_dir, test_mode, timestamp):
         java_apis = [api for api in successful_apis if 'Java' in api['display']]
         rust_apis = [api for api in successful_apis if 'Rust' in api['display']]
         go_apis = [api for api in successful_apis if 'Go' in api['display']]
+        lambda_apis = [api for api in successful_apis if 'Lambda' in api['display']]
+        eks_apis = [api for api in successful_apis if 'EKS' in api['display']]
         
         # Calculate averages
         def avg_metric(apis, metric_key):
@@ -1232,7 +1309,9 @@ def generate_html_report(results_dir, test_mode, timestamp):
             'producer-api-rust-rest',
             'producer-api-rust-grpc',
             'producer-api-go-rest',
-            'producer-api-go-grpc'
+            'producer-api-go-grpc',
+            'producer-api-go-rest-lambda',
+            'producer-api-go-grpc-lambda'
         ]
         
         for api in api_results:
@@ -1240,25 +1319,28 @@ def generate_html_report(results_dir, test_mode, timestamp):
                 api_name = api['name']
                 payload_size = api.get('payload_size', 'default')
                 
-                # Skip default payload size
-                if payload_size and payload_size.lower() != 'default':
-                    if api_name not in performance_data_by_api:
-                        performance_data_by_api[api_name] = {
-                            'display': api['display'],
-                            'data': {}
-                        }
-                    all_payload_sizes.add(payload_size)
-                    performance_data_by_api[api_name]['data'][payload_size] = {
-                        'throughput': api['metrics'].get('throughput', 0),
-                        'avg_response': api['metrics'].get('avg_response', 0),
-                        'error_rate': api['metrics'].get('error_rate', 0),
-                        'p95_response': api['metrics'].get('p95_response', 0)
+                # For Lambda APIs, include default payload size; for containerized APIs, skip default
+                is_lambda = api.get('infrastructure') == 'lambda' or 'lambda' in api.get('name', '').lower()
+                # Include all payload sizes (including 'default' for Lambda APIs)
+                if api_name not in performance_data_by_api:
+                    performance_data_by_api[api_name] = {
+                        'display': api['display'],
+                        'data': {}
                     }
+                all_payload_sizes.add(payload_size)
+                performance_data_by_api[api_name]['data'][payload_size] = {
+                    'throughput': api['metrics'].get('throughput', 0),
+                    'avg_response': api['metrics'].get('avg_response', 0),
+                    'error_rate': api['metrics'].get('error_rate', 0),
+                    'p95_response': api['metrics'].get('p95_response', 0)
+                }
         
         # Sort payload sizes
-        payload_size_order = ['4k', '8k', '32k', '64k']
+        # Include 'default' if Lambda APIs are present
+        has_lambda_apis = any('lambda' in api_name.lower() for api_name in performance_data_by_api.keys())
+        payload_size_order = ['default', '4k', '8k', '32k', '64k'] if has_lambda_apis else ['4k', '8k', '32k', '64k']
         sorted_payload_sizes = sorted(
-            [s for s in all_payload_sizes if s and s.lower() != 'default'],
+            [s for s in all_payload_sizes if s],
             key=lambda x: (payload_size_order.index(x) if x in payload_size_order else 999, x)
         )
         
@@ -1405,11 +1487,12 @@ def generate_html_report(results_dir, test_mode, timestamp):
     
     # Load resource metrics from database for all APIs
     resource_data = {}
+    db_query_metrics = {}
     
     try:
         script_dir = Path(__file__).parent
         sys.path.insert(0, str(script_dir))
-        from db_client import get_resource_metrics_summary
+        from db_client import get_resource_metrics_summary, get_db_query_metrics_snapshot
         
         # Get resource metrics from database for each API's test run
         for api_result in api_results:
@@ -1442,6 +1525,15 @@ def generate_html_report(results_dir, test_mode, timestamp):
                     elif resource_summary and resource_summary.get('sample_count', 0) == 0:
                         # Log warning for missing resource metrics
                         print(f"Warning: No resource metrics collected for {api_name} (test_run_id: {test_run_id})", file=sys.stderr)
+                    
+                    # Load DB query metrics if available (for full/saturation tests)
+                    if test_mode != 'smoke':
+                        try:
+                            db_metrics = get_db_query_metrics_snapshot(test_run_id)
+                            if db_metrics:
+                                db_query_metrics[api_name] = db_metrics
+                        except Exception as e:
+                            print(f"Warning: Could not load DB query metrics for {api_name}: {e}", file=sys.stderr)
                 except Exception as e:
                     print(f"Error loading resource metrics from database for {api_name}: {e}", file=sys.stderr)
     except Exception as e:
@@ -1494,12 +1586,12 @@ def generate_html_report(results_dir, test_mode, timestamp):
                     overall = resource_data[api_name].get('overall', {})
                     avg_cpu = overall.get('avg_cpu_percent', 0.0)
                     avg_memory_mb = overall.get('avg_memory_mb', 0.0)
-                    memory_limit_mb = overall.get('max_memory_mb', 2048.0) or 2048.0
+                    # Use actual container memory limit, not peak usage
+                    memory_limit_mb = overall.get('memory_limit_mb', 2048.0) or 2048.0
                 
-                # Debug: Check if resource data is missing
+                # Resource metrics might not be available - this is common for smoke tests
+                # or when metrics collection failed. Efficiency will show 0% in this case.
                 if avg_cpu == 0.0 and avg_memory_mb == 0.0:
-                    # Resource metrics might not be available - this is common for smoke tests
-                    # or when metrics collection failed. Efficiency will show 0% in this case.
                     pass
                 
                 # Use configured memory per pod, or calculate from limit
@@ -1572,6 +1664,7 @@ def generate_html_report(results_dir, test_mode, timestamp):
                 <thead>
                     <tr>
                         <th style="text-align: left;">API</th>
+                        <th style="text-align: left;">Payload Size</th>
                         <th style="text-align: right;">Total Cost ($)</th>
                         <th style="text-align: right;">Cost/1K Requests ($)</th>
                         <th style="text-align: right;">Instance Cost ($)</th>
@@ -1606,6 +1699,9 @@ def generate_html_report(results_dir, test_mode, timestamp):
                 # Format pod size
                 pod_size = f"{cost_info['cpu_cores_per_pod']:.1f} CPU, {cost_info['memory_gb_per_pod']:.1f}GB RAM"
                 
+                # Format payload size
+                payload_display = format_payload_size(cost_info.get('payload_size', 'default'))
+                
                 # Ensure all cost values are non-zero (use 0.000001 minimum to show 6 decimals)
                 instance_cost_val = cost_info.get('instance_effective_cost')
                 instance_cost = max(instance_cost_val if instance_cost_val is not None else 0, 0.000001)
@@ -1625,6 +1721,7 @@ def generate_html_report(results_dir, test_mode, timestamp):
                 html_content += f"""
                     <tr>
                         <td><strong>{cost_info['display']}</strong></td>
+                        <td>{payload_display}</td>
                         <td style="text-align: right;">{format_cost(cost_info['total_cost'])}</td>
                         <td style="text-align: right;">{format_cost(cost_info['cost_per_1000_requests'])}</td>
                         <td style="text-align: right;">{format_cost(instance_cost)}</td>
@@ -1671,139 +1768,6 @@ def generate_html_report(results_dir, test_mode, timestamp):
             <p style="margin-top: 10px; color: #666; font-size: 12px; font-style: italic;">
                 <strong>Column Definitions:</strong> For detailed explanations of all cost analytics columns, see <code>load-test/README.md</code>.
             </p>
-            
-            <div class="resource-section">
-                <h4>Total Cost Comparison - Lower is Better</h4>
-                <div class="data-table-container">
-                    <table>
-                        <thead>
-                            <tr>
-                                <th>API</th>
-                                <th>Payload Size</th>
-                                <th class="text-right">Total Cost ($)</th>
-                            </tr>
-                        </thead>
-                        <tbody>
-"""
-            for cost_info in cost_data:
-                payload_display = format_payload_size(cost_info.get('payload_size', 'default'))
-                html_content += f"""
-                            <tr>
-                                <td><strong>{cost_info['display']}</strong></td>
-                                <td>{payload_display}</td>
-                                <td class="text-right">{format_cost(cost_info['total_cost'])}</td>
-                            </tr>
-"""
-            html_content += """
-                        </tbody>
-                    </table>
-                </div>
-            </div>
-            
-            <div class="resource-section">
-                <h4>Cost per 1,000 Requests Comparison - Lower is Better</h4>
-                <div class="data-table-container">
-                    <table>
-                        <thead>
-                            <tr>
-                                <th>API</th>
-                                <th>Payload Size</th>
-                                <th class="text-right">Cost per 1K Requests ($)</th>
-                            </tr>
-                        </thead>
-                        <tbody>
-"""
-            for cost_info in cost_data:
-                payload_display = format_payload_size(cost_info.get('payload_size', 'default'))
-                html_content += f"""
-                            <tr>
-                                <td><strong>{cost_info['display']}</strong></td>
-                                <td>{payload_display}</td>
-                                <td class="text-right">{format_cost(cost_info['cost_per_1000_requests'])}</td>
-                            </tr>
-"""
-            html_content += """
-                        </tbody>
-                    </table>
-                </div>
-            </div>
-            
-            <div class="resource-section">
-                <h4>Cost Breakdown by Component</h4>
-                <div class="data-table-container">
-                    <table>
-                        <thead>
-                            <tr>
-                                <th>API</th>
-                                <th>Payload Size</th>
-                                <th class="text-right">Instance ($)</th>
-                                <th class="text-right">Cluster ($)</th>
-                                <th class="text-right">ALB ($)</th>
-                                <th class="text-right">Storage ($)</th>
-                                <th class="text-right">Network ($)</th>
-                            </tr>
-                        </thead>
-                        <tbody>
-"""
-            for cost_info in cost_data:
-                payload_display = format_payload_size(cost_info.get('payload_size', 'default'))
-                instance_cost_val = cost_info.get('instance_effective_cost')
-                instance_cost = max(instance_cost_val if instance_cost_val is not None else 0, 0.000001)
-                cluster_cost_val = cost_info.get('cluster_cost')
-                cluster_cost = max(cluster_cost_val if cluster_cost_val is not None else 0, 0.000001)
-                alb_cost_val = cost_info.get('alb_cost')
-                alb_cost = max(alb_cost_val if alb_cost_val is not None else 0, 0.000001)
-                storage_cost_val = cost_info.get('storage_cost')
-                storage_cost = max(storage_cost_val if storage_cost_val is not None else 0, 0.000001)
-                network_cost_val = cost_info.get('network_cost')
-                network_cost = max(network_cost_val if network_cost_val is not None else 0, 0.000001)
-                html_content += f"""
-                            <tr>
-                                <td><strong>{cost_info['display']}</strong></td>
-                                <td>{payload_display}</td>
-                                <td class="text-right">{format_cost(instance_cost)}</td>
-                                <td class="text-right">{format_cost(cluster_cost)}</td>
-                                <td class="text-right">{format_cost(alb_cost)}</td>
-                                <td class="text-right">{format_cost(storage_cost)}</td>
-                                <td class="text-right">{format_cost(network_cost)}</td>
-                            </tr>
-"""
-            html_content += """
-                        </tbody>
-                    </table>
-                </div>
-            </div>
-            
-            <div class="resource-section">
-                <h4>Resource Efficiency vs Cost</h4>
-                <div class="data-table-container">
-                    <table>
-                        <thead>
-                            <tr>
-                                <th>API</th>
-                                <th>Payload Size</th>
-                                <th class="text-right">Avg Efficiency (%)</th>
-                                <th class="text-right">Cost per 1K Requests ($)</th>
-                            </tr>
-                        </thead>
-                        <tbody>
-"""
-            for cost_info in cost_data:
-                payload_display = format_payload_size(cost_info.get('payload_size', 'default'))
-                avg_efficiency = (cost_info['cpu_efficiency'] + cost_info['memory_efficiency']) / 2 * 100
-                html_content += f"""
-                            <tr>
-                                <td><strong>{cost_info['display']}</strong></td>
-                                <td>{payload_display}</td>
-                                <td class="text-right">{avg_efficiency:.2f}</td>
-                                <td class="text-right">{format_cost(cost_info['cost_per_1000_requests'])}</td>
-                            </tr>
-"""
-            html_content += """
-                        </tbody>
-                    </table>
-                </div>
-            </div>
         </div>
 """
         except Exception as e:
@@ -1850,6 +1814,19 @@ def generate_html_report(results_dir, test_mode, timestamp):
                         <td class="text-right">{r['max_memory_percent']:.2f}</td>
                         <td class="text-right">{r['avg_memory_mb']:.2f}</td>
                         <td class="text-right">{r['max_memory_mb']:.2f}</td>
+                    </tr>
+"""
+                elif api.get('infrastructure') == 'lambda':
+                    # Lambda APIs don't have resource metrics (serverless), but show them in the table
+                    html_content += f"""
+                    <tr>
+                        <td><strong>{api['display']}</strong></td>
+                        <td class="text-right">-</td>
+                        <td class="text-right">-</td>
+                        <td class="text-right">-</td>
+                        <td class="text-right">-</td>
+                        <td class="text-right">-</td>
+                        <td class="text-right">-</td>
                     </tr>
 """
             
@@ -2043,6 +2020,274 @@ def generate_html_report(results_dir, test_mode, timestamp):
             <p><strong>Note:</strong> For accurate resource metrics, run longer tests (full or saturation mode) with resource monitoring enabled.</p>
         </div>
         """
+    
+    # Database Query Performance Metrics Section
+    if db_query_metrics and test_mode != 'smoke':
+        html_content += """
+        <h2>🗄️ Database Query Performance Metrics</h2>
+        
+        <div class="resource-section">
+            <h3>Top Queries by Total Execution Time</h3>
+            <div class="insight-box">
+                <p><strong>Query Performance Analysis:</strong> This section shows the top database queries by total execution time, collected from pg_stat_statements during the test run. Lower execution times and higher cache hit ratios indicate better database performance.</p>
+            </div>
+"""
+        
+        for api_result in api_results:
+            if api_result.get('status') != 'success':
+                continue
+            
+            api_name = api_result['name']
+            if api_name not in db_query_metrics:
+                continue
+            
+            db_metrics = db_query_metrics[api_name]
+            top_queries = db_metrics.get('top_queries', [])
+            pool_stats = db_metrics.get('connection_pool_stats', {})
+            
+            if top_queries:
+                html_content += f"""
+            <h4>{api_result['display']} - Top 10 Queries</h4>
+            <div class="data-table-container">
+                <table>
+                    <thead>
+                        <tr>
+                            <th>Query Preview</th>
+                            <th class="text-right">Calls</th>
+                            <th class="text-right">Total Time (ms)</th>
+                            <th class="text-right">Mean Time (ms)</th>
+                            <th class="text-right">Min Time (ms)</th>
+                            <th class="text-right">Max Time (ms)</th>
+                            <th class="text-right">Rows</th>
+                            <th class="text-right">Cache Hit %</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+"""
+                for query in top_queries[:10]:  # Top 10 queries
+                    query_text = query.get('query_text', '')[:100] + ('...' if len(query.get('query_text', '')) > 100 else '')
+                    html_content += f"""
+                        <tr>
+                            <td style="font-family: monospace; font-size: 11px; word-break: break-all;">{query_text}</td>
+                            <td class="text-right">{query.get('calls', 0)}</td>
+                            <td class="text-right">{query.get('total_exec_time_ms', 0):.2f}</td>
+                            <td class="text-right">{query.get('mean_exec_time_ms', 0):.2f}</td>
+                            <td class="text-right">{query.get('min_exec_time_ms', 0):.2f}</td>
+                            <td class="text-right">{query.get('max_exec_time_ms', 0):.2f}</td>
+                            <td class="text-right">{query.get('rows_processed', 0)}</td>
+                            <td class="text-right">{query.get('cache_hit_ratio', 0):.1f}%</td>
+                        </tr>
+"""
+                html_content += """
+                    </tbody>
+                </table>
+            </div>
+"""
+            
+            # Connection pool stats
+            if pool_stats:
+                html_content += f"""
+            <h4>{api_result['display']} - Connection Pool Statistics</h4>
+            <table style="width: auto; margin-bottom: 20px;">
+                <thead>
+                    <tr>
+                        <th>Metric</th>
+                        <th class="text-right">Value</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr>
+                        <td>Total Connections</td>
+                        <td class="text-right">{pool_stats.get('total_connections', 0)}</td>
+                    </tr>
+                    <tr>
+                        <td>Active Connections</td>
+                        <td class="text-right">{pool_stats.get('active_connections', 0)}</td>
+                    </tr>
+                    <tr>
+                        <td>Idle Connections</td>
+                        <td class="text-right">{pool_stats.get('idle_connections', 0)}</td>
+                    </tr>
+                    <tr>
+                        <td>Idle in Transaction</td>
+                        <td class="text-right">{pool_stats.get('idle_in_transaction', 0)}</td>
+                    </tr>
+                    <tr>
+                        <td>Waiting Connections</td>
+                        <td class="text-right">{pool_stats.get('waiting_connections', 0)}</td>
+                    </tr>
+                </tbody>
+            </table>
+"""
+        
+        html_content += """
+        </div>
+"""
+    elif test_mode != 'smoke':
+        html_content += """
+        <h2>🗄️ Database Query Performance Metrics</h2>
+        
+        <div class="warning-box">
+            <h4>⚠️ Database Query Metrics Not Available</h4>
+            <p>Database query performance metrics were not collected for this test run.</p>
+            <p><strong>Possible reasons:</strong></p>
+            <ul>
+                <li>pg_stat_statements extension may not be enabled in PostgreSQL</li>
+                <li>Database metrics collection script encountered an error</li>
+                <li>Test run completed before metrics could be collected</li>
+            </ul>
+        </div>
+"""
+    
+    # Lambda-specific sections
+    lambda_apis = [api for api in api_results if api.get('infrastructure') == 'lambda' or 'lambda' in api.get('name', '').lower()]
+    if lambda_apis:
+        # Lambda Cold Start Analysis
+        html_content += """
+        <h2>❄️ Lambda Cold Start Analysis</h2>
+        
+        <div class="comparison-section">
+            <h3>Cold Start Metrics</h3>
+            <div class="insight-box">
+                <p><strong>Cold Start Impact:</strong> Lambda cold starts can significantly impact latency. This section analyzes cold start frequency and duration.</p>
+            </div>
+            <table>
+                <thead>
+                    <tr>
+                        <th>API</th>
+                        <th class="text-right">Total Invocations</th>
+                        <th class="text-right">Cold Starts</th>
+                        <th class="text-right">Cold Start %</th>
+                        <th class="text-right">Avg Init Duration (ms)</th>
+                        <th class="text-right">P95 Init Duration (ms)</th>
+                        <th class="text-right">Avg Cold Start Duration (ms)</th>
+                        <th class="text-right">Avg Warm Duration (ms)</th>
+                    </tr>
+                </thead>
+                <tbody>
+"""
+        
+        for api in lambda_apis:
+            lambda_metrics = api.get('lambda_metrics', {})
+            # Show Lambda APIs even if lambda_metrics are not available
+            cold_start_info = lambda_metrics.get('cold_start', {}) if lambda_metrics else {}
+            init_duration = cold_start_info.get('init_duration', {}) if cold_start_info else {}
+            cold_start_duration = cold_start_info.get('total_duration', {}) if cold_start_info else {}
+            warm_duration = lambda_metrics.get('warm_invocation', {}).get('duration', {}) if lambda_metrics else {}
+            
+            # Use regular metrics as fallback for total invocations
+            regular_metrics = api.get('metrics', {})
+            total_invocations = lambda_metrics.get('total_invocations', regular_metrics.get('total_samples', 0)) if lambda_metrics else regular_metrics.get('total_samples', 0)
+            
+            # Format values with proper handling for missing data
+            cold_starts = lambda_metrics.get('cold_starts', 0) if lambda_metrics else '-'
+            cold_start_pct = f"{lambda_metrics.get('cold_start_percentage', 0.0):.2f}%" if lambda_metrics else '-'
+            init_avg = f"{init_duration.get('avg_ms', 0.0):.2f}" if init_duration else '-'
+            init_p95 = f"{init_duration.get('p95_ms', 0.0):.2f}" if init_duration else '-'
+            cold_avg = f"{cold_start_duration.get('avg_ms', 0.0):.2f}" if cold_start_duration else '-'
+            warm_avg = f"{warm_duration.get('avg_ms', 0.0):.2f}" if warm_duration else '-'
+            
+            html_content += f"""
+                    <tr>
+                        <td><strong>{api.get('display', api.get('name'))}</strong></td>
+                        <td class="text-right">{total_invocations}</td>
+                        <td class="text-right">{cold_starts}</td>
+                        <td class="text-right">{cold_start_pct}</td>
+                        <td class="text-right">{init_avg}</td>
+                        <td class="text-right">{init_p95}</td>
+                        <td class="text-right">{cold_avg}</td>
+                        <td class="text-right">{warm_avg}</td>
+                    </tr>
+"""
+        
+        html_content += """
+                </tbody>
+            </table>
+        </div>
+        
+        <div class="comparison-section">
+            <h3>Lambda Cost Analysis</h3>
+            <div class="insight-box">
+                <p><strong>Cost Model:</strong> Lambda costs are based on compute (GB-seconds), requests, and API Gateway usage.</p>
+            </div>
+"""
+        
+        # Calculate Lambda costs
+        try:
+            script_dir = Path(__file__).parent
+            sys.path.insert(0, str(script_dir))
+            from calculate_lambda_costs import calculate_cost_for_lambda_api
+            
+            lambda_cost_data = []
+            for api in lambda_apis:
+                lambda_metrics = api.get('lambda_metrics', {})
+                metrics = api.get('metrics', {})
+                
+                if lambda_metrics and metrics:
+                    # Extract Lambda-specific metrics
+                    avg_billed_duration_ms = lambda_metrics.get('billed_duration', {}).get('avg_ms', 0.0)
+                    memory_size_mb = lambda_metrics.get('memory', {}).get('allocated_mb', 512.0)
+                    num_invocations = lambda_metrics.get('total_invocations', metrics.get('total_samples', 0))
+                    
+                    # Estimate data transfer (1KB per request)
+                    data_transfer_gb = (num_invocations * 0.001) / 1024.0
+                    
+                    costs = calculate_cost_for_lambda_api(
+                        api_name=api.get('name'),
+                        num_invocations=num_invocations,
+                        avg_billed_duration_ms=avg_billed_duration_ms,
+                        memory_size_mb=memory_size_mb,
+                        data_transfer_gb=data_transfer_gb,
+                        include_api_gateway=True
+                    )
+                    
+                    lambda_cost_data.append({
+                        'api_name': api.get('name'),
+                        'display': api.get('display', api.get('name')),
+                        **costs
+                    })
+            
+            if lambda_cost_data:
+                html_content += """
+            <table>
+                <thead>
+                    <tr>
+                        <th>API</th>
+                        <th class="text-right">Total Cost ($)</th>
+                        <th class="text-right">Cost/1K Requests ($)</th>
+                        <th class="text-right">Lambda Compute ($)</th>
+                        <th class="text-right">Lambda Requests ($)</th>
+                        <th class="text-right">API Gateway ($)</th>
+                    </tr>
+                </thead>
+                <tbody>
+"""
+                for cost_info in lambda_cost_data:
+                    html_content += f"""
+                    <tr>
+                        <td><strong>{cost_info['display']}</strong></td>
+                        <td class="text-right">${cost_info['total_cost']:.6f}</td>
+                        <td class="text-right">${cost_info['cost_per_1000_requests']:.6f}</td>
+                        <td class="text-right">${cost_info['lambda_compute_cost']:.6f}</td>
+                        <td class="text-right">${cost_info['lambda_request_cost']:.6f}</td>
+                        <td class="text-right">${cost_info['api_gateway_total_cost']:.6f}</td>
+                    </tr>
+"""
+                html_content += """
+                </tbody>
+            </table>
+"""
+        except Exception as e:
+            print(f"Warning: Could not calculate Lambda costs ({e})", file=sys.stderr)
+            html_content += """
+            <div class="insight-box">
+                <p>Lambda cost analytics are currently unavailable. Please ensure the Lambda cost calculation module is available.</p>
+            </div>
+"""
+        
+        html_content += """
+        </div>
+"""
     
     
     html_content += f"""

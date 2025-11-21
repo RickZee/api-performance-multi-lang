@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"sync"
+	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 	"go.uber.org/zap"
@@ -32,8 +33,9 @@ func GetConnectionPool(databaseURL string, logger *zap.Logger) (*pgxpool.Pool, e
 		// Longer idle timeout since Lambda containers are reused
 		config.MaxConnIdleTime = 0 // Keep connections alive as long as possible
 		config.MaxConnLifetime = 0 // No max lifetime for Lambda reuse
-		// Health check settings
-		config.HealthCheckPeriod = 0 // Disable periodic health checks
+		// Health check settings - use a reasonable interval (30s) instead of 0
+		// Setting to 0 causes panic in newer pgx versions
+		config.HealthCheckPeriod = 30 * time.Second
 
 		pool, poolErr = pgxpool.NewWithConfig(context.Background(), config)
 		if poolErr != nil {

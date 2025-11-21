@@ -56,6 +56,12 @@ Thumbs.db
 # Generated data (if applicable)
 load-test/shared/data/generated/
 
+# Lambda test temporary files
+load-test/shared/.lambda-pids/
+load-test/shared/.lambda-logs/
+load-test/shared/.lambda-env-*.json
+load-test/shared/.lambda-endpoints.json
+
 # Python cache files
 __pycache__/
 **/__pycache__/

@@ -47,8 +47,6 @@ Globals:
     Timeout: 30
     MemorySize: 512
     Runtime: provided.al2023
-    Architectures:
-      - x86_64
     Environment:
       Variables:
         LOG_LEVEL: !Ref LogLevel
@@ -58,7 +56,7 @@ Resources:
     Type: AWS::Serverless::Function
     Properties:
       FunctionName: producer-api-go-grpc-lambda
-      CodeUri: ./
+      CodeUri: build/
       Handler: bootstrap
       Runtime: provided.al2023
       Architectures:
