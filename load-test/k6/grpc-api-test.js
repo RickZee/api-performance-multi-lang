@@ -30,6 +30,7 @@ const apiPort = __ENV.PORT || 9090;
 const serviceName = __ENV.SERVICE || 'com.example.grpc.EventService';
 const methodName = __ENV.METHOD || 'ProcessEvent';
 const protoFile = __ENV.PROTO_FILE || '/k6/proto/java-grpc/event_service.proto';
+const DEBUG = __ENV.DEBUG === 'true' || __ENV.DEBUG === '1';
 
 // Payload size is configured via PAYLOAD_SIZE environment variable (4k, 8k, 32k, 64k)
 // If not specified, uses default small payload (~400-500 bytes)
@@ -58,18 +59,26 @@ try {
     
     // For import paths, use empty array - proto file should be self-contained
     // If proto has imports, we'd need to add the directory, but for now try without
-    console.log(`Attempting to load proto file: ${protoPath}`);
+    if (DEBUG) {
+        console.log(`Attempting to load proto file: ${protoPath}`);
+    }
     client.load([], protoPath);
-    console.log(`Proto file loaded successfully: ${protoPath}`);
+    if (DEBUG) {
+        console.log(`Proto file loaded successfully: ${protoPath}`);
+    }
 } catch (e) {
     console.error(`Failed to load proto file ${protoFile} as relative path: ${e}`);
     // Try with import path set to proto directory
     try {
         const protoPath = protoFile.startsWith('/k6/proto/') ? '../' + protoFile.substring(5) : protoFile;
         const protoDir = protoPath.substring(0, protoPath.lastIndexOf('/'));
-        console.log(`Trying alternative: protoPath=${protoPath}, protoDir=${protoDir}`);
+        if (DEBUG) {
+            console.log(`Trying alternative: protoPath=${protoPath}, protoDir=${protoDir}`);
+        }
         client.load([protoDir], protoPath);
-        console.log(`Alternative load succeeded`);
+        if (DEBUG) {
+            console.log(`Alternative load succeeded`);
+        }
     } catch (e2) {
         console.error(`Alternative load with import path also failed: ${e2}`);
         throw e2; // Re-throw to fail the test
@@ -108,7 +117,9 @@ function initializeConnection() {
             timeout: CONNECTION_TIMEOUT_MS / 1000, // Convert to seconds
         });
         connectionInitialized = true;
-        console.log(`[TCP] VU ${vuId}: Connection initialized (lazy) to ${apiHost}:${apiPort}`);
+        if (DEBUG) {
+            console.log(`[TCP] VU ${vuId}: Connection initialized (lazy) to ${apiHost}:${apiPort}`);
+        }
         return true;
     } catch (e) {
         const errorMsg = e.toString();
@@ -144,7 +155,9 @@ export default function () {
             if (attempt > 0) {
                 connectionRetries.add(1);
                 const delay = getRetryDelay(attempt - 1);
-                console.log(`[TCP] VU ${vuId} Iter ${iterId}: Retry attempt ${attempt}/${MAX_RETRIES} after ${(delay * 1000).toFixed(0)}ms delay`);
+                if (DEBUG) {
+                    console.log(`[TCP] VU ${vuId} Iter ${iterId}: Retry attempt ${attempt}/${MAX_RETRIES} after ${(delay * 1000).toFixed(0)}ms delay`);
+                }
                 sleep(delay);
                 
                 // Reset connection on retry
@@ -161,7 +174,9 @@ export default function () {
                 }
             }
             
-            console.log(`[TCP] VU ${vuId} Iter ${iterId}: Invoking gRPC method (attempt ${attempt + 1}/${MAX_RETRIES})...`);
+            if (DEBUG) {
+                console.log(`[TCP] VU ${vuId} Iter ${iterId}: Invoking gRPC method (attempt ${attempt + 1}/${MAX_RETRIES})...`);
+            }
             response = client.invoke(`${serviceName}/${methodName}`, payload);
             
             // Success - break out of retry loop
@@ -181,7 +196,9 @@ export default function () {
                 // For connection exhaustion, use longer backoff
                 if (attempt < MAX_RETRIES - 1) {
                     const delay = getRetryDelay(attempt) * 2; // Double delay for port exhaustion
-                    console.log(`[TCP] VU ${vuId} Iter ${iterId}: Using extended backoff ${(delay * 1000).toFixed(0)}ms for port exhaustion`);
+                    if (DEBUG) {
+                        console.log(`[TCP] VU ${vuId} Iter ${iterId}: Using extended backoff ${(delay * 1000).toFixed(0)}ms for port exhaustion`);
+                    }
                     sleep(delay);
                     continue;
                 }
@@ -228,14 +245,20 @@ export function teardown(data) {
     const vuId = __VU || 'unknown';
     try {
         if (client && client.connected) {
-            console.log(`[TCP] VU ${vuId}: Closing connection during teardown`);
+            if (DEBUG) {
+                console.log(`[TCP] VU ${vuId}: Closing connection during teardown`);
+            }
             client.close();
         } else {
-            console.log(`[TCP] VU ${vuId}: No active connection to close during teardown`);
+            if (DEBUG) {
+                console.log(`[TCP] VU ${vuId}: No active connection to close during teardown`);
+            }
         }
     } catch (e) {
-        console.log(`[TCP] VU ${vuId}: Error during teardown (ignored): ${e}`);
-        // Ignore errors during teardown
+        // Ignore errors during teardown (only log in debug mode)
+        if (DEBUG) {
+            console.log(`[TCP] VU ${vuId}: Error during teardown (ignored): ${e}`);
+        }
     }
 }
 

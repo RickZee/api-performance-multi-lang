@@ -1,0 +1,74 @@
+{
+  "execution_mode": "local",
+  "test_modes": {
+    "available": ["smoke", "full", "saturation"],
+    "default": "smoke"
+  },
+  "test_execution": {
+    "mode": "sequential",
+    "options": ["sequential", "parallel", "lambda_only", "containerized_only"]
+  },
+  "local_mode": {
+    "enabled": true,
+    "use_local_lambdas": true,
+    "use_local_database": true,
+    "docker_network": "car_network"
+  },
+  "aws_mode": {
+    "enabled": false,
+    "region": "us-east-1",
+    "s3_bucket": "",
+    "use_aws_database": false,
+    "vpc_id": "",
+    "subnet_ids": []
+  },
+  "database": {
+    "local": {
+      "host": "postgres-large",
+      "port": 5432,
+      "name": "car_entities",
+      "user": "postgres",
+      "password": "password"
+    },
+    "aws": {
+      "type": "aurora_serverless",
+      "endpoint": "",
+      "port": 5432,
+      "name": "car_entities",
+      "user": "postgres",
+      "password": ""
+    }
+  },
+  "lambda_apis": {
+    "enabled": true,
+    "apis": [
+      "producer-api-go-rest-lambda",
+      "producer-api-go-grpc-lambda"
+    ]
+  },
+  "containerized_apis": {
+    "enabled": true,
+    "apis": [
+      "producer-api-java-rest",
+      "producer-api-java-grpc",
+      "producer-api-rust-rest",
+      "producer-api-rust-grpc",
+      "producer-api-go-rest",
+      "producer-api-go-grpc"
+    ]
+  },
+  "reporting": {
+    "generate_html": true,
+    "generate_csv": false,
+    "output_directory": "load-test/results/unified-reports",
+    "include_cost_analysis": true,
+    "include_lambda_metrics": true
+  },
+  "cleanup": {
+    "stop_services_after_test": true,
+    "delete_lambda_stacks": false,
+    "cleanup_test_data": true,
+    "keep_results": true
+  }
+}
+

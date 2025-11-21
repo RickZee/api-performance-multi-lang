@@ -7,9 +7,11 @@ import (
 )
 
 type Config struct {
-	DatabaseURL string
-	ServerPort  int
-	LogLevel    string
+	DatabaseURL  string
+	ServerPort   int
+	LogLevel     string
+	AuthEnabled  bool
+	JWTSecretKey string
 }
 
 func Load() (*Config, error) {
@@ -32,10 +34,18 @@ func Load() (*Config, error) {
 		logLevel = "info"
 	}
 
+	authEnabled := os.Getenv("AUTH_ENABLED") == "true" || os.Getenv("AUTH_ENABLED") == "1"
+	jwtSecretKey := os.Getenv("JWT_SECRET_KEY")
+	if jwtSecretKey == "" {
+		jwtSecretKey = "test-signing-key-for-jwt-tokens-not-for-production-use"
+	}
+
 	return &Config{
-		DatabaseURL: databaseURL,
-		ServerPort:  serverPort,
-		LogLevel:    logLevel,
+		DatabaseURL:  databaseURL,
+		ServerPort:   serverPort,
+		LogLevel:     logLevel,
+		AuthEnabled:  authEnabled,
+		JWTSecretKey: jwtSecretKey,
 	}, nil
 }
 

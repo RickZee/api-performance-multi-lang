@@ -1,0 +1,20 @@
+{
+  "aws": {
+    "region": "us-east-1",
+    "s3_bucket": "",
+    "vpc_id": "",
+    "subnet_ids": []
+  },
+  "database": {
+    "aurora_endpoint": "",
+    "database_name": "car_entities",
+    "database_user": "postgres",
+    "database_password": ""
+  },
+  "lambda_settings": {
+    "default_memory_mb": 512,
+    "default_timeout_seconds": 30,
+    "log_level": "info"
+  }
+}
+

@@ -1,0 +1,31 @@
+{
+  "local_execution": {
+    "docker_network": "car_network",
+    "database_host": "car_entities_postgres_large",
+    "database_port": 5432,
+    "database_name": "car_entities",
+    "database_user": "postgres",
+    "database_password": "password",
+    "base_port": 9084,
+    "ports": {
+      "producer-api-go-rest-lambda": 9084,
+      "producer-api-go-grpc-lambda": 9085,
+      "producer-api-java-rest-lambda": 9086,
+      "producer-api-java-grpc-lambda": 9087
+    },
+    "memory_mb": 512,
+    "timeout_seconds": 30,
+    "log_level": "info",
+    "environment_variables": {
+      "LOG_LEVEL": "info"
+    }
+  },
+  "sam_local_settings": {
+    "warm_containers": "EAGER",
+    "debug_port": null,
+    "debug_args": "",
+    "container_host": "localhost",
+    "container_host_interface": "127.0.0.1"
+  }
+}
+

@@ -1,0 +1,41 @@
+{
+  "apis": {
+    "producer-api-go-rest-lambda": {
+      "name": "producer-api-go-rest-lambda",
+      "display": "Go REST Lambda",
+      "protocol": "REST",
+      "language": "Go",
+      "test_script": "lambda-rest-api-test.js",
+      "default_memory_mb": 512,
+      "default_timeout_seconds": 30,
+      "memory_configs_to_test": [128, 256, 512, 1024, 2048, 3008],
+      "timeout_configs_to_test": [15, 30, 60],
+      "api_gateway_endpoint_env_var": "LAMBDA_GO_REST_API_URL"
+    },
+    "producer-api-go-grpc-lambda": {
+      "name": "producer-api-go-grpc-lambda",
+      "display": "Go gRPC Lambda",
+      "protocol": "gRPC",
+      "language": "Go",
+      "test_script": "lambda-grpc-api-test.js",
+      "default_memory_mb": 512,
+      "default_timeout_seconds": 30,
+      "memory_configs_to_test": [128, 256, 512, 1024, 2048, 3008],
+      "timeout_configs_to_test": [15, 30, 60],
+      "api_gateway_endpoint_env_var": "LAMBDA_GO_GRPC_API_URL"
+    }
+  },
+  "test_settings": {
+    "cloudwatch_log_group_prefix": "/aws/lambda/",
+    "cloudwatch_metrics_namespace": "AWS/Lambda",
+    "cold_start_inactivity_threshold_seconds": 900,
+    "default_region": "us-east-1",
+    "results_directory": "load-test/results/lambda-tests"
+  },
+  "cost_settings": {
+    "include_api_gateway": true,
+    "estimate_data_transfer_per_request_kb": 1.0,
+    "provisioned_concurrency_enabled": false
+  }
+}
+

@@ -28,6 +28,10 @@ services:
       -c max_parallel_workers_per_gather=2
       -c max_parallel_workers=4
       -c max_parallel_maintenance_workers=2
+      -c shared_preload_libraries=pg_stat_statements
+      -c pg_stat_statements.track=all
+      -c pg_stat_statements.max=10000
+      -c log_min_duration_statement=1000
     ports:
       - "5432:5432"
     volumes:
@@ -63,6 +67,11 @@ services:
     volumes:
       - postgres_data_metrics:/var/lib/postgresql/data
       - ./load-test/shared/migrations:/docker-entrypoint-initdb.d:ro
+    command: >
+      postgres
+      -c shared_buffers=256MB
+      -c effective_cache_size=512MB
+      -c max_connections=50
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U postgres -d performance_metrics"]
       interval: 10s

@@ -21,6 +21,10 @@ const apiPort = __ENV.PORT || 8081;
 const apiPath = __ENV.PATH || '/api/v1/events';
 const apiUrl = `http://${apiHost}:${apiPort}${apiPath}`;
 
+// Authentication configuration
+const AUTH_ENABLED = __ENV.AUTH_ENABLED === 'true' || __ENV.AUTH_ENABLED === '1';
+const JWT_TOKEN = __ENV.JWT_TOKEN || '';
+
 // Payload size is configured via PAYLOAD_SIZE environment variable (4k, 8k, 32k, 64k)
 // If not specified, uses default small payload (~400-500 bytes)
 
@@ -29,10 +33,17 @@ export default function () {
     const payload = generateEventPayload();
     
     // Set headers
+    const headers = {
+        'Content-Type': 'application/json',
+    };
+    
+    // Add Authorization header if auth is enabled
+    if (AUTH_ENABLED && JWT_TOKEN) {
+        headers['Authorization'] = `Bearer ${JWT_TOKEN}`;
+    }
+    
     const params = {
-        headers: {
-            'Content-Type': 'application/json',
-        },
+        headers: headers,
     };
     
     // Send POST request
