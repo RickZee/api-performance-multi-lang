@@ -678,6 +678,9 @@ clear_database() {
         return 0
     fi
     
+    # Reset pg_stat_statements to start fresh for the next test
+    docker-compose exec -T postgres-large psql -U postgres -d car_entities -c "SELECT pg_stat_statements_reset();" >/dev/null 2>&1 || true
+    
     # Clear the car_entities table
     # Try TRUNCATE first, if it fails due to disk space, try DELETE with LIMIT
     local truncate_output
@@ -2137,6 +2140,27 @@ PYTHON_SCRIPT
             fi
         else
             print_warning "No phase analysis data available"
+        fi
+        
+        # Collect and store DB query metrics (for full and saturation tests)
+        if [ "$TEST_MODE" != "smoke" ]; then
+            print_status "Collecting database query metrics..."
+            local db_metrics_script="$db_script_dir/collect-db-metrics.py"
+            if [ -f "$db_metrics_script" ]; then
+                # Collect DB metrics snapshot
+                local db_metrics_file=$(mktemp)
+                if python3 "$db_metrics_script" snapshot "$test_run_id" > "$db_metrics_file" 2>/dev/null; then
+                    # Store in database
+                    if python3 "$db_script_dir/db_client.py" insert_db_query_metrics "$test_run_id" "$db_metrics_file" >/dev/null 2>&1; then
+                        print_success "DB query metrics collected and stored"
+                    else
+                        print_warning "Failed to store DB query metrics in database"
+                    fi
+                else
+                    print_warning "Failed to collect DB query metrics (pg_stat_statements may not be enabled)"
+                fi
+                rm -f "$db_metrics_file"
+            fi
         fi
     fi
     

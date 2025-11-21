@@ -86,3 +86,63 @@ This document explains the columns in the AWS EKS Cost Analytics section of the 
 
 **Note on Pricing:** All costs are estimated based on AWS us-east-1 on-demand pricing as of 2024. Actual costs may vary based on instance types, regions, reserved instances, spot instances, and other factors. These estimates assume a single EKS cluster shared across all APIs.
 
+## Lambda API Testing
+
+The load testing framework supports testing AWS Lambda functions both locally (using SAM Local) and in AWS.
+
+### Lambda Test Scripts
+
+- **`run-lambda-tests.sh`** - Main script for running Lambda performance tests
+- **`start-local-lambdas.sh`** - Start Lambda functions locally using SAM Local
+- **`stop-local-lambdas.sh`** - Stop locally running Lambda functions
+- **`deploy-all-lambdas.sh`** - Deploy Lambda functions to AWS
+- **`lambda-config.json`** - Configuration for Lambda APIs and test settings
+- **`lambda-local-config.json`** - Configuration for local Lambda execution
+
+### Lambda Test Scripts (k6)
+
+- **`lambda-rest-api-test.js`** - k6 test script for Lambda REST APIs
+- **`lambda-grpc-api-test.js`** - k6 test script for Lambda gRPC APIs
+
+### Running Lambda Tests
+
+**Local Execution (SAM Local):**
+
+```bash
+cd load-test/shared
+
+# Start local Lambda functions
+./start-local-lambdas.sh
+
+# Run tests
+./run-lambda-tests.sh smoke local
+./run-lambda-tests.sh full local
+./run-lambda-tests.sh saturation local
+
+# Stop local Lambda functions
+./stop-local-lambdas.sh
+```
+
+**Cloud Execution (AWS):**
+
+```bash
+cd load-test/shared
+
+# Deploy Lambda functions to AWS
+./deploy-all-lambdas.sh
+
+# Run tests
+./run-lambda-tests.sh smoke cloud
+./run-lambda-tests.sh full cloud
+./run-lambda-tests.sh saturation cloud
+```
+
+### Lambda Test Configuration
+
+Lambda tests support different memory configurations and execution modes. See `lambda-config.json` for available settings and `system-test-config.json` for test execution configuration.
+
+For more information, see:
+- [Lambda REST API README](../producer-api-go-rest-lambda/README.md)
+- [Lambda gRPC API README](../producer-api-go-grpc-lambda/README.md)
+- [Terraform README](../terraform/README.md)
+

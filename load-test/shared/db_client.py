@@ -441,6 +441,139 @@ def get_all_apis_resource_summary(
 
 
 # ============================================================================
+# DATABASE QUERY METRICS FUNCTIONS
+# ============================================================================
+
+def insert_db_query_metrics_snapshot(
+    test_run_id: int,
+    snapshot_timestamp: datetime,
+    top_queries: List[Dict[str, Any]],
+    connection_pool_stats: Dict[str, Any]
+) -> Optional[int]:
+    """Insert a DB query metrics snapshot and return snapshot_id"""
+    try:
+        with get_connection() as conn:
+            with conn.cursor() as cur:
+                # Insert snapshot
+                cur.execute("""
+                    INSERT INTO db_query_metrics_snapshots 
+                    (test_run_id, snapshot_timestamp, total_queries_tracked)
+                    VALUES (%s, %s, %s)
+                    RETURNING id
+                """, (test_run_id, snapshot_timestamp, len(top_queries)))
+                
+                snapshot_id = cur.fetchone()[0]
+                
+                # Insert query details
+                if top_queries:
+                    query_details = []
+                    for query in top_queries:
+                        query_details.append((
+                            snapshot_id,
+                            query.get('queryid'),
+                            query.get('query_text', '')[:5000],  # Limit text length
+                            query.get('calls', 0),
+                            query.get('total_exec_time', 0),
+                            query.get('mean_exec_time', 0),
+                            query.get('min_exec_time', 0),
+                            query.get('max_exec_time', 0),
+                            query.get('stddev_exec_time'),
+                            query.get('rows', 0),
+                            query.get('shared_blks_hit', 0),
+                            query.get('shared_blks_read', 0),
+                            query.get('cache_hit_ratio')
+                        ))
+                    
+                    execute_batch(cur, """
+                        INSERT INTO db_query_details 
+                        (snapshot_id, queryid, query_text, calls, total_exec_time_ms, 
+                         mean_exec_time_ms, min_exec_time_ms, max_exec_time_ms, 
+                         stddev_exec_time_ms, rows_processed, shared_blks_hit, 
+                         shared_blks_read, cache_hit_ratio)
+                        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                    """, query_details)
+                
+                # Insert connection pool stats
+                if connection_pool_stats:
+                    cur.execute("""
+                        INSERT INTO db_connection_pool_stats
+                        (snapshot_id, total_connections, active_connections, 
+                         idle_connections, idle_in_transaction, waiting_connections)
+                        VALUES (%s, %s, %s, %s, %s, %s)
+                    """, (
+                        snapshot_id,
+                        connection_pool_stats.get('total_connections', 0),
+                        connection_pool_stats.get('active_connections', 0),
+                        connection_pool_stats.get('idle_connections', 0),
+                        connection_pool_stats.get('idle_in_transaction', 0),
+                        connection_pool_stats.get('waiting_connections', 0)
+                    ))
+                
+                return snapshot_id
+    except Exception as e:
+        print(f"Error inserting DB query metrics snapshot: {e}", file=sys.stderr)
+        return None
+
+
+def get_db_query_metrics_snapshot(test_run_id: int) -> Optional[Dict[str, Any]]:
+    """Get the latest DB query metrics snapshot for a test run"""
+    with get_connection() as conn:
+        with conn.cursor(cursor_factory=RealDictCursor) as cur:
+            # Get snapshot
+            cur.execute("""
+                SELECT * FROM db_query_metrics_snapshots
+                WHERE test_run_id = %s
+                ORDER BY snapshot_timestamp DESC
+                LIMIT 1
+            """, (test_run_id,))
+            
+            snapshot = cur.fetchone()
+            if not snapshot:
+                return None
+            
+            snapshot_dict = dict(snapshot)
+            snapshot_id = snapshot_dict['id']
+            
+            # Get query details
+            cur.execute("""
+                SELECT * FROM db_query_details
+                WHERE snapshot_id = %s
+                ORDER BY total_exec_time_ms DESC
+                LIMIT 20
+            """, (snapshot_id,))
+            
+            snapshot_dict['top_queries'] = [dict(row) for row in cur.fetchall()]
+            
+            # Get connection pool stats
+            cur.execute("""
+                SELECT * FROM db_connection_pool_stats
+                WHERE snapshot_id = %s
+            """, (snapshot_id,))
+            
+            pool_stats = cur.fetchone()
+            if pool_stats:
+                snapshot_dict['connection_pool_stats'] = dict(pool_stats)
+            
+            return snapshot_dict
+
+
+def get_all_apis_db_query_metrics(
+    test_mode: Optional[str] = None,
+    payload_size: Optional[str] = None
+) -> Dict[str, Optional[Dict[str, Any]]]:
+    """Get DB query metrics for all APIs (latest test run per API)"""
+    test_runs = get_latest_test_run_per_api(test_mode, payload_size)
+    results = {}
+    
+    for api_name, test_run in test_runs.items():
+        test_run_id = test_run['id']
+        db_metrics = get_db_query_metrics_snapshot(test_run_id)
+        results[api_name] = db_metrics
+    
+    return results
+
+
+# ============================================================================
 # MAIN (for testing)
 # ============================================================================
 
@@ -490,6 +623,42 @@ if __name__ == '__main__':
             sys.exit(0)
         else:
             print("Database connection failed")
+            sys.exit(1)
+    elif command == 'insert_db_query_metrics':
+        if len(sys.argv) < 3:
+            print("Usage: db_client.py insert_db_query_metrics <test_run_id> <snapshot_json_file>")
+            sys.exit(1)
+        test_run_id = int(sys.argv[2])
+        snapshot_file = sys.argv[3]
+        
+        with open(snapshot_file, 'r') as f:
+            snapshot_data = json.load(f)
+        
+        from datetime import datetime
+        snapshot_timestamp = datetime.fromisoformat(snapshot_data['timestamp'])
+        top_queries = snapshot_data.get('top_queries', [])
+        pool_stats = snapshot_data.get('connection_pool_stats', {})
+        
+        snapshot_id = insert_db_query_metrics_snapshot(
+            test_run_id, snapshot_timestamp, top_queries, pool_stats
+        )
+        
+        if snapshot_id:
+            print(f"DB query metrics snapshot inserted: {snapshot_id}")
+            sys.exit(0)
+        else:
+            print("Failed to insert DB query metrics snapshot", file=sys.stderr)
+            sys.exit(1)
+    elif command == 'get_db_query_metrics':
+        if len(sys.argv) < 3:
+            print("Usage: db_client.py get_db_query_metrics <test_run_id>")
+            sys.exit(1)
+        test_run_id = int(sys.argv[2])
+        metrics = get_db_query_metrics_snapshot(test_run_id)
+        if metrics:
+            print(json.dumps(metrics, indent=2, default=str))
+        else:
+            print("No DB query metrics found for test run", file=sys.stderr)
             sys.exit(1)
     elif command == 'create_test_run':
         if len(sys.argv) < 6:

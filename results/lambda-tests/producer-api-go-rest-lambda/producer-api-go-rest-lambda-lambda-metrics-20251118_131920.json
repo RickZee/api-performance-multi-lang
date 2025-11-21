@@ -1,0 +1,57 @@
+{
+  "total_invocations": 6,
+  "cold_starts": 6,
+  "warm_invocations": 0,
+  "cold_start_percentage": 100.0,
+  "duration": {
+    "avg_ms": 17.154999999999998,
+    "min_ms": 0.64,
+    "max_ms": 27.83,
+    "p50_ms": 19.4,
+    "p95_ms": 27.83,
+    "p99_ms": 27.83
+  },
+  "cold_start": {
+    "count": 6,
+    "init_duration": {
+      "avg_ms": 0.64,
+      "min_ms": 0.64,
+      "max_ms": 0.64,
+      "p95_ms": 0.64,
+      "p99_ms": 0.64
+    },
+    "total_duration": {
+      "avg_ms": 17.154999999999998,
+      "min_ms": 0.64,
+      "max_ms": 27.83,
+      "p95_ms": 27.83,
+      "p99_ms": 27.83
+    }
+  },
+  "warm_invocation": {
+    "count": 0,
+    "duration": {
+      "avg_ms": 0.0,
+      "min_ms": 0.0,
+      "max_ms": 0.0,
+      "p50_ms": 0.0,
+      "p95_ms": 0.0,
+      "p99_ms": 0.0
+    }
+  },
+  "memory": {
+    "allocated_mb": 512,
+    "max_used_mb": 512,
+    "avg_used_mb": 512.0,
+    "utilization_percent": 100.0
+  },
+  "billed_duration": {
+    "avg_ms": 50.833333333333336,
+    "total_ms": 305,
+    "total_seconds": 0.305
+  },
+  "log_file": "/Users/rickzakharov/dev/github/api-performance-multi-lang/load-test/shared/.lambda-logs/producer-api-go-rest-lambda.log",
+  "start_time": null,
+  "end_time": null,
+  "inactivity_threshold_seconds": 900
+}

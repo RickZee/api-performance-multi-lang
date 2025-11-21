@@ -50,3 +50,7 @@ go build -o producer-api-go-grpc ./cmd/server    # Build binary
 **Note:** Proto files are automatically generated during Docker builds, so this step is only needed for local development.
 
 For Docker usage, see the main [README.md](../README.md).
+
+## Lambda Version
+
+A serverless Lambda version is also available: **[Producer API - Go gRPC Lambda](../producer-api-go-grpc-lambda/README.md)**
