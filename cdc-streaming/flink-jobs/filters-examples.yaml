@@ -1,0 +1,269 @@
+# Example Filter and Routing Configurations
+# This file contains additional examples of filtering and routing configurations
+# Copy and modify these examples to create your own filters
+
+# ============================================================================
+# Basic Filters
+# ============================================================================
+
+# Filter by Event Name
+- id: car-created-filter
+  name: "Car Created Events"
+  description: "Filters all car creation events"
+  consumerId: car-inventory-service
+  outputTopic: filtered-car-created-events
+  conditions:
+    - field: eventHeader.eventName
+      operator: equals
+      value: "CarCreated"
+  enabled: true
+
+# Filter by Entity Type
+- id: loan-entity-filter
+  name: "All Loan Entities"
+  description: "Filters all events related to loan entities"
+  consumerId: loan-service
+  outputTopic: filtered-loan-entities
+  conditions:
+    - field: eventBody.entities[0].entityType
+      operator: equals
+      value: "Loan"
+  enabled: true
+
+# Filter by Multiple Event Names
+- id: payment-events-filter
+  name: "Payment Events"
+  description: "Filters all payment-related events"
+  consumerId: payment-service
+  outputTopic: filtered-payment-events
+  conditions:
+    - field: eventHeader.eventName
+      operator: in
+      values: ["LoanPaymentSubmitted", "PaymentProcessed", "PaymentFailed"]
+  enabled: true
+
+# ============================================================================
+# Value-Based Filters
+# ============================================================================
+
+# High Value Loan Filter
+- id: high-value-loan-filter
+  name: "High Value Loans"
+  description: "Filters loans with amount greater than 100,000"
+  consumerId: loan-approval-service
+  outputTopic: filtered-high-value-loans
+  conditions:
+    - field: eventHeader.eventName
+      operator: equals
+      value: "LoanCreated"
+    - field: eventBody.entities[0].updatedAttributes.loan.loanAmount
+      operator: greaterThan
+      value: 100000
+  enabled: true
+
+# Low Value Service Filter
+- id: low-cost-service-filter
+  name: "Low Cost Services"
+  description: "Filters service events with cost less than 100"
+  consumerId: service-analytics
+  outputTopic: filtered-low-cost-services
+  conditions:
+    - field: eventHeader.eventName
+      operator: equals
+      value: "CarServiceDone"
+    - field: eventBody.entities[0].updatedAttributes.service.amountPaid
+      operator: lessThan
+      value: 100
+  enabled: true
+
+# Range Filter
+- id: medium-loan-filter
+  name: "Medium Value Loans"
+  description: "Filters loans between 25,000 and 75,000"
+  consumerId: loan-processing
+  outputTopic: filtered-medium-loans
+  conditions:
+    - field: eventHeader.eventName
+      operator: equals
+      value: "LoanCreated"
+    - field: eventBody.entities[0].updatedAttributes.loan.loanAmount
+      operator: greaterThanOrEqual
+      value: 25000
+    - field: eventBody.entities[0].updatedAttributes.loan.loanAmount
+      operator: lessThanOrEqual
+      value: 75000
+  enabled: true
+
+# ============================================================================
+# Status-Based Filters
+# ============================================================================
+
+# Active Loans Only
+- id: active-loan-filter
+  name: "Active Loans"
+  description: "Filters only active loan events"
+  consumerId: loan-management
+  outputTopic: filtered-active-loans
+  conditions:
+    - field: eventHeader.eventName
+      operator: equals
+      value: "LoanCreated"
+    - field: eventBody.entities[0].updatedAttributes.loan.status
+      operator: equals
+      value: "active"
+  enabled: true
+
+# Failed Payments
+- id: failed-payment-filter
+  name: "Failed Payments"
+  description: "Filters failed payment events"
+  consumerId: payment-retry-service
+  outputTopic: filtered-failed-payments
+  conditions:
+    - field: eventHeader.eventName
+      operator: equals
+      value: "LoanPaymentSubmitted"
+    - field: eventBody.entities[0].updatedAttributes.loanPayment.status
+      operator: equals
+      value: "failed"
+  enabled: false  # Enable when needed
+
+# ============================================================================
+# Time-Based Filters
+# ============================================================================
+
+# Recent Events (last 24 hours)
+- id: recent-events-filter
+  name: "Recent Events"
+  description: "Filters events from the last 24 hours"
+  consumerId: real-time-analytics
+  outputTopic: filtered-recent-events
+  conditions:
+    - field: eventHeader.createdDate
+      operator: greaterThan
+      value: "NOW-24H"  # Placeholder - implement in Flink SQL
+  enabled: true
+
+# Business Hours Events
+- id: business-hours-filter
+  name: "Business Hours Events"
+  description: "Filters events during business hours (9 AM - 5 PM)"
+  consumerId: business-hours-processor
+  outputTopic: filtered-business-hours-events
+  conditions:
+    - field: eventHeader.createdDate
+      operator: between
+      value: "09:00-17:00"  # Placeholder - implement in Flink SQL
+  enabled: false
+
+# ============================================================================
+# Multi-Condition Filters
+# ============================================================================
+
+# Premium Customer Loans
+- id: premium-customer-loan-filter
+  name: "Premium Customer Loans"
+  description: "High value loans for premium customers"
+  consumerId: premium-services
+  outputTopic: filtered-premium-loans
+  conditions:
+    - field: eventHeader.eventName
+      operator: equals
+      value: "LoanCreated"
+    - field: eventBody.entities[0].updatedAttributes.loan.loanAmount
+      operator: greaterThan
+      value: 50000
+    - field: eventBody.entities[0].updatedAttributes.customer.tier
+      operator: equals
+      value: "premium"
+  enabled: false
+
+# Urgent Service Requests
+- id: urgent-service-filter
+  name: "Urgent Service Requests"
+  description: "High priority service events"
+  consumerId: urgent-service-handler
+  outputTopic: filtered-urgent-services
+  conditions:
+    - field: eventHeader.eventName
+      operator: equals
+      value: "CarServiceDone"
+    - field: eventBody.entities[0].updatedAttributes.service.priority
+      operator: equals
+      value: "urgent"
+    - field: eventBody.entities[0].updatedAttributes.service.amountPaid
+      operator: greaterThan
+      value: 500
+  enabled: false
+
+# ============================================================================
+# Region/Geography-Based Filters
+# ============================================================================
+
+# US East Region Events
+- id: us-east-filter
+  name: "US East Region"
+  description: "Filters events from US East region"
+  consumerId: us-east-processor
+  outputTopic: filtered-us-east-events
+  conditions:
+    - field: eventBody.entities[0].updatedAttributes.region
+      operator: equals
+      value: "US-East"
+  enabled: false
+
+# International Events
+- id: international-filter
+  name: "International Events"
+  description: "Filters events outside US"
+  consumerId: international-processor
+  outputTopic: filtered-international-events
+  conditions:
+    - field: eventBody.entities[0].updatedAttributes.region
+      operator: notIn
+      values: ["US-East", "US-West", "US-Central"]
+  enabled: false
+
+# ============================================================================
+# Pattern Matching Filters
+# ============================================================================
+
+# Events with Specific Pattern in Entity ID
+- id: pattern-match-filter
+  name: "Pattern Match Filter"
+  description: "Filters events where entity ID matches a pattern"
+  consumerId: pattern-processor
+  outputTopic: filtered-pattern-events
+  conditions:
+    - field: eventBody.entities[0].entityId
+      operator: matches
+      value: "^loan-.*-premium$"  # Regex pattern
+  enabled: false
+
+# ============================================================================
+# Composite Filters (Multiple Output Topics)
+# ============================================================================
+
+# Route to Multiple Topics Based on Amount
+- id: loan-amount-routing
+  name: "Loan Amount Routing"
+  description: "Routes loans to different topics based on amount"
+  consumerId: loan-router
+  outputTopics:
+    - topic: filtered-small-loans
+      condition:
+        - field: eventBody.entities[0].updatedAttributes.loan.loanAmount
+          operator: lessThan
+          value: 10000
+    - topic: filtered-medium-loans
+      condition:
+        - field: eventBody.entities[0].updatedAttributes.loan.loanAmount
+          operator: between
+          value: [10000, 50000]
+    - topic: filtered-large-loans
+      condition:
+        - field: eventBody.entities[0].updatedAttributes.loan.loanAmount
+          operator: greaterThan
+          value: 50000
+  enabled: false
+

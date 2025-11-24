@@ -1,0 +1,147 @@
+{
+  "type": "record",
+  "name": "FilteredBusinessEvent",
+  "namespace": "com.example.cdc",
+  "doc": "Filtered business event schema for consumer topics",
+  "fields": [
+    {
+      "name": "eventHeader",
+      "type": {
+        "type": "record",
+        "name": "EventHeader",
+        "fields": [
+          {
+            "name": "uuid",
+            "type": ["null", "string"],
+            "default": null,
+            "doc": "Unique event identifier"
+          },
+          {
+            "name": "eventName",
+            "type": "string",
+            "doc": "Name of the event (e.g., CarCreated, LoanCreated)"
+          },
+          {
+            "name": "createdDate",
+            "type": ["null", "long"],
+            "logicalType": "timestamp-millis",
+            "default": null,
+            "doc": "Event creation timestamp in milliseconds"
+          },
+          {
+            "name": "savedDate",
+            "type": ["null", "long"],
+            "logicalType": "timestamp-millis",
+            "default": null,
+            "doc": "Event save timestamp in milliseconds"
+          },
+          {
+            "name": "eventType",
+            "type": ["null", "string"],
+            "default": null,
+            "doc": "Type of the event"
+          }
+        ]
+      }
+    },
+    {
+      "name": "eventBody",
+      "type": {
+        "type": "record",
+        "name": "EventBody",
+        "fields": [
+          {
+            "name": "entities",
+            "type": {
+              "type": "array",
+              "items": {
+                "type": "record",
+                "name": "EntityUpdate",
+                "fields": [
+                  {
+                    "name": "entityType",
+                    "type": "string",
+                    "doc": "Type of entity (Car, Loan, LoanPayment, ServiceRecord, etc.)"
+                  },
+                  {
+                    "name": "entityId",
+                    "type": "string",
+                    "doc": "Unique identifier of the entity"
+                  },
+                  {
+                    "name": "updatedAttributes",
+                    "type": {
+                      "type": "map",
+                      "values": ["null", "string", "long", "double", "boolean", {
+                        "type": "map",
+                        "values": ["null", "string", "long", "double", "boolean"]
+                      }]
+                    },
+                    "doc": "Updated entity attributes as key-value pairs"
+                  }
+                ]
+              }
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "sourceMetadata",
+      "type": {
+        "type": "record",
+        "name": "SourceMetadata",
+        "fields": [
+          {
+            "name": "table",
+            "type": "string",
+            "doc": "Source database table name"
+          },
+          {
+            "name": "operation",
+            "type": {
+              "type": "enum",
+              "name": "Operation",
+              "symbols": ["INSERT", "UPDATE", "DELETE"]
+            },
+            "doc": "Database operation type"
+          },
+          {
+            "name": "timestamp",
+            "type": "long",
+            "logicalType": "timestamp-millis",
+            "doc": "CDC capture timestamp"
+          }
+        ]
+      },
+      "doc": "Metadata about the source of this event from CDC"
+    },
+    {
+      "name": "filterMetadata",
+      "type": {
+        "type": "record",
+        "name": "FilterMetadata",
+        "fields": [
+          {
+            "name": "filterId",
+            "type": "string",
+            "doc": "Identifier of the filter that matched this event"
+          },
+          {
+            "name": "consumerId",
+            "type": "string",
+            "doc": "Identifier of the consumer this event is routed to"
+          },
+          {
+            "name": "filteredAt",
+            "type": "long",
+            "logicalType": "timestamp-millis",
+            "doc": "Timestamp when the event was filtered"
+          }
+        ]
+      },
+      "doc": "Metadata about the filtering/routing process"
+    }
+  ]
+}
+

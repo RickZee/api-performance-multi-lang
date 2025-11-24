@@ -70,7 +70,9 @@ docker-compose --profile producer-java-rest --profile producer-java-grpc --profi
 
 ### Run Performance Tests
 
-The test runner features a beautiful Rich-based UI with live metrics, progress tracking, and color-coded API names:
+```terminal
+python load-test/shared/run-tests.py smoke --payload-size 400b --payload-size 4k
+```
 
 ![Test Runner Demo](docs/test-runner-all-apis-demo.gif)
 
