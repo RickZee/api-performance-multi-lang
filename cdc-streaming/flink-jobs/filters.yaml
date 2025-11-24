@@ -1,0 +1,65 @@
+# Filter and Routing Configuration
+# This file defines filtering rules for routing events to consumer-specific topics
+# Changes to this file should be version-controlled and deployed via CI/CD
+
+filters:
+  # Loan-related events filter
+  - id: loan-events-filter
+    name: "Loan Events Filter"
+    description: "Filters events related to loans (LoanCreated, LoanPaymentSubmitted)"
+    consumerId: loan-consumer
+    outputTopic: filtered-loan-events
+    conditions:
+      - field: eventHeader.eventName
+        operator: in
+        values: ["LoanCreated", "LoanPaymentSubmitted"]
+      - field: eventBody.entities[0].entityType
+        operator: in
+        values: ["Loan", "LoanPayment"]
+    enabled: true
+
+  # Service-related events filter
+  - id: service-events-filter
+    name: "Service Events Filter"
+    description: "Filters events related to car services (CarServiceDone)"
+    consumerId: service-consumer
+    outputTopic: filtered-service-events
+    conditions:
+      - field: eventHeader.eventName
+        operator: equals
+        value: "CarServiceDone"
+      - field: eventBody.entities[0].entityType
+        operator: equals
+        value: "ServiceRecord"
+    enabled: true
+
+  # High-value loan filter (example of amount-based filtering)
+  - id: high-value-loan-filter
+    name: "High Value Loan Filter"
+    description: "Filters loans with amount greater than 50000"
+    consumerId: loan-consumer
+    outputTopic: filtered-high-value-loans
+    conditions:
+      - field: eventHeader.eventName
+        operator: equals
+        value: "LoanCreated"
+      - field: eventBody.entities[0].updatedAttributes.loan.loanAmount
+        operator: greaterThan
+        value: 50000
+    enabled: false  # Disabled by default, enable as needed
+
+  # Car creation events filter
+  - id: car-creation-filter
+    name: "Car Creation Filter"
+    description: "Filters car creation events"
+    consumerId: car-consumer
+    outputTopic: filtered-car-events
+    conditions:
+      - field: eventHeader.eventName
+        operator: equals
+        value: "CarCreated"
+      - field: eventBody.entities[0].entityType
+        operator: equals
+        value: "Car"
+    enabled: true
+
