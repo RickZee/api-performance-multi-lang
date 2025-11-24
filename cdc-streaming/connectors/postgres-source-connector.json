@@ -1,0 +1,26 @@
+{
+  "name": "postgres-source-connector",
+  "config": {
+    "connector.class": "io.confluent.connect.jdbc.JdbcSourceConnector",
+    "tasks.max": "1",
+    "connection.url": "jdbc:postgresql://car_entities_postgres_large:5432/car_entities",
+    "connection.user": "postgres",
+    "connection.password": "password",
+    "table.whitelist": "car_entities,loan_entities,service_record_entities,loan_payment_entities",
+    "mode": "bulk",
+    "topic.prefix": "postgres-",
+    "poll.interval.ms": "10000",
+    "batch.max.rows": "100",
+    "key.converter": "io.confluent.connect.avro.AvroConverter",
+    "value.converter": "io.confluent.connect.avro.AvroConverter",
+    "key.converter.schema.registry.url": "http://schema-registry:8081",
+    "value.converter.schema.registry.url": "http://schema-registry:8081",
+    "transforms": "route",
+    "transforms.route.type": "org.apache.kafka.connect.transforms.RegexRouter",
+    "transforms.route.regex": "postgres-(.*)",
+    "transforms.route.replacement": "raw-business-events",
+    "errors.tolerance": "all",
+    "errors.log.enable": "true",
+    "errors.log.include.messages": "true"
+  }
+}
