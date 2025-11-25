@@ -1,0 +1,80 @@
+name: Generate Flink SQL from Filters
+
+on:
+  push:
+    paths:
+      - 'cdc-streaming/flink-jobs/filters.yaml'
+      - 'cdc-streaming/flink-jobs/filters-examples.yaml'
+      - 'cdc-streaming/scripts/generate-flink-sql.py'
+      - 'cdc-streaming/scripts/templates/**'
+  pull_request:
+    paths:
+      - 'cdc-streaming/flink-jobs/filters.yaml'
+      - 'cdc-streaming/flink-jobs/filters-examples.yaml'
+  workflow_dispatch:
+
+jobs:
+  validate-and-generate:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+      
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+      
+      - name: Install dependencies
+        run: |
+          pip install pyyaml jsonschema jinja2
+      
+      - name: Validate YAML filters
+        working-directory: cdc-streaming
+        run: |
+          python scripts/validate-filters.py \
+            --config flink-jobs/filters.yaml \
+            --schema schemas/filter-schema.json
+      
+      - name: Generate Flink SQL
+        working-directory: cdc-streaming
+        run: |
+          python scripts/generate-flink-sql.py \
+            --config flink-jobs/filters.yaml \
+            --output flink-jobs/routing-generated.sql \
+            --template-dir scripts/templates \
+            --schema schemas/filter-schema.json
+      
+      - name: Validate generated SQL
+        working-directory: cdc-streaming
+        run: |
+          python scripts/validate-sql.py \
+            --sql flink-jobs/routing-generated.sql
+      
+      - name: Run tests
+        working-directory: cdc-streaming
+        run: |
+          python -m pytest tests/test_generator.py -v || python tests/test_generator.py
+      
+      - name: Upload generated SQL
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        uses: actions/upload-artifact@v3
+        with:
+          name: generated-sql
+          path: cdc-streaming/flink-jobs/routing-generated.sql
+      
+      - name: Create PR comment
+        if: github.event_name == 'pull_request'
+        uses: actions/github-script@v6
+        with:
+          script: |
+            const fs = require('fs');
+            const sql = fs.readFileSync('cdc-streaming/flink-jobs/routing-generated.sql', 'utf8');
+            github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: `## Generated Flink SQL\n\n\`\`\`sql\n${sql.substring(0, 2000)}\n\`\`\`\n\n*Generated from filters.yaml*`
+            });
+
+

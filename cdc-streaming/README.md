@@ -114,7 +114,33 @@ This will:
 
 ### 4. Deploy Flink SQL Jobs
 
-Deploy the Flink SQL routing job:
+#### Option A: Confluent Cloud Flink (Recommended for Production)
+
+Deploy Flink SQL statements to Confluent Cloud compute pools:
+
+```bash
+# Create compute pool
+confluent flink compute-pool create prod-flink-east \
+  --cloud aws \
+  --region us-east-1 \
+  --max-cfu 4
+
+# Deploy SQL statement
+confluent flink statement create \
+  --compute-pool cp-east-123 \
+  --statement-name event-routing-job \
+  --statement-file flink-jobs/routing-generated.sql
+
+# Monitor statement
+confluent flink statement describe ss-456789 \
+  --compute-pool cp-east-123
+```
+
+For detailed Confluent Cloud setup, see [confluent-setup.md](confluent-setup.md).
+
+#### Option B: Self-Managed Flink (Docker Compose)
+
+Deploy the Flink SQL routing job to self-managed Flink cluster:
 
 ```bash
 # Copy SQL file to Flink job directory (already mounted in docker-compose)
@@ -134,6 +160,8 @@ curl -X POST http://localhost:8081/v1/jobs \
 EOF
 ```
 
+**Note**: For production deployments, Confluent Cloud Flink is recommended for managed infrastructure, auto-scaling, and high availability.
+
 ### 5. Verify Pipeline
 
 Test the end-to-end pipeline:
@@ -147,6 +175,22 @@ Test the end-to-end pipeline:
 ### Filter Configuration
 
 Edit `flink-jobs/filters.yaml` to modify filtering rules. See `flink-jobs/filters-examples.yaml` for comprehensive examples.
+
+**Code Generation**: Flink SQL queries can be automatically generated from YAML filter configurations. See [CODE_GENERATION.md](CODE_GENERATION.md) for details.
+
+To generate SQL from filters:
+```bash
+# Validate filters
+python scripts/validate-filters.py
+
+# Generate SQL
+python scripts/generate-flink-sql.py \
+  --config flink-jobs/filters.yaml \
+  --output flink-jobs/routing-generated.sql
+
+# Validate generated SQL
+python scripts/validate-sql.py --sql flink-jobs/routing-generated.sql
+```
 
 Basic example:
 
@@ -186,7 +230,14 @@ See `flink-jobs/filters-examples.yaml` for 20+ example configurations.
 
 ### Flink SQL Jobs
 
-Edit `flink-jobs/routing.sql` to modify filtering and routing logic. See `flink-jobs/routing-examples.sql` for comprehensive examples.
+**Option 1: Generated SQL (Recommended)**
+- SQL is automatically generated from `filters.yaml`
+- See [CODE_GENERATION.md](CODE_GENERATION.md) for code generation guide
+- Generated file: `flink-jobs/routing-generated.sql`
+
+**Option 2: Manual SQL**
+- Edit `flink-jobs/routing.sql` manually for custom queries
+- See `flink-jobs/routing-examples.sql` for comprehensive examples
 
 Basic example:
 

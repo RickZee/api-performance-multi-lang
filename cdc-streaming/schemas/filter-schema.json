@@ -1,0 +1,163 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Filter Configuration Schema",
+  "description": "JSON schema for validating Flink SQL filter configurations",
+  "type": "object",
+  "required": ["filters"],
+  "properties": {
+    "filters": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["id", "name", "consumerId", "outputTopic", "conditions", "enabled"],
+        "properties": {
+          "id": {
+            "type": "string",
+            "pattern": "^[a-z0-9-]+$",
+            "description": "Unique identifier for the filter (lowercase, hyphens allowed)"
+          },
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Human-readable name for the filter"
+          },
+          "description": {
+            "type": "string",
+            "description": "Optional description of what the filter does"
+          },
+          "consumerId": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Identifier of the consumer that will process filtered events"
+          },
+          "outputTopic": {
+            "type": "string",
+            "pattern": "^[a-z0-9-]+$",
+            "description": "Kafka topic name for filtered events (lowercase, hyphens allowed)"
+          },
+          "conditions": {
+            "type": "array",
+            "minItems": 1,
+            "items": {
+              "type": "object",
+              "required": ["field", "operator"],
+              "properties": {
+                "field": {
+                  "type": "string",
+                  "pattern": "^[a-zA-Z0-9_.\\[\\]]+$",
+                  "description": "Field path in the event structure (e.g., eventHeader.eventName, eventBody.entities[0].entityType)"
+                },
+                "operator": {
+                  "type": "string",
+                  "enum": [
+                    "equals",
+                    "in",
+                    "notIn",
+                    "greaterThan",
+                    "lessThan",
+                    "greaterThanOrEqual",
+                    "lessThanOrEqual",
+                    "between",
+                    "matches",
+                    "isNull",
+                    "isNotNull"
+                  ],
+                  "description": "Comparison operator for the condition"
+                },
+                "value": {
+                  "description": "Single value for operators: equals, greaterThan, lessThan, greaterThanOrEqual, lessThanOrEqual, matches, isNull, isNotNull"
+                },
+                "values": {
+                  "type": "array",
+                  "description": "Array of values for operators: in, notIn"
+                },
+                "min": {
+                  "description": "Minimum value for 'between' operator"
+                },
+                "max": {
+                  "description": "Maximum value for 'between' operator"
+                },
+                "valueType": {
+                  "type": "string",
+                  "enum": ["string", "number", "boolean", "timestamp"],
+                  "default": "string",
+                  "description": "Type of the value for proper SQL casting"
+                },
+                "logicalOperator": {
+                  "type": "string",
+                  "enum": ["AND", "OR"],
+                  "default": "AND",
+                  "description": "Logical operator to combine with previous condition"
+                }
+              },
+              "allOf": [
+                {
+                  "if": {
+                    "properties": {
+                      "operator": {
+                        "enum": ["equals", "greaterThan", "lessThan", "greaterThanOrEqual", "lessThanOrEqual", "matches"]
+                      }
+                    }
+                  },
+                  "then": {
+                    "required": ["value"]
+                  }
+                },
+                {
+                  "if": {
+                    "properties": {
+                      "operator": {
+                        "enum": ["in", "notIn"]
+                      }
+                    }
+                  },
+                  "then": {
+                    "required": ["values"]
+                  }
+                },
+                {
+                  "if": {
+                    "properties": {
+                      "operator": {
+                        "const": "between"
+                      }
+                    }
+                  },
+                  "then": {
+                    "required": ["min", "max"]
+                  }
+                },
+                {
+                  "if": {
+                    "properties": {
+                      "operator": {
+                        "enum": ["isNull", "isNotNull"]
+                      }
+                    }
+                  },
+                  "then": {
+                    "not": {
+                      "required": ["value", "values"]
+                    }
+                  }
+                }
+              ]
+            }
+          },
+          "enabled": {
+            "type": "boolean",
+            "description": "Whether this filter is enabled (only enabled filters generate SQL)"
+          },
+          "conditionLogic": {
+            "type": "string",
+            "enum": ["AND", "OR"],
+            "default": "AND",
+            "description": "How to combine multiple conditions (default: AND)"
+          }
+        }
+      }
+    }
+  }
+}
+
+

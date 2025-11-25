@@ -18,7 +18,7 @@
     },
     "financialInstitution": {
       "type": "string",
-      "description": "Name of the financial institution providing the loan"
+      "description": "Name of the institution providing the loan"
     },
     "balance": {
       "type": "number",

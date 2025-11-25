@@ -201,3 +201,4 @@ WHERE
     `eventHeader`.`eventName` = 'CarCreated'
     AND `eventBody`.`entities`[1].`entityType` = 'Car';
 
+
