@@ -31,7 +31,7 @@ public class TestDataGenerator {
     private static final String[] CAR_MAKES = {"Honda", "Toyota", "Ford", "BMW", "Mercedes", "Audi", "Nissan", "Hyundai"};
     private static final String[] CAR_MODELS = {"Civic", "Camry", "Focus", "X3", "C-Class", "A4", "Altima", "Elantra"};
     private static final String[] COLORS = {"Blue", "Red", "White", "Black", "Silver", "Gray", "Green", "Yellow"};
-    private static final String[] FINANCIAL_INSTITUTIONS = {"ABC Bank", "XYZ Credit Union", "First National", "Community Bank", "Metro Financial"};
+    private static final String[] LOAN_PROVIDERS = {"ABC Bank", "XYZ Credit Union", "First National", "Community Bank", "Metro Financial"};
     private static final String[] EVENT_TYPES = {"LoanPaymentSubmitted", "CarServiceDone", "LoanCreated", "CarRegistered"};
     
     @Autowired
@@ -162,7 +162,7 @@ public class TestDataGenerator {
         Map<String, Object> attributes = new HashMap<>();
         attributes.put("id", "loan-" + random.nextInt(100000));
         attributes.put("carId", "car-" + random.nextInt(100000));
-        attributes.put("financialInstitution", FINANCIAL_INSTITUTIONS[random.nextInt(FINANCIAL_INSTITUTIONS.length)]);
+        attributes.put("financialInstitution", LOAN_PROVIDERS[random.nextInt(LOAN_PROVIDERS.length)]);
         attributes.put("balance", String.format("%.2f", 15000 + random.nextDouble() * 35000));
         attributes.put("loanAmount", String.format("%.2f", 20000 + random.nextDouble() * 40000));
         attributes.put("interestRate", String.format("%.3f", 0.02 + random.nextDouble() * 0.08));
