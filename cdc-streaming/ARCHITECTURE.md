@@ -685,7 +685,7 @@ The system is production-ready and can be deployed to Confluent Cloud or self-ma
 - **[CODE_GENERATION.md](CODE_GENERATION.md)**: Guide to YAML filter configuration and SQL code generation
 - **[DISASTER_RECOVERY.md](DISASTER_RECOVERY.md)**: Comprehensive disaster recovery procedures and failover mechanisms
 - **[PERFORMANCE_TUNING.md](PERFORMANCE_TUNING.md)**: Performance optimization strategies and tuning guides
-- **[confluent-setup.md](confluent-setup.md)**: Confluent Cloud deployment guide
+- **[CONFLUENT_CLOUD_SETUP_GUIDE.md](CONFLUENT_CLOUD_SETUP_GUIDE.md)**: Complete Confluent Cloud setup guide
 
 ## References
 
