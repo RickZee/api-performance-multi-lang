@@ -27,34 +27,32 @@ This CDC streaming system captures changes from PostgreSQL database tables and s
 
 ### Components
 
-1. **Confluent Platform**:
-   - Zookeeper: Coordination service for Kafka
-   - Kafka Broker: Message streaming platform
-   - Schema Registry: Schema management for Avro
-   - Kafka Connect: Connector framework for CDC
-   - Control Center: Monitoring and management UI (optional)
+- **Confluent Platform**: Kafka, Schema Registry, Kafka Connect, Control Center
+- **Flink Cluster**: JobManager, TaskManager, Flink SQL for stream processing
+- **Postgres Source Connector**: Debezium-based CDC connector
+- **Consumer Applications**: Process filtered events from consumer-specific topics
 
-2. **Flink Cluster**:
-   - JobManager: Coordinates Flink jobs
-   - TaskManager: Executes Flink tasks
-   - Flink SQL: Declarative stream processing
-
-3. **Postgres Source Connector**:
-   - Debezium-based connector
-   - Captures INSERT/UPDATE/DELETE from entity tables
-   - Publishes to `raw-business-events` topic
-
-4. **Example Consumers**:
-   - Loan Consumer: Consumes filtered loan events
-   - Service Consumer: Consumes filtered service events
+For detailed architecture information, component deep dives, and how consumers interact with the system, see [ARCHITECTURE.md](ARCHITECTURE.md).
 
 ## Prerequisites
+
+### For Docker Compose (Local Development)
 
 - Docker and Docker Compose
 - PostgreSQL 15+ (can use existing `postgres-large` service)
 - jq (for JSON processing in scripts)
 - curl (for API calls)
 - Access to existing producer APIs for generating test events
+
+### For Confluent Cloud (Production)
+
+- Confluent Cloud account (sign up at https://confluent.cloud)
+- Confluent CLI installed (`brew install confluentinc/tap/cli`)
+- AWS account (if using AWS cloud provider)
+- PostgreSQL database (Aurora PostgreSQL or self-managed)
+- Network connectivity between Confluent Cloud and PostgreSQL
+
+**For complete Confluent Cloud setup instructions, see [CONFLUENT_CLOUD_SETUP_GUIDE.md](CONFLUENT_CLOUD_SETUP_GUIDE.md).**
 
 ## Quick Start
 
@@ -88,8 +86,9 @@ Access Control Center at: http://localhost:9021
 
 #### Option B: Confluent Cloud (Production)
 
-Set up Confluent Cloud infrastructure:
+For complete Confluent Cloud setup instructions, see **[CONFLUENT_CLOUD_SETUP_GUIDE.md](CONFLUENT_CLOUD_SETUP_GUIDE.md)**.
 
+**Quick Start:**
 ```bash
 # Login to Confluent Cloud
 confluent login
@@ -109,9 +108,6 @@ confluent flink compute-pool create prod-flink-east \
   --cloud aws \
   --region us-east-1 \
   --max-cfu 4
-
-# Generate API keys for cluster access
-confluent api-key create --resource <cluster-id> --description "Cluster API key"
 ```
 
 **What's Included:**
@@ -121,96 +117,7 @@ confluent api-key create --resource <cluster-id> --description "Cluster API key"
 - Built-in monitoring and alerting
 - High availability and automatic failover
 
-**CI/CD Alternatives:**
-
-**Option B1: Terraform (Infrastructure as Code)**
-
-```hcl
-# terraform/confluent/environment.tf
-provider "confluent" {
-  cloud_api_key    = var.confluent_cloud_api_key
-  cloud_api_secret = var.confluent_cloud_api_secret
-}
-
-resource "confluent_environment" "prod" {
-  display_name = "prod"
-  stream_governance {
-    package = "ESSENTIALS"
-  }
-}
-
-resource "confluent_kafka_cluster" "dedicated" {
-  display_name = "prod-kafka-east"
-  availability = "MULTI_ZONE"
-  cloud        = "AWS"
-  region       = "us-east-1"
-  dedicated {
-    cku = 2
-  }
-  environment {
-    id = confluent_environment.prod.id
-  }
-}
-
-resource "confluent_flink_compute_pool" "prod_flink_east" {
-  display_name = "prod-flink-east"
-  cloud        = "AWS"
-  region       = "us-east-1"
-  max_cfu      = 4
-  environment {
-    id = confluent_environment.prod.id
-  }
-}
-```
-
-**Option B2: REST API**
-
-```python
-# scripts/setup-confluent-cloud.py
-import requests
-import base64
-
-def create_environment(name, api_key, api_secret):
-    url = "https://api.confluent.cloud/org/v2/environments"
-    auth = base64.b64encode(f'{api_key}:{api_secret}'.encode()).decode()
-    headers = {
-        "Authorization": f"Basic {auth}",
-        "Content-Type": "application/json"
-    }
-    payload = {
-        "display_name": name,
-        "stream_governance": {"package": "ESSENTIALS"}
-    }
-    response = requests.post(url, json=payload, headers=headers)
-    return response.json()
-```
-
-**Option B3: GitHub Actions**
-
-```yaml
-# .github/workflows/setup-confluent-cloud.yml
-name: Setup Confluent Cloud Infrastructure
-on:
-  workflow_dispatch:
-
-jobs:
-  setup:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v3
-      - name: Setup Confluent CLI
-        run: brew install confluentinc/tap/cli
-      - name: Create Environment
-        env:
-          CONFLUENT_CLOUD_API_KEY: ${{ secrets.CONFLUENT_API_KEY }}
-          CONFLUENT_CLOUD_API_SECRET: ${{ secrets.CONFLUENT_API_SECRET }}
-        run: |
-          confluent login --api-key $CONFLUENT_CLOUD_API_KEY --api-secret $CONFLUENT_CLOUD_API_SECRET
-          confluent environment create prod --stream-governance
-          confluent kafka cluster create prod-kafka-east --cloud aws --region us-east-1 --type dedicated --cku 2
-```
-
-For detailed Confluent Cloud setup, see [confluent-setup.md](confluent-setup.md).
+For detailed setup steps, CI/CD alternatives (Terraform, REST API, GitHub Actions), and advanced topics, see [CONFLUENT_CLOUD_SETUP_GUIDE.md](CONFLUENT_CLOUD_SETUP_GUIDE.md).
 
 ### 2. Create Kafka Topics
 
@@ -243,108 +150,9 @@ confluent kafka topic create filtered-loan-events --partitions 6
 confluent kafka topic create filtered-service-events --partitions 6
 confluent kafka topic create filtered-car-events --partitions 6
 confluent kafka topic create filtered-high-value-loans --partitions 6
-
-# Or create all topics in batch
-for topic in raw-business-events filtered-loan-events filtered-service-events filtered-car-events filtered-high-value-loans; do
-  confluent kafka topic create "$topic" --partitions 6
-done
 ```
 
-**CI/CD Alternatives:**
-
-**Option B1: Terraform**
-
-```hcl
-# terraform/confluent/kafka-topics.tf
-resource "confluent_kafka_topic" "raw_events" {
-  kafka_cluster {
-    id = confluent_kafka_cluster.dedicated.id
-  }
-  topic_name       = "raw-business-events"
-  partitions_count = 6
-  rest_endpoint    = confluent_kafka_cluster.dedicated.rest_endpoint
-  credentials {
-    key    = confluent_api_key.cluster_api_key.id
-    secret = confluent_api_key.cluster_api_key.secret
-  }
-}
-
-resource "confluent_kafka_topic" "filtered_loan_events" {
-  kafka_cluster {
-    id = confluent_kafka_cluster.dedicated.id
-  }
-  topic_name       = "filtered-loan-events"
-  partitions_count = 6
-  rest_endpoint    = confluent_kafka_cluster.dedicated.rest_endpoint
-  credentials {
-    key    = confluent_api_key.cluster_api_key.id
-    secret = confluent_api_key.cluster_api_key.secret
-  }
-}
-
-# Repeat for other topics...
-```
-
-**Option B2: REST API**
-
-```python
-# scripts/create-topics-confluent-cloud.py
-import requests
-import base64
-
-def create_topic(cluster_id, topic_name, partitions, api_key, api_secret):
-    url = f"https://api.confluent.cloud/kafka/v3/clusters/{cluster_id}/topics"
-    auth = base64.b64encode(f'{api_key}:{api_secret}'.encode()).decode()
-    headers = {
-        "Authorization": f"Basic {auth}",
-        "Content-Type": "application/json"
-    }
-    payload = {
-        "topic_name": topic_name,
-        "partitions_count": partitions
-    }
-    response = requests.post(url, json=payload, headers=headers)
-    return response.json()
-
-# Create all topics
-topics = [
-    ("raw-business-events", 6),
-    ("filtered-loan-events", 6),
-    ("filtered-service-events", 6),
-    ("filtered-car-events", 6),
-    ("filtered-high-value-loans", 6)
-]
-
-for topic_name, partitions in topics:
-    create_topic(cluster_id, topic_name, partitions, api_key, api_secret)
-```
-
-**Option B3: GitHub Actions**
-
-```yaml
-# .github/workflows/create-topics.yml
-name: Create Kafka Topics
-on:
-  workflow_dispatch:
-
-jobs:
-  create-topics:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v3
-      - name: Setup Confluent CLI
-        run: brew install confluentinc/tap/cli
-      - name: Create Topics
-        env:
-          CONFLUENT_CLOUD_API_KEY: ${{ secrets.CONFLUENT_API_KEY }}
-          CONFLUENT_CLOUD_API_SECRET: ${{ secrets.CONFLUENT_API_SECRET }}
-        run: |
-          confluent login --api-key $CONFLUENT_CLOUD_API_KEY --api-secret $CONFLUENT_CLOUD_API_SECRET
-          confluent kafka cluster use ${{ secrets.CLUSTER_ID }}
-          for topic in raw-business-events filtered-loan-events filtered-service-events filtered-car-events; do
-            confluent kafka topic create "$topic" --partitions 6
-          done
-```
+For detailed topic creation steps, CI/CD alternatives (Terraform, REST API, GitHub Actions), and topic configuration, see [CONFLUENT_CLOUD_SETUP_GUIDE.md](CONFLUENT_CLOUD_SETUP_GUIDE.md).
 
 ### 3. Set Up Postgres Connector
 
@@ -366,150 +174,13 @@ This will:
 Deploy Postgres Source Connector to Confluent Cloud:
 
 ```bash
-# Create connector cluster (if not using managed connectors)
-# Note: Confluent Cloud supports managed connectors or self-hosted Connect clusters
-
-# Option 1: Using Confluent Cloud managed connectors (if available)
+# Using Confluent Cloud managed connectors
 confluent connector create postgres-source \
   --kafka-cluster <cluster-id> \
   --config-file connectors/postgres-source-connector.json
-
-# Option 2: Using self-hosted Connect cluster
-# First, create connector cluster or use existing one
-confluent connect cluster create connect-cluster-east \
-  --cloud aws \
-  --region us-east-1 \
-  --kafka-cluster <cluster-id>
-
-# Then create connector
-confluent connector create postgres-source \
-  --connect-cluster <connect-cluster-id> \
-  --config-file connectors/postgres-source-connector.json
 ```
 
-**Connector Configuration for Confluent Cloud:**
-
-Update `connectors/postgres-source-connector.json` with Confluent Cloud settings:
-
-```json
-{
-  "name": "postgres-source-connector",
-  "config": {
-    "connector.class": "io.debezium.connector.postgresql.PostgresConnector",
-    "database.hostname": "<aurora-endpoint>",
-    "database.port": "5432",
-    "database.user": "<postgres-user>",
-    "database.password": "<postgres-password>",
-    "database.dbname": "<database-name>",
-    "database.server.name": "postgres-source",
-    "topic.prefix": "raw-business-events",
-    "table.include.list": "public.car_entities,public.loan_entities,public.service_record_entities",
-    "plugin.name": "pgoutput",
-    "tasks.max": "1",
-    "key.converter": "io.confluent.connect.avro.AvroConverter",
-    "key.converter.schema.registry.url": "https://<schema-registry-endpoint>",
-    "value.converter": "io.confluent.connect.avro.AvroConverter",
-    "value.converter.schema.registry.url": "https://<schema-registry-endpoint>",
-    "value.converter.schema.registry.basic.auth.credentials.source": "USER_INFO",
-    "value.converter.schema.registry.basic.auth.user.info": "<api-key>:<api-secret>"
-  }
-}
-```
-
-**CI/CD Alternatives:**
-
-**Option B1: Terraform**
-
-```hcl
-# terraform/confluent/connectors.tf
-resource "confluent_connector" "postgres_source" {
-  environment {
-    id = confluent_environment.prod.id
-  }
-  kafka_cluster {
-    id = confluent_kafka_cluster.dedicated.id
-  }
-  
-  config_sensitive = {
-    "database.password" = var.postgres_password
-    "value.converter.schema.registry.basic.auth.user.info" = "${var.schema_registry_api_key}:${var.schema_registry_api_secret}"
-  }
-  
-  config_nonsensitive = {
-    "connector.class"          = "io.debezium.connector.postgresql.PostgresConnector"
-    "database.hostname"        = var.aurora_endpoint
-    "database.port"            = "5432"
-    "database.user"            = var.postgres_user
-    "database.dbname"          = var.database_name
-    "database.server.name"     = "postgres-source"
-    "topic.prefix"             = "raw-business-events"
-    "table.include.list"       = "public.car_entities,public.loan_entities"
-    "plugin.name"              = "pgoutput"
-    "tasks.max"                = "1"
-    "key.converter"            = "io.confluent.connect.avro.AvroConverter"
-    "key.converter.schema.registry.url" = var.schema_registry_url
-    "value.converter"          = "io.confluent.connect.avro.AvroConverter"
-    "value.converter.schema.registry.url" = var.schema_registry_url
-  }
-}
-```
-
-**Option B2: REST API**
-
-```python
-# scripts/deploy-connector-confluent-cloud.py
-import requests
-import base64
-import json
-
-def deploy_connector(env_id, cluster_id, config_file, api_key, api_secret):
-    with open(config_file, 'r') as f:
-        connector_config = json.load(f)
-    
-    url = f"https://api.confluent.cloud/connect/v1/environments/{env_id}/clusters/{cluster_id}/connectors"
-    auth = base64.b64encode(f'{api_key}:{api_secret}'.encode()).decode()
-    headers = {
-        "Authorization": f"Basic {auth}",
-        "Content-Type": "application/json"
-    }
-    response = requests.post(url, json=connector_config, headers=headers)
-    return response.json()
-
-# Deploy connector
-deploy_connector(
-    env_id="env-123456",
-    cluster_id="lkc-abc123",
-    config_file="connectors/postgres-source-connector.json",
-    api_key=os.getenv("CONFLUENT_API_KEY"),
-    api_secret=os.getenv("CONFLUENT_API_SECRET")
-)
-```
-
-**Option B3: GitHub Actions**
-
-```yaml
-# .github/workflows/deploy-connector.yml
-name: Deploy Postgres Connector
-on:
-  workflow_dispatch:
-
-jobs:
-  deploy:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v3
-      - name: Setup Confluent CLI
-        run: brew install confluentinc/tap/cli
-      - name: Deploy Connector
-        env:
-          CONFLUENT_CLOUD_API_KEY: ${{ secrets.CONFLUENT_API_KEY }}
-          CONFLUENT_CLOUD_API_SECRET: ${{ secrets.CONFLUENT_API_SECRET }}
-        run: |
-          confluent login --api-key $CONFLUENT_CLOUD_API_KEY --api-secret $CONFLUENT_CLOUD_API_SECRET
-          confluent connector create postgres-source \
-            --kafka-cluster ${{ secrets.CLUSTER_ID }} \
-            --config-file connectors/postgres-source-connector.json
-```
+For detailed connector setup steps, configuration examples, and CI/CD alternatives (Terraform, REST API, GitHub Actions), see [CONFLUENT_CLOUD_SETUP_GUIDE.md](CONFLUENT_CLOUD_SETUP_GUIDE.md).
 
 ### 4. Deploy Flink SQL Jobs
 
@@ -535,7 +206,7 @@ confluent flink statement describe ss-456789 \
   --compute-pool cp-east-123
 ```
 
-For detailed Confluent Cloud setup, see [confluent-setup.md](confluent-setup.md).
+For detailed Flink SQL deployment steps, SQL configuration, and CI/CD alternatives (Terraform, REST API, GitHub Actions, Jenkins, Kubernetes), see [CONFLUENT_CLOUD_SETUP_GUIDE.md](CONFLUENT_CLOUD_SETUP_GUIDE.md).
 
 #### Option B: Self-Managed Flink (Docker Compose)
 
@@ -560,266 +231,6 @@ EOF
 ```
 
 **Note**: For production deployments, Confluent Cloud Flink is recommended for managed infrastructure, auto-scaling, and high availability.
-
-#### CI/CD Alternatives for Flink SQL Deployment
-
-**Option A1: Terraform (Infrastructure as Code)**
-
-```hcl
-# terraform/confluent/flink-statements.tf
-resource "confluent_flink_statement" "event_routing" {
-  compute_pool_id = confluent_flink_compute_pool.prod_flink_east.id
-  statement_name  = "event-routing-job"
-  statement       = file("${path.module}/../cdc-streaming/flink-jobs/routing-generated.sql")
-  
-  properties = {
-    "sql.current-catalog" = "default_catalog"
-    "sql.current-database" = "default_database"
-  }
-  
-  rest_endpoint = confluent_flink_compute_pool.prod_flink_east.rest_endpoint
-  credentials {
-    key    = confluent_api_key.flink_api_key.id
-    secret = confluent_api_key.flink_api_key.secret
-  }
-}
-```
-
-**Option A2: REST API (Python/Go Script)**
-
-```python
-# scripts/deploy-flink-statement.py
-import requests
-import base64
-import sys
-
-def deploy_flink_statement(compute_pool_id, statement_name, sql_file, api_key, api_secret):
-    with open(sql_file, 'r') as f:
-        sql_content = f.read()
-    
-    url = f"https://api.confluent.cloud/flink/v1beta1/compute-pools/{compute_pool_id}/statements"
-    auth = base64.b64encode(f'{api_key}:{api_secret}'.encode()).decode()
-    headers = {
-        "Authorization": f"Basic {auth}",
-        "Content-Type": "application/json"
-    }
-    payload = {
-        "statement_name": statement_name,
-        "statement": sql_content
-    }
-    response = requests.post(url, json=payload, headers=headers)
-    return response.json()
-
-if __name__ == '__main__':
-    deploy_flink_statement(
-        compute_pool_id=sys.argv[1],
-        statement_name=sys.argv[2],
-        sql_file=sys.argv[3],
-        api_key=sys.argv[4],
-        api_secret=sys.argv[5]
-    )
-```
-
-**Option A3: GitHub Actions Workflow**
-
-```yaml
-# .github/workflows/deploy-flink-job.yml
-name: Deploy Flink SQL Job
-on:
-  push:
-    branches: [main]
-    paths:
-      - 'cdc-streaming/flink-jobs/routing-generated.sql'
-
-jobs:
-  deploy:
-    runs-on: ubuntu-latest
-    environment: production
-    steps:
-      - uses: actions/checkout@v3
-      - name: Setup Confluent CLI
-        run: brew install confluentinc/tap/cli
-      - name: Login to Confluent
-        env:
-          CONFLUENT_CLOUD_API_KEY: ${{ secrets.CONFLUENT_API_KEY }}
-          CONFLUENT_CLOUD_API_SECRET: ${{ secrets.CONFLUENT_API_SECRET }}
-        run: confluent login --api-key $CONFLUENT_CLOUD_API_KEY --api-secret $CONFLUENT_CLOUD_API_SECRET
-      - name: Deploy Flink Statement
-        run: |
-          confluent flink statement create \
-            --compute-pool ${{ secrets.COMPUTE_POOL_ID }} \
-            --statement-name event-routing-job \
-            --statement-file cdc-streaming/flink-jobs/routing-generated.sql
-      - name: Verify Deployment
-        run: |
-          confluent flink statement list --compute-pool ${{ secrets.COMPUTE_POOL_ID }}
-```
-
-**Option A4: Jenkins Pipeline**
-
-```groovy
-// Jenkinsfile
-pipeline {
-    agent any
-    environment {
-        CONFLUENT_API_KEY = credentials('confluent-api-key')
-        CONFLUENT_API_SECRET = credentials('confluent-api-secret')
-        COMPUTE_POOL_ID = 'cp-east-123'
-    }
-    stages {
-        stage('Deploy Flink SQL') {
-            steps {
-                sh '''
-                    confluent login --api-key ${CONFLUENT_API_KEY} --api-secret ${CONFLUENT_API_SECRET}
-                    confluent flink statement create \
-                        --compute-pool ${COMPUTE_POOL_ID} \
-                        --statement-name event-routing-job \
-                        --statement-file cdc-streaming/flink-jobs/routing-generated.sql
-                '''
-            }
-        }
-        stage('Verify Deployment') {
-            steps {
-                sh '''
-                    confluent flink statement list --compute-pool ${COMPUTE_POOL_ID}
-                '''
-            }
-        }
-    }
-}
-```
-
-**Option B1: Docker Compose in CI/CD**
-
-```yaml
-# .github/workflows/deploy-flink-docker.yml
-name: Deploy Flink SQL to Docker
-on:
-  push:
-    branches: [main]
-    paths:
-      - 'cdc-streaming/flink-jobs/routing-generated.sql'
-
-jobs:
-  deploy:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v3
-      - name: Start Flink Cluster
-        run: |
-          cd cdc-streaming
-          docker-compose up -d flink-jobmanager flink-taskmanager
-      - name: Wait for Flink
-        run: |
-          timeout 60 bash -c 'until curl -f http://localhost:8081/overview; do sleep 2; done'
-      - name: Deploy SQL Job
-        run: |
-          docker exec cdc-flink-jobmanager \
-            ./bin/sql-client.sh embedded \
-            -f /opt/flink/jobs/routing-generated.sql
-      - name: Verify Job
-        run: |
-          curl http://localhost:8081/jobs | jq
-```
-
-**Option B2: Kubernetes Deployment**
-
-```yaml
-# k8s/flink-job-configmap.yaml
-apiVersion: v1
-kind: ConfigMap
-metadata:
-  name: flink-routing-sql
-data:
-  routing.sql: |
-    # SQL content from routing-generated.sql
----
-apiVersion: batch/v1
-kind: Job
-metadata:
-  name: deploy-flink-sql
-spec:
-  template:
-    spec:
-      containers:
-      - name: flink-sql-client
-        image: flink:1.18
-        command: ["/bin/sh", "-c"]
-        args:
-          - |
-            ./bin/sql-client.sh embedded \
-              -f /opt/flink/jobs/routing.sql
-        volumeMounts:
-        - name: sql-config
-          mountPath: /opt/flink/jobs
-      volumes:
-      - name: sql-config
-        configMap:
-          name: flink-routing-sql
-      restartPolicy: Never
-```
-
-**Option B3: Helm Chart Deployment**
-
-```yaml
-# k8s/helm/flink-sql/values.yaml
-flink:
-  jobManager:
-    serviceType: ClusterIP
-  taskManager:
-    replicas: 2
-  sqlJobs:
-    - name: event-routing-job
-      sqlFile: routing-generated.sql
-      parallelism: 2
-```
-
-**Option B4: Terraform for Self-Managed Flink**
-
-```hcl
-# terraform/flink/self-managed.tf
-resource "kubernetes_config_map" "flink_sql" {
-  metadata {
-    name      = "flink-routing-sql"
-    namespace = "flink"
-  }
-  data = {
-    "routing.sql" = file("${path.module}/../cdc-streaming/flink-jobs/routing-generated.sql")
-  }
-}
-
-resource "kubernetes_job" "deploy_flink_sql" {
-  metadata {
-    name      = "deploy-flink-sql"
-    namespace = "flink"
-  }
-  spec {
-    template {
-      spec {
-        container {
-          name  = "sql-client"
-          image = "flink:1.18"
-          command = ["/bin/sh", "-c"]
-          args = [
-            "./bin/sql-client.sh embedded -f /opt/flink/jobs/routing.sql"
-          ]
-          volume_mount {
-            name       = "sql-config"
-            mount_path = "/opt/flink/jobs"
-          }
-        }
-        volume {
-          name = "sql-config"
-          config_map {
-            name = kubernetes_config_map.flink_sql.metadata[0].name
-          }
-        }
-        restart_policy = "Never"
-      }
-    }
-  }
-}
-```
 
 ### 5. Verify Pipeline
 
@@ -869,9 +280,9 @@ confluent kafka topic consume filtered-loan-events --max-messages 10
 
 Edit `flink-jobs/filters.yaml` to modify filtering rules. See `flink-jobs/filters-examples.yaml` for comprehensive examples.
 
-**Code Generation**: Flink SQL queries can be automatically generated from YAML filter configurations. See [CODE_GENERATION.md](CODE_GENERATION.md) for details.
+**Code Generation**: Flink SQL queries can be automatically generated from YAML filter configurations. For detailed information on filter configuration, available operators, examples, and SQL generation, see [CODE_GENERATION.md](CODE_GENERATION.md).
 
-To generate SQL from filters:
+Quick start:
 ```bash
 # Validate filters
 python scripts/validate-filters.py
@@ -885,42 +296,6 @@ python scripts/generate-flink-sql.py \
 python scripts/validate-sql.py --sql flink-jobs/routing-generated.sql
 ```
 
-Basic example:
-
-```yaml
-filters:
-  - id: loan-events-filter
-    name: "Loan Events Filter"
-    consumerId: loan-consumer
-    outputTopic: filtered-loan-events
-    conditions:
-      - field: eventHeader.eventName
-        operator: in
-        values: ["LoanCreated", "LoanPaymentSubmitted"]
-    enabled: true
-```
-
-**Available Operators:**
-- `equals`: Exact match
-- `in`: Match any value in list
-- `greaterThan`: Numeric comparison
-- `lessThan`: Numeric comparison
-- `greaterThanOrEqual`: Numeric comparison
-- `lessThanOrEqual`: Numeric comparison
-- `between`: Range check
-- `matches`: Regex pattern matching
-- `notIn`: Exclude values in list
-
-**Example Filter Types:**
-- **Event Name Filter**: Filter by specific event types
-- **Value-Based Filter**: Filter by numeric thresholds (e.g., loan amount > 100000)
-- **Status-Based Filter**: Filter by entity status (e.g., active loans only)
-- **Time-Based Filter**: Filter by timestamp (e.g., last 24 hours)
-- **Multi-Condition Filter**: Combine multiple conditions with AND logic
-- **Pattern Matching**: Filter using regex patterns
-
-See `flink-jobs/filters-examples.yaml` for 20+ example configurations.
-
 ### Flink SQL Jobs
 
 **Option 1: Generated SQL (Recommended)**
@@ -932,37 +307,7 @@ See `flink-jobs/filters-examples.yaml` for 20+ example configurations.
 - Edit `flink-jobs/routing.sql` manually for custom queries
 - See `flink-jobs/routing-examples.sql` for comprehensive examples
 
-Basic example:
-
-```sql
--- Route Loan-related events
-INSERT INTO filtered_loan_events
-SELECT 
-    eventHeader,
-    eventBody,
-    sourceMetadata,
-    ROW('loan-events-filter', 'loan-consumer', UNIX_TIMESTAMP() * 1000) AS filterMetadata
-FROM raw_business_events
-WHERE eventHeader.eventName = 'LoanCreated' OR eventHeader.eventName = 'LoanPaymentSubmitted';
-```
-
-**Example Query Types:**
-- **Basic Filtering**: Filter by event name, entity type, or field values
-- **Value-Based Filtering**: Numeric comparisons (>, <, >=, <=, BETWEEN)
-- **Status Filtering**: Filter by entity status or state
-- **Time-Based Filtering**: Filter by timestamp or time windows
-- **Pattern Matching**: Use LIKE or REGEXP for pattern matching
-- **Windowed Aggregations**: Tumbling or sliding window aggregations
-- **Multi-Topic Routing**: Route to different topics based on conditions
-- **Joins**: Join with reference data tables
-- **Error Handling**: Route invalid events to dead letter queue
-
-See `flink-jobs/routing-examples.sql` for 19+ example SQL queries including:
-- Basic and advanced filtering
-- Windowed aggregations
-- Multi-topic routing
-- Join operations
-- Error handling patterns
+For detailed Flink SQL examples, query types, table definitions, and deployment patterns, see [ARCHITECTURE.md](ARCHITECTURE.md).
 
 ### Postgres Connector
 
