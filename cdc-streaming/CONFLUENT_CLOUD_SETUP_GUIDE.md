@@ -280,9 +280,13 @@ confluent kafka topic update raw-business-events \
 Schema Registry is automatically enabled with Stream Governance:
 
 ```bash
-# Get Schema Registry endpoint
+# Get Schema Registry endpoint (requires environment context)
 confluent schema-registry cluster describe \
-  --output json | jq -r '.endpoint'
+  --environment <env-id> \
+  --output json | jq -r '.endpoint_url'
+
+# Or if environment is already set as current:
+# confluent schema-registry cluster describe --output json | jq -r '.endpoint_url'
 
 # Example: https://psrc-xxxxx.us-east-1.aws.confluent.cloud
 ```
@@ -290,12 +294,16 @@ confluent schema-registry cluster describe \
 ### Step 2: Generate Schema Registry API Keys
 
 ```bash
+# Get Schema Registry cluster ID
+SR_CLUSTER_ID=$(confluent schema-registry cluster describe --output json | jq -r '.cluster')
+echo "Schema Registry Cluster ID: $SR_CLUSTER_ID"
+
 # Create API key for Schema Registry
 confluent api-key create \
-  --resource <schema-registry-cluster-id> \
+  --resource $SR_CLUSTER_ID \
   --description "Schema Registry API key"
 
-# Save key and secret
+# Save key and secret (replace with actual values from the command output)
 export SCHEMA_REGISTRY_URL="https://psrc-xxxxx.us-east-1.aws.confluent.cloud"
 export SCHEMA_REGISTRY_API_KEY="<api-key>"
 export SCHEMA_REGISTRY_API_SECRET="<api-secret>"
@@ -343,9 +351,9 @@ confluent schema-registry schema create \
 
 ```bash
 # Set backward compatibility (allows adding fields)
-confluent schema-registry subject update-config \
-  raw-business-events-value \
-  --compatibility BACKWARD
+confluent schema-registry subject update raw-business-events-value --compatibility backward
+confluent schema-registry subject update filtered-loan-events-value --compatibility backward
+confluent schema-registry subject update filtered-service-events-value --compatibility backward
 ```
 
 ## Flink Compute Pool Setup
@@ -353,11 +361,11 @@ confluent schema-registry subject update-config \
 ### Step 1: Create Compute Pool
 
 ```bash
-# Create compute pool
+# Create compute pool (valid --max-cfu values: 5, 10, 20, 30, 40, 50)
 confluent flink compute-pool create prod-flink-east \
   --cloud aws \
   --region us-east-1 \
-  --max-cfu 4
+  --max-cfu 5
 
 # Note the compute pool ID (e.g., cp-abc123)
 # Set as current compute pool
@@ -365,9 +373,10 @@ confluent flink compute-pool use <compute-pool-id>
 ```
 
 **CFU Sizing Guidelines:**
-- **2-4 CFU**: Development/testing, up to 50K events/sec
-- **4-8 CFU**: Production, 50K-200K events/sec
-- **8-16 CFU**: High-throughput, 200K+ events/sec
+- **5 CFU**: Development/testing, low-throughput workloads
+- **10 CFU**: Production, moderate workloads (up to 100K events/sec)
+- **20 CFU**: Production, high workloads (100K-500K events/sec)
+- **30-50 CFU**: Enterprise, very high-throughput (500K+ events/sec)
 
 ### Step 2: Create Service Account for Flink
 
@@ -382,22 +391,21 @@ confluent iam service-account create flink-sa \
 ### Step 3: Assign FlinkDeveloper Role
 
 ```bash
-# Get environment resource name
-ENV_RESOURCE_NAME=$(confluent environment describe <env-id> --output json | jq -r '.resource_name')
-
-# Assign role
+# Assign FlinkDeveloper role to service account
 confluent iam rbac role-binding create \
   --principal User:<service-account-id> \
   --role FlinkDeveloper \
-  --resource-name $ENV_RESOURCE_NAME
+  --environment <env-id>
 ```
 
 ### Step 4: Generate Flink API Key
 
 ```bash
-# Create API key for Flink compute pool
+# Create API key for Flink (uses region-based resource, not compute-pool-id)
 confluent api-key create \
-  --resource <compute-pool-id> \
+  --resource flink \
+  --cloud aws \
+  --region us-east-1 \
   --service-account <service-account-id> \
   --description "Flink compute pool API key"
 
@@ -409,315 +417,557 @@ export FLINK_API_SECRET="<api-secret>"
 ### Step 5: Get Flink REST Endpoint
 
 ```bash
-# Get Flink REST endpoint
-confluent flink compute-pool describe <compute-pool-id> \
-  --output json | jq -r '.rest_endpoint'
+# Flink REST endpoint follows pattern: https://flink.{region}.{cloud}.confluent.cloud
+# For AWS us-east-1:
+export FLINK_REST_ENDPOINT="https://flink.us-east-1.aws.confluent.cloud"
 
-# Example: https://flink.us-east-1.aws.confluent.cloud
+# For other regions, use pattern: https://flink.<region>.<cloud>.confluent.cloud
 ```
 
 ## Connector Setup
 
-### Step 1: Prepare Connector Configuration
+### Overview
 
-Update `connectors/postgres-source-connector.json` for Confluent Cloud:
+This section covers setting up CDC (Change Data Capture) from PostgreSQL to Confluent Cloud using Debezium.
+
+**Two Options:**
+- **Option A**: Confluent Cloud Managed Connectors (fully managed, easier)
+- **Option B**: Self-Hosted Kafka Connect (more control, local bridge)
+
+### Option A: Confluent Cloud Managed Connectors
+
+Use Confluent Cloud's managed PostgreSQL CDC connector:
+
+```bash
+# Create managed connector via CLI
+confluent connector create postgres-cdc-source \
+  --cluster lkc-xxxxx \
+  --type postgres-cdc-source \
+  --config-file connectors/managed-postgres-connector.json
+```
+
+### Option B: Self-Hosted Kafka Connect (Local to Cloud Bridge)
+
+This option is useful when testing locally or when your database isn't accessible from Confluent Cloud.
+
+#### Step 1: Enable PostgreSQL Logical Replication
+
+```bash
+# Update postgresql.conf
+wal_level = logical
+max_replication_slots = 4
+max_wal_senders = 4
+
+# Restart PostgreSQL
+docker restart <postgres-container>
+
+# Verify settings
+psql -c "SHOW wal_level;"
+```
+
+#### Step 2: Install Debezium Connector
+
+If Confluent Hub fails, download manually from Maven Central:
+
+```bash
+docker exec <kafka-connect-container> bash -c "
+curl -L -o /tmp/debezium.tar.gz \
+  https://repo1.maven.org/maven2/io/debezium/debezium-connector-postgres/2.4.0.Final/debezium-connector-postgres-2.4.0.Final-plugin.tar.gz &&
+mkdir -p /usr/share/confluent-hub-components/debezium-connector-postgresql &&
+tar -xzf /tmp/debezium.tar.gz -C /usr/share/confluent-hub-components/debezium-connector-postgresql --strip-components=1 &&
+rm /tmp/debezium.tar.gz
+"
+
+# Restart Kafka Connect to load plugin
+docker restart <kafka-connect-container>
+```
+
+#### Step 3: Create CDC Topics
+
+Topics must exist before connector writes to them:
+
+```bash
+# Create CDC topics with proper naming
+confluent kafka topic create cdc-raw.public.car_entities --partitions 3
+confluent kafka topic create cdc-raw.public.loan_entities --partitions 3
+```
+
+#### Step 4: Deploy Connector
+
+Create connector configuration (JSON format is simpler for testing):
 
 ```json
 {
-  "name": "postgres-source-connector",
+  "name": "postgres-cdc-confluent-cloud",
   "config": {
     "connector.class": "io.debezium.connector.postgresql.PostgresConnector",
-    "database.hostname": "<aurora-endpoint>",
-    "database.port": "5432",
-    "database.user": "<postgres-user>",
-    "database.password": "<postgres-password>",
-    "database.dbname": "<database-name>",
-    "database.server.name": "postgres-source",
-    "topic.prefix": "raw-business-events",
-    "table.include.list": "public.car_entities,public.loan_entities,public.service_record_entities",
-    "plugin.name": "pgoutput",
     "tasks.max": "1",
+    "database.hostname": "<postgres-hostname>",
+    "database.port": "5432",
+    "database.user": "postgres",
+    "database.password": "<password>",
+    "database.dbname": "<database-name>",
+    "database.server.name": "postgres-cdc",
+    "topic.prefix": "cdc-raw",
+    "table.include.list": "public.car_entities,public.loan_entities",
+    "plugin.name": "pgoutput",
+    "slot.name": "cdc_confluent_slot",
+    "publication.name": "cdc_confluent_publication",
+    "publication.autocreate.mode": "filtered",
     
-    "key.converter": "io.confluent.connect.avro.AvroConverter",
-    "key.converter.schema.registry.url": "https://psrc-xxxxx.us-east-1.aws.confluent.cloud",
-    "key.converter.schema.registry.basic.auth.credentials.source": "USER_INFO",
-    "key.converter.schema.registry.basic.auth.user.info": "<schema-registry-api-key>:<schema-registry-api-secret>",
+    "key.converter": "org.apache.kafka.connect.json.JsonConverter",
+    "key.converter.schemas.enable": "false",
+    "value.converter": "org.apache.kafka.connect.json.JsonConverter",
+    "value.converter.schemas.enable": "false",
     
-    "value.converter": "io.confluent.connect.avro.AvroConverter",
-    "value.converter.schema.registry.url": "https://psrc-xxxxx.us-east-1.aws.confluent.cloud",
-    "value.converter.schema.registry.basic.auth.credentials.source": "USER_INFO",
-    "value.converter.schema.registry.basic.auth.user.info": "<schema-registry-api-key>:<schema-registry-api-secret>",
+    "producer.bootstrap.servers": "<kafka-bootstrap-servers>",
+    "producer.security.protocol": "SASL_SSL",
+    "producer.sasl.mechanism": "PLAIN",
+    "producer.sasl.jaas.config": "org.apache.kafka.common.security.plain.PlainLoginModule required username=\"<kafka-api-key>\" password=\"<kafka-api-secret>\";",
     
-    "kafka.bootstrap.servers": "pkc-xxxxx.us-east-1.aws.confluent.cloud:9092",
-    "kafka.security.protocol": "SASL_SSL",
-    "kafka.sasl.mechanism": "PLAIN",
-    "kafka.sasl.jaas.config": "org.apache.kafka.common.security.plain.PlainLoginModule required username=\"<kafka-api-key>\" password=\"<kafka-api-secret>\";"
+    "snapshot.mode": "never",
+    "tombstones.on.delete": "true",
+    "include.schema.changes": "false",
+    
+    "transforms": "unwrap",
+    "transforms.unwrap.type": "io.debezium.transforms.ExtractNewRecordState",
+    "transforms.unwrap.drop.tombstones": "false",
+    "transforms.unwrap.add.fields": "op,table,ts_ms",
+    
+    "errors.tolerance": "all",
+    "errors.log.enable": "true",
+    "errors.log.include.messages": "true"
   }
 }
 ```
 
-### Step 2: Deploy Connector
-
-**Option A: Using Confluent Cloud Managed Connectors**
+Deploy via REST API:
 
 ```bash
-# Create connector
-confluent connector create postgres-source \
-  --kafka-cluster <cluster-id> \
-  --config-file connectors/postgres-source-connector.json
+curl -X POST http://localhost:8083/connectors \
+  -H "Content-Type: application/json" \
+  -d @connectors/postgres-cdc-confluent-cloud.json
 ```
 
-**Option B: Using Self-Hosted Connect Cluster**
+#### Step 5: Verify Connector
 
 ```bash
-# Create connector cluster (if needed)
-confluent connect cluster create connect-cluster-east \
-  --cloud aws \
-  --region us-east-1 \
-  --kafka-cluster <cluster-id>
+# Check status
+curl http://localhost:8083/connectors/<connector-name>/status | jq
 
-# Create connector
-confluent connector create postgres-source \
-  --connect-cluster <connect-cluster-id> \
-  --config-file connectors/postgres-source-connector.json
+# Verify data flow
+docker exec <kafka-connect-container> kafka-console-consumer \
+  --bootstrap-server <confluent-cloud-bootstrap> \
+  --consumer.config /tmp/kafka.properties \
+  --topic cdc-raw.public.car_entities \
+  --from-beginning \
+  --max-messages 5
 ```
 
-### Step 3: Verify Connector Status
-
-```bash
-# Check connector status
-confluent connector describe postgres-source-connector
-
-# View connector logs
-confluent connector logs postgres-source-connector
-
-# Check connector health
-confluent connector health-check postgres-source-connector
+**Expected output:**
+```json
+{
+  "id": "car-123",
+  "entity_type": "Car",
+  "data": "{\"make\": \"Honda\", \"model\": \"Accord\"}",
+  "__op": "c",
+  "__table": "car_entities",
+  "__ts_ms": 1732900000000
+}
 ```
 
 ## Flink SQL Configuration
 
-### Step 1: Update SQL for Confluent Cloud
+### Important: Confluent Cloud Flink Dialect Differences
 
-The generated SQL from `generate-flink-sql.py` needs to be updated with Confluent Cloud endpoints.
+Confluent Cloud Flink uses a **different SQL dialect** than Apache Flink:
 
-**Create Confluent Cloud SQL Configuration:**
+| Feature | Apache Flink | Confluent Cloud |
+|---------|--------------|-----------------|
+| Connector | `'kafka'` | `'confluent'` |
+| Topic specification | `'topic' = 'name'` | Table name = topic name |
+| Processing time | `PROCTIME()` | ❌ Not supported |
+| Formats | `'json'`, `'avro'` | Requires Schema Registry or specific configuration |
+
+**Recommendation**: Use the **Confluent Cloud Web Console SQL Workspace** for initial development. It provides:
+- Real-time syntax validation
+- Interactive query testing
+- Better error messages
+- Built-in documentation
+
+### Step 1: Access Flink SQL Workspace
+
+**Via Web Console (Recommended):**
+
+1. Navigate to https://confluent.cloud
+2. Select your environment
+3. Click **Flink** → **Open SQL Workspace**
+4. Select compute pool: `prod-flink-east`
+
+**Via CLI:**
 
 ```bash
-# Generate SQL from filters
-python scripts/generate-flink-sql.py \
-  --config flink-jobs/filters.yaml \
-  --output flink-jobs/routing-confluent-cloud.sql \
-  --kafka-bootstrap "${KAFKA_BOOTSTRAP_SERVERS}" \
-  --schema-registry "${SCHEMA_REGISTRY_URL}"
+# Set context
+confluent environment use <env-id>
+confluent flink compute-pool use <compute-pool-id>
+
+# Deploy statement
+confluent flink statement create <statement-name> \
+  --sql "<your-sql>" \
+  --database <kafka-cluster-id>
 ```
 
-**Manual Update Required:**
+### Step 2: Create Source Table
 
-Update the generated SQL file to include Confluent Cloud authentication:
+In Confluent Cloud Flink, use the Web Console to create tables:
 
 ```sql
--- Source table with Confluent Cloud configuration
-CREATE TABLE raw_business_events (
-    `eventHeader` ROW<...>,
-    `eventBody` ROW<...>,
-    `sourceMetadata` ROW<...>,
-    `proctime` AS PROCTIME(),
-    `eventtime` AS TO_TIMESTAMP_LTZ(`eventHeader`.`createdDate`, 3),
-    WATERMARK FOR `eventtime` AS `eventtime` - INTERVAL '5' SECOND
+-- Example: Create source table for existing topic
+CREATE TABLE my_source_table (
+    id STRING,
+    name STRING,
+    timestamp BIGINT
 ) WITH (
-    'connector' = 'kafka',
-    'topic' = 'raw-business-events',
-    'properties.bootstrap.servers' = 'pkc-xxxxx.us-east-1.aws.confluent.cloud:9092',
-    'properties.security.protocol' = 'SASL_SSL',
-    'properties.sasl.mechanism' = 'PLAIN',
-    'properties.sasl.jaas.config' = 'org.apache.kafka.common.security.plain.PlainLoginModule required username="<kafka-api-key>" password="<kafka-api-secret>";',
-    'properties.group.id' = 'flink-routing-job',
-    'format' = 'avro',
-    'avro.schema-registry.url' = 'https://psrc-xxxxx.us-east-1.aws.confluent.cloud',
-    'avro.schema-registry.basic-auth.credentials-source' = 'USER_INFO',
-    'avro.schema-registry.basic-auth.user-info' = '<schema-registry-api-key>:<schema-registry-api-secret>',
+    'connector' = 'confluent',
+    'value.format' = 'json-registry',
+    'scan.startup.mode' = 'earliest-offset'
+);
+```
+
+**Note**: Table name automatically maps to topic name. For topics with dots (e.g., `cdc-raw.public.car_entities`), reference them directly:
+
+```sql
+SELECT * FROM `cdc-raw.public.car_entities` LIMIT 10;
+```
+
+### Step 3: Test Queries Interactively
+
+Before deploying INSERT statements, test SELECT queries:
+
+```sql
+-- Test: Read from your topic
+SELECT * FROM your_table_name LIMIT 10;
+
+-- Test: Filter data
+SELECT * FROM your_table_name 
+WHERE field_name = 'value'
+LIMIT 10;
+```
+
+### Step 4: Create Sink Table and INSERT Statement
+
+Once source table works, create sink and INSERT:
+
+```sql
+-- Create sink table
+CREATE TABLE my_sink_table (
+    id STRING,
+    processed_field STRING
+) WITH (
+    'connector' = 'confluent',
+    'value.format' = 'json-registry'
+);
+
+-- Deploy INSERT statement
+INSERT INTO my_sink_table
+SELECT id, UPPER(name) as processed_field
+FROM my_source_table;
+```
+
+### Common Pitfalls
+
+1. **Reserved Keywords**: `model`, `timestamp`, `date`, `time` are reserved - use backticks or rename
+2. **JSON Parsing**: Use `JSON_VALUE(field, '$.path')` to extract from JSON strings
+3. **Schema Registry**: JSON format requires Schema Registry integration or use `'raw'` format
+4. **Multiple Statements**: CLI doesn't support multiple CREATE/INSERT statements well - use Web Console
+
+### Working with CDC Data
+
+For Debezium CDC data (JSON format):
+
+```sql
+-- CDC data structure from Debezium
+CREATE TABLE cdc_source (
+    id STRING,
+    entity_type STRING,
+    data STRING,           -- JSON string with nested data
+    __op STRING,           -- Operation: 'c'=create, 'u'=update, 'd'=delete
+    __table STRING,        -- Source table name
+    __ts_ms BIGINT         -- Timestamp
+) WITH (
+    'connector' = 'confluent',
+    'value.format' = 'json-registry',
     'scan.startup.mode' = 'earliest-offset'
 );
 
--- Sink tables with same configuration
-CREATE TABLE filtered_loan_events (
-    ...
-) WITH (
-    'connector' = 'kafka',
-    'topic' = 'filtered-loan-events',
-    'properties.bootstrap.servers' = 'pkc-xxxxx.us-east-1.aws.confluent.cloud:9092',
-    'properties.security.protocol' = 'SASL_SSL',
-    'properties.sasl.mechanism' = 'PLAIN',
-    'properties.sasl.jaas.config' = 'org.apache.kafka.common.security.plain.PlainLoginModule required username="<kafka-api-key>" password="<kafka-api-secret>";',
-    'format' = 'avro',
-    'avro.schema-registry.url' = 'https://psrc-xxxxx.us-east-1.aws.confluent.cloud',
-    'avro.schema-registry.basic-auth.credentials-source' = 'USER_INFO',
-    'avro.schema-registry.basic-auth.user-info' = '<schema-registry-api-key>:<schema-registry-api-secret>',
-    'sink.partitioner' = 'fixed'
-);
-```
-
-**Use the Preparation Script (Recommended):**
-
-A helper script is provided to automate SQL preparation:
-
-```bash
-# Set environment variables
-export KAFKA_BOOTSTRAP_SERVERS="pkc-xxxxx.us-east-1.aws.confluent.cloud:9092"
-export SCHEMA_REGISTRY_URL="https://psrc-xxxxx.us-east-1.aws.confluent.cloud"
-export KAFKA_API_KEY="<your-kafka-api-key>"
-export KAFKA_API_SECRET="<your-kafka-api-secret>"
-export SCHEMA_REGISTRY_API_KEY="<your-schema-registry-api-key>"
-export SCHEMA_REGISTRY_API_SECRET="<your-schema-registry-api-secret>"
-
-# Run preparation script
-./scripts/prepare-sql-for-confluent-cloud.sh
-```
-
-The script will:
-1. Generate SQL from `filters.yaml`
-2. Inject Confluent Cloud endpoints
-3. Add authentication properties
-4. Validate the generated SQL
-5. Output: `flink-jobs/routing-confluent-cloud.sql`
-
-**Manual Configuration (Alternative):**
-
-If you prefer manual configuration, update the generated SQL file with Confluent Cloud authentication as shown in the examples above.
-
-### Step 2: Validate SQL Syntax
-
-```bash
-# Validate SQL file
-python scripts/validate-sql.py \
-  --sql flink-jobs/routing-confluent-cloud.sql
+-- Extract fields from JSON data
+SELECT 
+    id,
+    JSON_VALUE(data, '$.make') as make,
+    JSON_VALUE(data, '$.model') as car_model,
+    __op as operation
+FROM cdc_source
+WHERE __op IN ('c', 'u');
 ```
 
 ## Deploy Flink SQL Statements
 
-### Step 1: Deploy Statement
+### Recommended: Use Web Console for Initial Deployment
+
+Due to Confluent Cloud Flink dialect differences, the **Web Console is strongly recommended** for first-time deployments.
+
+**Steps:**
+
+1. Go to https://confluent.cloud
+2. Navigate: **Environment** → **Flink** → **Open SQL Workspace**
+3. Select compute pool: `prod-flink-east`
+4. Write SQL interactively with real-time validation
+5. Run queries to test before deploying INSERT statements
+
+### Option 1: Web Console Deployment (Recommended)
+
+**Test connectivity first:**
+```sql
+-- Verify you can read from topics
+SELECT * FROM `your-topic-name` LIMIT 10;
+```
+
+**Deploy processing:**
+```sql
+-- Create source table (table name = topic name)
+CREATE TABLE source_table (...);
+
+-- Create sink table
+CREATE TABLE sink_table (...);
+
+-- Deploy INSERT statement
+INSERT INTO sink_table
+SELECT ... FROM source_table;
+```
+
+### Option 2: CLI Deployment (For Automation)
 
 ```bash
-# Deploy SQL statement
-confluent flink statement create \
-  --compute-pool <compute-pool-id> \
-  --statement-name event-routing-job \
-  --statement-file flink-jobs/routing-confluent-cloud.sql
+# Set context
+confluent environment use <env-id>
+confluent flink compute-pool use <compute-pool-id>
+
+# Deploy single statement
+confluent flink statement create <statement-name> \
+  --sql "CREATE TABLE my_table (id STRING) WITH ('connector' = 'confluent');" \
+  --database <kafka-cluster-id> \
+  --wait
 ```
+
+**Important CLI Limitations:**
+- Cannot deploy multiple statements together easily
+- Error messages are less detailed than Web Console
+- No interactive syntax validation
+- Best for simple queries or automation after development
 
 ### Step 2: Verify Deployment
 
+**Via Web Console:**
+- View statement in **Flink** → **Statements**
+- Check status: Should be `RUNNING`
+- Monitor throughput and metrics in real-time
+
+**Via CLI:**
+
 ```bash
-# List statements
-confluent flink statement list --compute-pool <compute-pool-id>
+# List all statements
+confluent flink statement list
 
-# Describe statement
-confluent flink statement describe <statement-id> \
-  --compute-pool <compute-pool-id>
+# Get statement details
+confluent flink statement describe <statement-name>
 
-# Check statement status
-confluent flink statement describe <statement-id> \
-  --compute-pool <compute-pool-id> \
-  --output json | jq '.status'
+# Check if processing records
+confluent flink statement describe <statement-name> --output json | jq '.status'
 ```
 
 ### Step 3: Monitor Statement
 
-```bash
-# View statement logs
-confluent flink statement logs <statement-id> \
-  --compute-pool <compute-pool-id>
+**Key Metrics to Watch:**
 
-# View statement metrics
-confluent flink statement describe <statement-id> \
-  --compute-pool <compute-pool-id> \
-  --output json | jq '.metrics'
+```bash
+# View statement details
+confluent flink statement describe <statement-name> --output json | jq '{
+  status: .status,
+  phase: .phase,
+  created: .created_at
+}'
+
+# Check if data is flowing
+# Consume from output topic to verify
 ```
 
 **Via Confluent Cloud Console:**
-- Navigate to: **Flink** → **Statements**
-- View statement status, metrics, and logs
-- Monitor throughput, latency, and backpressure
+- Navigate to: **Flink** → **Statements** → Click your statement
+- View: Status, Job Graph, Metrics
+- Monitor: Records In/Out, Throughput, Backpressure
+- Check: Logs for errors or warnings
 
 ## Testing and Verification
 
 ### Step 1: Verify Connector is Running
 
+**For Self-Hosted Kafka Connect:**
+
 ```bash
 # Check connector status
-confluent connector describe postgres-source-connector \
+curl http://localhost:8083/connectors/<connector-name>/status | jq
+
+# Expected output:
+# {
+#   "connector": {"state": "RUNNING"},
+#   "tasks": [{"state": "RUNNING"}]
+# }
+
+# Check connector logs
+docker logs <kafka-connect-container> 2>&1 | grep "records sent"
+```
+
+**For Confluent Cloud Managed Connector:**
+
+```bash
+confluent connector describe <connector-name> \
   --output json | jq '.status'
-
-# Should show: {"state": "RUNNING", "tasks": [...]}
 ```
 
-### Step 2: Verify Topics Have Messages
+### Step 2: Verify Messages in Topics
+
+**Check topic exists and has messages:**
 
 ```bash
-# Check raw topic
-confluent kafka topic describe raw-business-events \
-  --output json | jq '.partitions[].offset'
+# List topics
+confluent kafka topic list
 
-# Consume sample messages
-confluent kafka topic consume raw-business-events \
-  --max-messages 10 \
-  --from-beginning
+# Describe topic (shows partition count, replication factor)
+confluent kafka topic describe <topic-name>
 ```
 
-### Step 3: Verify Flink Statement is Processing
+**Consume messages to verify data flow:**
 
+For topics with plain text/JSON (without Schema Registry):
 ```bash
-# Check statement metrics
-confluent flink statement describe <statement-id> \
-  --compute-pool <compute-pool-id> \
-  --output json | jq '.metrics'
-
-# Look for:
-# - numRecordsInPerSecond > 0
-# - numRecordsOutPerSecond > 0
-# - status: RUNNING
-```
-
-### Step 4: Verify Filtered Topics
-
-```bash
-# Check filtered topics have messages
-for topic in filtered-loan-events filtered-service-events filtered-car-events; do
-  echo "Checking $topic:"
-  confluent kafka topic describe "$topic" \
-    --output json | jq '.partitions[].offset'
-done
-
-# Consume from filtered topics
-confluent kafka topic consume filtered-loan-events \
+# Using kafka-console-consumer inside Kafka Connect container
+docker exec <kafka-connect-container> kafka-console-consumer \
+  --bootstrap-server <bootstrap-servers> \
+  --consumer.config /tmp/kafka.properties \
+  --topic <topic-name> \
+  --from-beginning \
   --max-messages 5
 ```
 
-### Step 5: End-to-End Test
-
-**Generate Test Data:**
-
+For topics with Avro (requires Schema Registry):
 ```bash
-# Use your producer API to create test events
-# Events should appear in raw-business-events topic
-# Then be filtered and appear in filtered topics
+# Confluent Cloud CLI automatically handles Avro
+confluent kafka topic consume <topic-name> \
+  --value-format avro \
+  --schema-registry-endpoint <url> \
+  --schema-registry-api-key <key> \
+  --schema-registry-api-secret <secret> \
+  --from-beginning
 ```
 
-**Verify Complete Flow:**
+### Step 3: End-to-End Data Flow Test
+
+**Insert test data into PostgreSQL:**
 
 ```bash
-# 1. Check raw topic has new messages
-confluent kafka topic consume raw-business-events \
-  --max-messages 1 \
-  --offset latest
+# Insert test record
+docker exec <postgres-container> psql -U postgres -d <database> -c "
+INSERT INTO car_entities (id, entity_type, created_at, updated_at, data)
+VALUES ('test-$(date +%s)', 'Car', NOW(), NOW(), 
+'{\"make\": \"Toyota\", \"model\": \"Camry\", \"year\": 2024}'::jsonb);
+"
+```
 
-# 2. Wait a few seconds for Flink processing
+**Verify CDC captured the change:**
 
-# 3. Check filtered topics have new messages
-confluent kafka topic consume filtered-loan-events \
-  --max-messages 1 \
-  --offset latest
+```bash
+# Wait a few seconds, then consume from CDC topic
+docker exec <kafka-connect-container> kafka-console-consumer \
+  --bootstrap-server <bootstrap-servers> \
+  --consumer.config /tmp/kafka.properties \
+  --topic cdc-raw.public.car_entities \
+  --from-beginning \
+  --max-messages 1
+```
+
+**Expected output:**
+```json
+{
+  "id": "test-1234567890",
+  "entity_type": "Car",
+  "data": "{\"make\": \"Toyota\", \"model\": \"Camry\", \"year\": 2024}",
+  "__op": "c",
+  "__table": "car_entities",
+  "__ts_ms": 1732900000000
+}
+```
+
+### Step 4: Verify Flink Processing (If Deployed)
+
+**Check Flink statement status:**
+
+```bash
+# Via CLI
+confluent flink statement list
+
+# Via Web Console
+# Navigate: Flink → Statements → Check status
+```
+
+**Verify output topic has processed data:**
+
+```bash
+# Consume from Flink output topic
+docker exec <kafka-connect-container> kafka-console-consumer \
+  --bootstrap-server <bootstrap-servers> \
+  --consumer.config /tmp/kafka.properties \
+  --topic <flink-output-topic> \
+  --from-beginning
+```
+
+### Step 5: Troubleshoot Issues
+
+**Connector not sending data:**
+
+```bash
+# Check connector logs for errors
+docker logs <kafka-connect-container> 2>&1 | grep -i "error\|exception"
+
+# Verify PostgreSQL replication slot exists
+docker exec <postgres-container> psql -U postgres -d <database> -c "
+SELECT * FROM pg_replication_slots;
+"
+
+# Restart connector if needed
+curl -X POST http://localhost:8083/connectors/<connector-name>/restart
+```
+
+**Topics not receiving messages:**
+
+```bash
+# Verify topics exist
+confluent kafka topic list | grep <topic-name>
+
+# Check Kafka API credentials are correct
+# Review connector configuration
+curl http://localhost:8083/connectors/<connector-name> | jq '.config'
+```
+
+**Flink statement not processing:**
+
+```bash
+# Check statement status and errors via Web Console
+# Flink → Statements → Click statement → View Logs
+
+# Common issues:
+# - Table/topic name mismatch
+# - Authentication errors
+# - Invalid SQL syntax for Confluent Cloud dialect
 ```
 
 ## Troubleshooting
@@ -859,6 +1109,133 @@ confluent kafka cluster describe <cluster-id> >> diagnostics.txt
 confluent flink compute-pool describe <compute-pool-id> >> diagnostics.txt
 confluent flink statement describe <statement-id> --compute-pool <compute-pool-id> >> diagnostics.txt
 ```
+
+## Practical Notes and Lessons Learned
+
+Based on real-world implementation experience, here are key insights:
+
+### Debezium Connector Installation
+
+**Issue**: `confluent-hub install` may fail to find the Debezium connector.
+
+**Solution**: Download manually from Maven Central:
+```bash
+curl -L -o /tmp/debezium.tar.gz \
+  https://repo1.maven.org/maven2/io/debezium/debezium-connector-postgres/2.4.0.Final/debezium-connector-postgres-2.4.0.Final-plugin.tar.gz
+tar -xzf /tmp/debezium.tar.gz -C /usr/share/confluent-hub-components/
+```
+
+### Schema Compatibility Challenges
+
+**Issue**: Debezium's raw table structure doesn't match custom Avro schemas expecting structured events.
+
+**Pragmatic Solution**: Use JSON format for initial CDC capture, transform later with Flink:
+```json
+"key.converter": "org.apache.kafka.connect.json.JsonConverter",
+"key.converter.schemas.enable": "false",
+"value.converter": "org.apache.kafka.connect.json.JsonConverter",
+"value.converter.schemas.enable": "false"
+```
+
+**Best Practice**: Create dedicated CDC topics (e.g., `cdc-raw.public.table_name`) separate from application-level topics.
+
+### Topic Naming for Flink
+
+**Issue**: Topics with dots (e.g., `cdc-raw.public.car_entities`) require backticks in Flink SQL.
+
+**Workaround**:
+```sql
+SELECT * FROM `cdc-raw.public.car_entities`;
+```
+
+**Best Practice**: For new deployments, use underscores: `cdc_raw_public_car_entities`.
+
+### Confluent Cloud Flink vs Apache Flink
+
+**Critical Differences**:
+
+| Feature | Apache Flink | Confluent Cloud |
+|---------|--------------|-----------------|
+| Connector | `'kafka'` | `'confluent'` |
+| Topic config | `'topic' = 'name'` | Table name IS topic name |
+| PROCTIME() | ✅ Supported | ❌ Not supported |
+| JSON format | Simple | Needs Schema Registry or special config |
+
+**Impact**: SQL written for Apache Flink often won't work in Confluent Cloud without significant changes.
+
+**Recommendation**: Always develop Flink SQL in the Web Console first. CLI deployment is best for automation after development.
+
+### Verifying Data Flow
+
+**Don't rely solely on connector status showing "RUNNING"**. Always verify actual data:
+
+```bash
+# Create kafka.properties inside Kafka Connect container
+docker exec <kafka-connect-container> bash -c "cat > /tmp/kafka.properties << 'EOF'
+bootstrap.servers=<bootstrap-servers>
+security.protocol=SASL_SSL
+sasl.mechanism=PLAIN
+sasl.jaas.config=org.apache.kafka.common.security.plain.PlainLoginModule required username=\"<key>\" password=\"<secret>\";
+EOF"
+
+# Then consume to verify
+docker exec <kafka-connect-container> kafka-console-consumer \
+  --bootstrap-server <bootstrap-servers> \
+  --consumer.config /tmp/kafka.properties \
+  --topic <topic-name> \
+  --from-beginning \
+  --max-messages 5
+```
+
+### PostgreSQL Replication Setup
+
+**Critical**: Logical replication must be enabled BEFORE creating connectors:
+
+```sql
+-- Check current setting
+SHOW wal_level;
+
+-- If not 'logical', update postgresql.conf:
+-- wal_level = logical
+-- max_replication_slots = 4
+-- max_wal_senders = 4
+
+-- Then restart PostgreSQL
+```
+
+**Verify replication slot is created**:
+```sql
+SELECT * FROM pg_replication_slots;
+```
+
+### Working CDC Pipeline Components
+
+**What's Proven to Work**:
+1. ✅ PostgreSQL (Docker) → Debezium → Kafka Connect → Confluent Cloud Topics
+2. ✅ JSON format for CDC data (simpler than Avro for initial capture)
+3. ✅ ExtractNewRecordState transform to flatten Debezium envelope
+4. ✅ Direct consumption from topics to verify data flow
+
+**What Requires More Setup**:
+1. ⚠️ Avro format requires schema compatibility between Debezium and custom schemas
+2. ⚠️ Flink SQL deployment via CLI (Web Console is much easier)
+3. ⚠️ Complex Flink transformations with nested JSON parsing
+
+### Recommended Development Flow
+
+1. **Start with Docker locally**: PostgreSQL + Kafka Connect bridging to Confluent Cloud
+2. **Use JSON for CDC**: Simpler than Avro, easy to debug
+3. **Verify each step**: PostgreSQL → Topics → Consumers (don't skip validation)
+4. **Develop Flink SQL in Web Console**: Interactive, better errors, syntax validation
+5. **Automate with CLI later**: After SQL is proven to work
+
+### Common Gotchas
+
+1. **Reserved Keywords in Flink**: `model`, `timestamp`, `date`, `time` - use backticks or rename columns
+2. **Topic Must Exist First**: Create topics before deploying connectors
+3. **Credentials in Multiple Places**: Kafka Connect, Flink SQL, Consumer configs all need auth
+4. **CLI Token Expiration**: `confluent login` tokens expire; re-authenticate if commands fail
+5. **Multiple Statements**: Confluent Cloud Flink CLI doesn't handle multiple CREATE/INSERT well - use Web Console
 
 ## Quick Reference
 
@@ -1382,4 +1759,3 @@ jobs:
 - Flink statement failures
 - Consumer lag > 10,000 messages
 - Cluster unavailability
-
