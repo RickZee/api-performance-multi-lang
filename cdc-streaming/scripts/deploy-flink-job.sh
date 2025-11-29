@@ -60,8 +60,3 @@ else
     echo "  docker logs cdc-flink-taskmanager"
     exit 1
 fi
-
-
-
-
-

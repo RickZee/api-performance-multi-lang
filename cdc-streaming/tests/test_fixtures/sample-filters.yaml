@@ -55,8 +55,3 @@ filters:
         value: "TestEvent"
         valueType: string
     enabled: false
-
-
-
-
-
