@@ -200,3 +200,4 @@ FROM raw_business_events
 WHERE 
     `eventHeader`.`eventName` = 'CarCreated'
     AND `eventBody`.`entities`[1].`entityType` = 'Car';
+
