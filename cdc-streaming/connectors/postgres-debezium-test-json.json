@@ -34,10 +34,13 @@
     "tombstones.on.delete": "true",
     "include.schema.changes": "false",
     
-    "transforms": "unwrap",
+    "transforms": "unwrap,route",
     "transforms.unwrap.type": "io.debezium.transforms.ExtractNewRecordState",
     "transforms.unwrap.drop.tombstones": "false",
     "transforms.unwrap.add.fields": "op,table,ts_ms",
+    "transforms.route.type": "org.apache.kafka.connect.transforms.RegexRouter",
+    "transforms.route.regex": "cdc-raw.public.(.*)",
+    "transforms.route.replacement": "raw-business-events",
     
     "errors.tolerance": "all",
     "errors.log.enable": "true",

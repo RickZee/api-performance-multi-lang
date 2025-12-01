@@ -12,7 +12,7 @@
     "database.server.name": "postgres-cdc",
     
     "topic.prefix": "cdc",
-    "table.include.list": "public.car_entities,public.loan_entities,public.service_record_entities,public.loan_payment_entities",
+    "table.include.list": "public.car_entities",
     
     "plugin.name": "pgoutput",
     "slot.name": "confluent_cloud_cdc_slot",

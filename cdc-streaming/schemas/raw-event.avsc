@@ -2,7 +2,7 @@
   "type": "record",
   "name": "RawBusinessEvent",
   "namespace": "com.example.cdc",
-  "doc": "Raw business event schema from Postgres CDC",
+  "doc": "Raw business event schema - Flink compatible (all nested fields non-nullable)",
   "fields": [
     {
       "name": "eventHeader",
@@ -12,8 +12,8 @@
         "fields": [
           {
             "name": "uuid",
-            "type": ["null", "string"],
-            "default": null,
+            "type": "string",
+            "default": "",
             "doc": "Unique event identifier"
           },
           {
@@ -23,22 +23,20 @@
           },
           {
             "name": "createdDate",
-            "type": ["null", "long"],
+            "type": "long",
             "logicalType": "timestamp-millis",
-            "default": null,
             "doc": "Event creation timestamp in milliseconds"
           },
           {
             "name": "savedDate",
-            "type": ["null", "long"],
+            "type": "long",
             "logicalType": "timestamp-millis",
-            "default": null,
             "doc": "Event save timestamp in milliseconds"
           },
           {
             "name": "eventType",
-            "type": ["null", "string"],
-            "default": null,
+            "type": "string",
+            "default": "",
             "doc": "Type of the event"
           }
         ]
@@ -72,12 +70,9 @@
                     "name": "updatedAttributes",
                     "type": {
                       "type": "map",
-                      "values": ["null", "string", "long", "double", "boolean", {
-                        "type": "map",
-                        "values": ["null", "string", "long", "double", "boolean"]
-                      }]
+                      "values": "string"
                     },
-                    "doc": "Updated entity attributes as key-value pairs"
+                    "doc": "Updated entity attributes as key-value pairs (JSON stringified)"
                   }
                 ]
               }
@@ -99,12 +94,8 @@
           },
           {
             "name": "operation",
-            "type": {
-              "type": "enum",
-              "name": "Operation",
-              "symbols": ["INSERT", "UPDATE", "DELETE"]
-            },
-            "doc": "Database operation type"
+            "type": "string",
+            "doc": "Database operation type (INSERT, UPDATE, DELETE)"
           },
           {
             "name": "timestamp",

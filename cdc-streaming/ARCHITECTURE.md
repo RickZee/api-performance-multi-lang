@@ -330,6 +330,7 @@ In **Confluent Cloud**, Flink jobs are deployed as **SQL statements** rather tha
 
 - **Source Tables**: Defines source tables that read from Kafka topics (e.g., `raw-business-events`)
 - **Sink Tables**: Defines sink tables that write to filtered Kafka topics (e.g., `filtered-loan-events`)
+  - **Auto-Topic Creation**: Filtered topics are automatically created by Flink when it writes to them for the first time
 - **Filtering**: Uses SQL WHERE clauses to filter events based on business rules
 - **Transformation**: SELECT statements transform and enrich events (adds `filterMetadata`)
 - **Routing**: Routes matching events to different Kafka topics based on filter conditions
@@ -409,7 +410,7 @@ confluent flink statement list --compute-pool cp-east-123
 confluent flink statement describe ss-456789 --compute-pool cp-east-123
 ```
 
-**Topic Creation**: The filtered topics (`filtered-loan-events`, etc.) must exist in Kafka before Flink can write to them. Create topics via Confluent Cloud Console, CLI, or Terraform.
+**Topic Creation**: Filtered topics (`filtered-loan-events`, etc.) are automatically created by Flink when it writes to them for the first time. No manual topic creation is required for filtered topics. Only the `raw-business-events` topic needs to be created manually before deploying the CDC connector.
 
 **Filter Types Supported**:
 

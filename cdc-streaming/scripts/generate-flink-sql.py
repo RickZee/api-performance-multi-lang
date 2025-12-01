@@ -74,12 +74,52 @@ class SQLGenerator:
     def translate_field_path(self, field: str) -> str:
         """Translate YAML field path to Flink SQL field path.
         
+        Maps event structure fields to Debezium CDC format fields:
+        - eventHeader.eventName -> derived from entity_type + __op
+        - eventBody.entities[0].entityType -> entity_type
+        - eventBody.entities[0].updatedAttributes.* -> data (JSON)
+        - sourceMetadata.table -> __table
+        - sourceMetadata.operation -> __op
+        - sourceMetadata.timestamp -> __ts_ms
+        
         Args:
             field: Field path from YAML (e.g., eventHeader.eventName)
             
         Returns:
-            Flink SQL field path with backticks (e.g., `eventHeader`.`eventName`)
+            Flink SQL field path with backticks mapped to Debezium fields
         """
+        # Map event structure to Debezium fields
+        if field.startswith('eventHeader.eventName'):
+            # eventName is derived from entity_type + __op, so we need special handling
+            # For WHERE clauses, we'll check entity_type and __op separately
+            return "`entity_type`"  # Will be combined with __op in condition generation
+        elif field.startswith('eventBody.entities[') and '.entityType' in field:
+            # eventBody.entities[0].entityType -> entity_type
+            return "`entity_type`"
+        elif field.startswith('eventBody.entities[') and '.updatedAttributes' in field:
+            # eventBody.entities[0].updatedAttributes.* -> data (JSON field)
+            # Extract the attribute path
+            attr_match = re.search(r'updatedAttributes\.(.+)$', field)
+            if attr_match:
+                attr_path = attr_match.group(1)
+                # For JSON access, we'll use JSON_VALUE or CAST
+                return f"CAST(`data` AS MAP<STRING, STRING>)"
+            return "`data`"
+        elif field.startswith('sourceMetadata.table'):
+            return "`__table`"
+        elif field.startswith('sourceMetadata.operation'):
+            return "`__op`"
+        elif field.startswith('sourceMetadata.timestamp'):
+            return "`__ts_ms`"
+        elif field.startswith('eventHeader.'):
+            # Other eventHeader fields - map to appropriate Debezium fields
+            if 'createdDate' in field or 'savedDate' in field:
+                return "`__ts_ms`"
+            elif 'eventType' in field:
+                return "`entity_type`"
+            elif 'uuid' in field:
+                return "`id`"
+        
         # Handle array indices: entities[0] -> entities[1] (Flink uses 1-based indexing)
         # Pattern to match array indices like [0], [1], etc.
         def replace_index(match):
@@ -89,22 +129,44 @@ class SQLGenerator:
         # Replace array indices
         field = re.sub(r'\[(\d+)\]', replace_index, field)
         
-        # Split by dots and wrap each part in backticks
-        parts = field.split('.')
-        sql_parts = []
+        # Split by dots, but preserve array indices
+        # Use regex to split on dots that are NOT inside brackets
+        parts = []
+        current_part = ""
+        bracket_depth = 0
         
+        for char in field:
+            if char == '[':
+                bracket_depth += 1
+                current_part += char
+            elif char == ']':
+                bracket_depth -= 1
+                current_part += char
+            elif char == '.' and bracket_depth == 0:
+                if current_part:
+                    parts.append(current_part)
+                current_part = ""
+            else:
+                current_part += char
+        
+        if current_part:
+            parts.append(current_part)
+        
+        # Build SQL path
+        sql_parts = []
         for part in parts:
-            # Skip empty parts
             if not part:
                 continue
-            # If part contains brackets, handle separately
+            # If part contains brackets, keep them together
             if '[' in part:
-                # Split on bracket
-                base = part.split('[')[0]
-                bracket_part = '[' + '['.join(part.split('[')[1:])
+                # Extract base name and bracket
+                bracket_idx = part.index('[')
+                base = part[:bracket_idx]
+                bracket_part = part[bracket_idx:]
                 if base:
-                    sql_parts.append(f"`{base}`")
-                sql_parts.append(bracket_part)
+                    sql_parts.append(f"`{base}`{bracket_part}")
+                else:
+                    sql_parts.append(bracket_part)
             else:
                 sql_parts.append(f"`{part}`")
         
@@ -161,18 +223,60 @@ class SQLGenerator:
         # Generate condition based on operator
         if operator == 'equals':
             value = condition['value']
-            if value_type == 'string':
+            # Special handling for eventName: map to entity_type + __op
+            if 'eventHeader.eventName' in condition.get('field', ''):
+                # Map event names like "CarCreated" to entity_type + __op
+                if value.endswith('Created'):
+                    entity_type = value[:-7]  # Remove "Created"
+                    sql = f"(`entity_type` = '{entity_type}' AND `__op` = 'c')"
+                elif value.endswith('Updated'):
+                    entity_type = value[:-7]  # Remove "Updated"
+                    sql = f"(`entity_type` = '{entity_type}' AND `__op` = 'u')"
+                elif value.endswith('Deleted'):
+                    entity_type = value[:-7]  # Remove "Deleted"
+                    sql = f"(`entity_type` = '{entity_type}' AND `__op` = 'd')"
+                elif value.endswith('Submitted'):
+                    entity_type = value[:-9]  # Remove "Submitted"
+                    sql = f"(`entity_type` = '{entity_type}' AND `__op` = 'c')"
+                else:
+                    # Fallback: just check entity_type
+                    sql = f"`entity_type` = '{value}'"
+            elif value_type == 'string':
                 sql = f"{field_sql} = '{value}'"
             else:
                 sql = f"{field_sql} = {value}"
         
         elif operator == 'in':
             values = condition['values']
-            if value_type == 'string':
+            # Special handling for eventName: map to entity_type + __op combinations
+            if 'eventHeader.eventName' in condition.get('field', ''):
+                # Map event names like ["LoanCreated", "LoanPaymentSubmitted"] 
+                # to (entity_type = 'Loan' AND __op = 'c') OR (entity_type = 'LoanPayment' AND __op = 'c')
+                conditions = []
+                for val in values:
+                    if val.endswith('Created'):
+                        entity_type = val[:-7]
+                        conditions.append(f"(`entity_type` = '{entity_type}' AND `__op` = 'c')")
+                    elif val.endswith('Updated'):
+                        entity_type = val[:-7]
+                        conditions.append(f"(`entity_type` = '{entity_type}' AND `__op` = 'u')")
+                    elif val.endswith('Deleted'):
+                        entity_type = val[:-7]
+                        conditions.append(f"(`entity_type` = '{entity_type}' AND `__op` = 'd')")
+                    elif val.endswith('Submitted'):
+                        # Handle "LoanPaymentSubmitted" -> LoanPayment entity with op='c'
+                        entity_type = val[:-9]  # Remove "Submitted"
+                        conditions.append(f"(`entity_type` = '{entity_type}' AND `__op` = 'c')")
+                    else:
+                        # Fallback: just check entity_type
+                        conditions.append(f"`entity_type` = '{val}'")
+                sql = "(" + " OR ".join(conditions) + ")"
+            elif value_type == 'string':
                 values_str = ", ".join(f"'{v}'" for v in values)
+                sql = f"{field_sql} IN ({values_str})"
             else:
                 values_str = ", ".join(str(v) for v in values)
-            sql = f"{field_sql} IN ({values_str})"
+                sql = f"{field_sql} IN ({values_str})"
         
         elif operator == 'notIn':
             values = condition['values']
@@ -231,9 +335,6 @@ class SQLGenerator:
         else:
             raise FilterConfigError(f"Unsupported operator: {operator}")
         
-        # Add logical operator prefix if not first condition
-        if not is_first:
-            return f" {logical_op} {sql}"
         return sql
     
     def generate_where_clause(self, filter_config: Dict[str, Any]) -> str:
@@ -251,11 +352,35 @@ class SQLGenerator:
         
         condition_logic = filter_config.get('conditionLogic', 'AND')
         
-        # Generate individual conditions
+        # Generate individual conditions (without logical operators)
         condition_parts = []
-        for i, condition in enumerate(conditions):
-            is_first = (i == 0)
-            cond_sql = self.generate_condition(condition, is_first=is_first)
+        seen_entity_types = set()  # Track entity_type conditions to avoid redundancy
+        
+        for condition in conditions:
+            cond_sql = self.generate_condition(condition, is_first=False)
+            
+            # Smart deduplication: if condition is "entity_type = 'X' AND __op = 'Y'"
+            # and we already have a simpler "entity_type = 'X'" condition, skip the simpler one
+            # OR if we have "entity_type = 'X' AND __op = 'Y'" and a new "entity_type = 'X'", skip the new one
+            import re
+            # Check if this is a simple entity_type condition
+            simple_match = re.match(r"^`entity_type` = '([^']+)'$", cond_sql.strip())
+            # Check if this is a compound condition with entity_type and __op
+            compound_match = re.match(r"^\(`entity_type` = '([^']+)' AND `__op` = '([^']+)'\)$", cond_sql.strip())
+            
+            if simple_match:
+                entity_type = simple_match.group(1)
+                # If we already have a compound condition for this entity_type, skip the simple one
+                if entity_type in seen_entity_types:
+                    continue
+                seen_entity_types.add(entity_type)
+            elif compound_match:
+                entity_type = compound_match.group(1)
+                # If we have a compound condition, it implies the simple one, so track it
+                seen_entity_types.add(entity_type)
+                # Remove any simple conditions for this entity_type that we already added
+                condition_parts = [c for c in condition_parts if not re.match(r"^`entity_type` = '{}'$".format(re.escape(entity_type)), c.strip())]
+            
             condition_parts.append(cond_sql)
         
         # Combine with logic operator
@@ -266,7 +391,10 @@ class SQLGenerator:
     
     def generate_sql(self, config_path: str, output_path: str, 
                     kafka_bootstrap: str = "kafka:29092",
-                    schema_registry_url: str = "http://schema-registry:8081") -> None:
+                    schema_registry_url: str = "http://schema-registry:8081",
+                    confluent_cloud: bool = False,
+                    schema_registry_api_key: str = None,
+                    schema_registry_api_secret: str = None) -> None:
         """Generate Flink SQL from YAML configuration.
         
         Args:
@@ -274,6 +402,9 @@ class SQLGenerator:
             output_path: Path to output SQL file
             kafka_bootstrap: Kafka bootstrap servers
             schema_registry_url: Schema Registry URL
+            confluent_cloud: If True, generate Confluent Cloud-compatible SQL
+            schema_registry_api_key: Schema Registry API key (required for Confluent Cloud)
+            schema_registry_api_secret: Schema Registry API secret (required for Confluent Cloud)
         """
         # Load YAML configuration
         config_file = Path(config_path)
@@ -293,8 +424,17 @@ class SQLGenerator:
             print("Warning: No enabled filters found in configuration")
             return
         
+        # Select template based on target platform
+        if confluent_cloud:
+            if not schema_registry_api_key or not schema_registry_api_secret:
+                raise ValueError("schema_registry_api_key and schema_registry_api_secret are required for Confluent Cloud")
+            # Use separate statements template for Confluent Cloud (CLI doesn't support STATEMENT SET well)
+            template_name = 'routing-confluent-cloud-separate.sql.j2'
+        else:
+            template_name = 'routing.sql.j2'
+        
         # Load template
-        template = self.env.get_template('routing.sql.j2')
+        template = self.env.get_template(template_name)
         
         # Prepare template context
         context = {
@@ -303,6 +443,11 @@ class SQLGenerator:
             'schema_registry_url': schema_registry_url,
             'generator': self  # Pass generator for template functions
         }
+        
+        # Add Confluent Cloud specific context
+        if confluent_cloud:
+            context['schema_registry_api_key'] = schema_registry_api_key
+            context['schema_registry_api_secret'] = schema_registry_api_secret
         
         # Generate SQL
         sql_content = template.render(**context)
@@ -315,6 +460,10 @@ class SQLGenerator:
         
         print(f"Generated SQL file: {output_path}")
         print(f"Generated {len(enabled_filters)} filter queries")
+        if confluent_cloud:
+            print("Target: Confluent Cloud Flink")
+        else:
+            print("Target: Apache Flink")
 
 
 def main():
@@ -363,8 +512,29 @@ def main():
         action='store_true',
         help='Skip YAML schema validation'
     )
+    parser.add_argument(
+        '--confluent-cloud',
+        action='store_true',
+        help='Generate SQL for Confluent Cloud Flink (uses confluent connector, removes PROCTIME, etc.)'
+    )
+    parser.add_argument(
+        '--schema-registry-api-key',
+        type=str,
+        help='Schema Registry API key (required for Confluent Cloud)'
+    )
+    parser.add_argument(
+        '--schema-registry-api-secret',
+        type=str,
+        help='Schema Registry API secret (required for Confluent Cloud)'
+    )
     
     args = parser.parse_args()
+    
+    # Validate Confluent Cloud requirements
+    if args.confluent_cloud:
+        if not args.schema_registry_api_key or not args.schema_registry_api_secret:
+            print("Error: --schema-registry-api-key and --schema-registry-api-secret are required for --confluent-cloud", file=sys.stderr)
+            sys.exit(1)
     
     # Change to script directory for relative paths
     script_dir = Path(__file__).parent.parent
@@ -380,7 +550,10 @@ def main():
             config_path=args.config,
             output_path=args.output,
             kafka_bootstrap=args.kafka_bootstrap,
-            schema_registry_url=args.schema_registry
+            schema_registry_url=args.schema_registry,
+            confluent_cloud=args.confluent_cloud,
+            schema_registry_api_key=args.schema_registry_api_key,
+            schema_registry_api_secret=args.schema_registry_api_secret
         )
         
         sys.exit(0)

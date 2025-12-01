@@ -131,10 +131,8 @@ Create the necessary Kafka topics:
 
 This creates:
 - `raw-business-events` (3 partitions)
-- `filtered-loan-events` (3 partitions)
-- `filtered-service-events` (3 partitions)
-- `filtered-car-events` (3 partitions)
-- `filtered-high-value-loans` (3 partitions)
+
+**Note**: Filtered topics (`filtered-loan-events`, `filtered-service-events`, etc.) are automatically created by Flink when it writes to them for the first time. No manual creation is required.
 
 #### Option B: Confluent Cloud (Production)
 
@@ -144,12 +142,11 @@ Create topics in Confluent Cloud:
 # Set cluster context
 confluent kafka cluster use <cluster-id>
 
-# Create topics via CLI
+# Create raw-business-events topic (only topic that needs manual creation)
 confluent kafka topic create raw-business-events --partitions 6
-confluent kafka topic create filtered-loan-events --partitions 6
-confluent kafka topic create filtered-service-events --partitions 6
-confluent kafka topic create filtered-car-events --partitions 6
-confluent kafka topic create filtered-high-value-loans --partitions 6
+
+# Note: Filtered topics are automatically created by Flink when it writes to them.
+# No manual creation is required for filtered topics.
 ```
 
 For detailed topic creation steps, CI/CD alternatives (Terraform, REST API, GitHub Actions), and topic configuration, see [CONFLUENT_CLOUD_SETUP_GUIDE.md](CONFLUENT_CLOUD_SETUP_GUIDE.md).
@@ -236,11 +233,7 @@ EOF
 
 #### Option A: Docker Compose (Local Development)
 
-Test the end-to-end pipeline:
-
-```bash
-./scripts/test-pipeline.sh
-```
+Test the end-to-end pipeline by checking connector status, Flink statements, and topic message counts using the Confluent Cloud CLI.
 
 #### Option B: Confluent Cloud (Production)
 
@@ -580,40 +573,29 @@ curl -X POST http://localhost:9081/api/v1/events \
 
 #### Validate Kafka Topics
 
-Use the validation script to check Kafka topics:
+Check Kafka topics using the Confluent Cloud CLI:
 
 ```bash
-cd cdc-streaming/scripts
+# List topics
+confluent kafka topic list
 
-# Validate raw events topic
-./validate-kafka.sh raw-business-events
+# Describe a topic
+confluent kafka topic describe raw-business-events
 
-# Validate filtered loan events
-./validate-kafka.sh filtered-loan-events
-
-# Validate with custom limit
-LIMIT=20 ./validate-kafka.sh filtered-service-events
+# Consume messages
+confluent kafka topic consume raw-business-events --value-format json --max-messages 10
 ```
-
-The script will:
-- Check if the topic exists
-- Show topic information (partitions, replication)
-- Display message count
-- Show sample messages
-- Validate message structure (JSON format)
 
 #### Validate Flink Jobs
 
-Use the validation script to check Flink job status:
+Check Flink job status using the Confluent Cloud CLI:
 
 ```bash
-cd cdc-streaming/scripts
+# List all Flink statements
+confluent flink statement list --compute-pool <pool-id>
 
-# Validate all Flink jobs
-./validate-flink.sh
-
-# Validate specific job by name
-./validate-flink.sh event-routing-job
+# Describe a specific statement
+confluent flink statement describe <statement-name> --compute-pool <pool-id>
 ```
 
 The script will:
@@ -852,10 +834,9 @@ cdc-streaming/
 └── scripts/
     ├── setup-connector.sh          # Connector setup script
     ├── create-topics.sh            # Topic creation script
-    ├── test-pipeline.sh            # Pipeline test script
     ├── generate-test-data.sh       # Generate test data using k6 and Java REST API
-    ├── validate-kafka.sh           # Validate data in Kafka topics
-    └── validate-flink.sh           # Validate Flink job status and metrics
+    ├── deploy-flink-confluent-cloud.sh  # Deploy Flink SQL to Confluent Cloud
+    └── generate-flink-sql.py      # Generate Flink SQL from filters.yaml
 ```
 
 ## Integration with Existing Stack

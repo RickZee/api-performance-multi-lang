@@ -80,3 +80,4 @@ echo "  Restart:        curl -X POST $KAFKA_CONNECT_URL/connectors/$CONNECTOR_NA
 echo "  Delete:         curl -X DELETE $KAFKA_CONNECT_URL/connectors/$CONNECTOR_NAME"
 echo ""
 
+

@@ -21,12 +21,11 @@ else
 fi
 
 # Topic configurations
+# Note: Only raw-business-events needs to be created manually.
+# Filtered topics (filtered-loan-events, filtered-service-events, etc.) are 
+# automatically created by Flink when it writes to them for the first time.
 TOPICS=(
     "raw-business-events:3:1"           # topic:partitions:replication-factor
-    "filtered-loan-events:3:1"
-    "filtered-service-events:3:1"
-    "filtered-car-events:3:1"
-    "filtered-high-value-loans:3:1"
 )
 
 # Create topics
