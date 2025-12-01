@@ -76,3 +76,4 @@ jobs:
               repo: context.repo.repo,
               body: `## Generated Flink SQL\n\n\`\`\`sql\n${sql.substring(0, 2000)}\n\`\`\`\n\n*Generated from filters.yaml*`
             });
+

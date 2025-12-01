@@ -225,22 +225,14 @@ export KAFKA_API_SECRET="<api-secret>"
 # Set cluster context
 confluent kafka cluster use <cluster-id>
 
-# Create topics
+# Create raw-business-events topic (only topic that needs manual creation)
 confluent kafka topic create raw-business-events \
   --partitions 6 \
   --config retention.ms=604800000
 
-confluent kafka topic create filtered-loan-events \
-  --partitions 6
-
-confluent kafka topic create filtered-service-events \
-  --partitions 6
-
-confluent kafka topic create filtered-car-events \
-  --partitions 6
-
-confluent kafka topic create filtered-high-value-loans \
-  --partitions 6
+# Note: Filtered topics (filtered-loan-events, filtered-service-events, etc.) 
+# are automatically created by Flink when it writes to them for the first time.
+# No manual creation is required for filtered topics.
 ```
 
 ### Step 2: Verify Topics
@@ -1232,7 +1224,7 @@ SELECT * FROM pg_replication_slots;
 ### Common Gotchas
 
 1. **Reserved Keywords in Flink**: `model`, `timestamp`, `date`, `time` - use backticks or rename columns
-2. **Topic Must Exist First**: Create topics before deploying connectors
+2. **Topic Must Exist First**: Only `raw-business-events` topic must exist before deploying connectors. Filtered topics are automatically created by Flink.
 3. **Credentials in Multiple Places**: Kafka Connect, Flink SQL, Consumer configs all need auth
 4. **CLI Token Expiration**: `confluent login` tokens expire; re-authenticate if commands fail
 5. **Multiple Statements**: Confluent Cloud Flink CLI doesn't handle multiple CREATE/INSERT well - use Web Console
@@ -1429,36 +1421,33 @@ Replicate topic structure in secondary region:
 # Set cluster context
 confluent kafka cluster use <west-cluster-id>
 
-# Create topics (same as primary region)
+# Create raw-business-events topic (only topic that needs manual creation)
 confluent kafka topic create raw-business-events --partitions 6
-confluent kafka topic create filtered-loan-events --partitions 6
-confluent kafka topic create filtered-service-events --partitions 6
-confluent kafka topic create filtered-car-events --partitions 6
-confluent kafka topic create filtered-high-value-loans --partitions 6
+
+# Note: Filtered topics are automatically created by Flink when it writes to them.
+# No manual creation is required for filtered topics in secondary region.
 ```
 
 **Terraform:**
 
 ```hcl
 # terraform/confluent/modules/region/topics.tf
-resource "confluent_kafka_topic" "topics" {
-  for_each = toset([
-    "raw-business-events",
-    "filtered-loan-events",
-    "filtered-service-events",
-    "filtered-car-events",
-    "filtered-high-value-loans"
-  ])
-  
+# Note: Only raw-business-events needs to be created manually.
+# Filtered topics are automatically created by Flink when it writes to them.
+resource "confluent_kafka_topic" "raw_business_events" {
   kafka_cluster {
     id = confluent_kafka_cluster.cluster.id
   }
-  topic_name       = each.value
+  topic_name       = "raw-business-events"
   partitions_count = 6
   rest_endpoint    = confluent_kafka_cluster.cluster.rest_endpoint
   credentials {
     key    = confluent_api_key.cluster_api_key.id
     secret = confluent_api_key.cluster_api_key.secret
+  }
+  
+  config = {
+    "retention.ms" = "604800000"  # 7 days
   }
 }
 ```

@@ -80,3 +80,4 @@ echo "  1. Start Kafka Connect: docker-compose up -d kafka-connect"
 echo "  2. Deploy connector: ./scripts/deploy-debezium-connector.sh"
 echo ""
 
+
