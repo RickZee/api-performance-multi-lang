@@ -81,3 +81,4 @@ echo "  2. Deploy connector: ./scripts/deploy-debezium-connector.sh"
 echo ""
 
 
+

@@ -148,3 +148,4 @@ print_info "Done! Next steps:"
 echo "  1. Review flink-jobs/routing-confluent-cloud.sql"
 echo "  2. Deploy using: confluent flink statement create --compute-pool <pool-id> --statement-file flink-jobs/routing-confluent-cloud.sql"
 
+
