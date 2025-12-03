@@ -1,16 +1,16 @@
 #!/bin/bash
 
-# Deploy Debezium PostgreSQL Connector to Confluent Cloud
-# This connector reads from local Postgres and writes to Confluent Cloud Kafka
+# Deploy Debezium PostgreSQL Connector for Simple Events to Confluent Cloud
+# This connector reads from local Postgres simple_events table and writes to Confluent Cloud Kafka
 
 set -e
 
 SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
-CONNECTOR_CONFIG="$SCRIPT_DIR/../connectors/postgres-debezium-source-confluent-cloud.json"
+CONNECTOR_CONFIG="$SCRIPT_DIR/../connectors/postgres-debezium-simple-events-confluent-cloud.json"
 KAFKA_CONNECT_URL="${KAFKA_CONNECT_URL:-http://localhost:8083}"
 
 echo "======================================"
-echo "Deploying Debezium Connector"
+echo "Deploying Debezium Simple Events Connector"
 echo "======================================"
 
 # Check if Kafka Connect is running
@@ -69,7 +69,7 @@ curl -s "$KAFKA_CONNECT_URL/connectors/$CONNECTOR_NAME/status" | jq '.'
 
 echo ""
 echo "======================================"
-echo "Connector Deployment Complete!"
+echo "Simple Events Connector Deployment Complete!"
 echo "======================================"
 echo ""
 echo "Useful commands:"
@@ -79,8 +79,4 @@ echo "  Check logs:     docker logs cdc-kafka-connect -f"
 echo "  Restart:        curl -X POST $KAFKA_CONNECT_URL/connectors/$CONNECTOR_NAME/restart"
 echo "  Delete:         curl -X DELETE $KAFKA_CONNECT_URL/connectors/$CONNECTOR_NAME"
 echo ""
-
-
-
-
 
