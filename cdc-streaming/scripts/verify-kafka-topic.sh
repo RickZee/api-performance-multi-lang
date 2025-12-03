@@ -77,3 +77,4 @@ echo "  - Check Confluent Cloud UI for topic '$TOPIC'"
 echo "  - Use the commands above to consume from the topic"
 echo ""
 
+

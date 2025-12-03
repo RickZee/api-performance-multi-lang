@@ -140,3 +140,4 @@ echo "  View connector logs: docker logs cdc-kafka-connect-cloud -f"
 echo "  Test API endpoint: curl -X POST $API_URL/api/v1/events/events-simple -H 'Content-Type: application/json' -d '$TEST_EVENT'"
 echo ""
 
+
