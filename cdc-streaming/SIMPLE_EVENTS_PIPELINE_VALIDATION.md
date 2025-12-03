@@ -164,3 +164,4 @@ Once validated:
 3. Configure Flink jobs if needed for event processing
 4. Set up alerting for connector failures
 
+
