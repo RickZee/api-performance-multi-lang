@@ -5,7 +5,7 @@ import com.example.dto.Event;
 import com.example.dto.EventBody;
 import com.example.dto.EventHeader;
 import com.example.service.EventProcessingService;
-import com.fasterxml.jackson.databind.ObjectMapper;
+import com.example.service.SimpleEventProcessingService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -29,14 +29,15 @@ class EventControllerTest {
     @Mock
     private EventProcessingService eventProcessingService;
 
+    @Mock
+    private SimpleEventProcessingService simpleEventProcessingService;
+
     private WebTestClient webTestClient;
-    private ObjectMapper objectMapper;
 
     @BeforeEach
     void setUp() {
-        objectMapper = new ObjectMapper();
         webTestClient = WebTestClient
-                .bindToController(new EventController(eventProcessingService))
+                .bindToController(new EventController(eventProcessingService, simpleEventProcessingService))
                 .build();
     }
 
