@@ -2,7 +2,9 @@ package com.example.controller;
 
 import com.example.constants.ApiConstants;
 import com.example.dto.Event;
+import com.example.dto.SimpleEvent;
 import com.example.service.EventProcessingService;
+import com.example.service.SimpleEventProcessingService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.HttpStatus;
@@ -22,6 +24,7 @@ import java.util.concurrent.atomic.AtomicInteger;
 public class EventController {
     
     private final EventProcessingService eventProcessingService;
+    private final SimpleEventProcessingService simpleEventProcessingService;
 
     @PostMapping
     public Mono<ResponseEntity<String>> processEvent(@Valid @RequestBody(required = false) Event event) {
@@ -118,6 +121,44 @@ public class EventController {
                         "processingTimeMs", processingTimeMs
                     ));
                 }));
+    }
+
+    @PostMapping("/events-simple")
+    public Mono<ResponseEntity<String>> processSimpleEvent(@Valid @RequestBody(required = false) SimpleEvent event) {
+        // Handle null event body explicitly
+        if (event == null) {
+            return Mono.just(ResponseEntity.status(HttpStatus.UNPROCESSABLE_ENTITY)
+                    .body("Invalid request: Event body is required"));
+        }
+        
+        log.info("{} Received simple event: {}", ApiConstants.API_NAME, event.getEventName() != null ? 
+                event.getEventName() : "null or invalid");
+        
+        return simpleEventProcessingService.processSimpleEvent(event)
+                .then(Mono.just(ResponseEntity.ok("Simple event processed successfully")))
+                .doOnError(error -> log.warn("{} Error in reactive chain: {} - {}", ApiConstants.API_NAME, error.getClass().getName(), error.getMessage()))
+                .onErrorResume(IllegalArgumentException.class, ex -> {
+                    log.warn("{} Caught IllegalArgumentException: {}", ApiConstants.API_NAME, ex.getMessage());
+                    return Mono.just(ResponseEntity.status(HttpStatus.UNPROCESSABLE_ENTITY)
+                            .body("Invalid event: " + ex.getMessage()));
+                })
+                .onErrorResume(RuntimeException.class, ex -> {
+                    // Check if it's an IllegalArgumentException wrapped in RuntimeException
+                    Throwable cause = ex.getCause();
+                    if (cause instanceof IllegalArgumentException) {
+                        log.warn("{} Caught wrapped IllegalArgumentException: {}", ApiConstants.API_NAME, cause.getMessage());
+                        return Mono.just(ResponseEntity.status(HttpStatus.UNPROCESSABLE_ENTITY)
+                                .body("Invalid event: " + cause.getMessage()));
+                    }
+                    log.error("{} Caught RuntimeException: {} - {}", ApiConstants.API_NAME, ex.getClass().getName(), ex.getMessage(), ex);
+                    return Mono.just(ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
+                            .body("Error processing event: " + ex.getMessage()));
+                })
+                .onErrorResume(throwable -> {
+                    log.error("{} Caught unexpected error: {} - {}", ApiConstants.API_NAME, throwable.getClass().getName(), throwable.getMessage(), throwable);
+                    return Mono.just(ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
+                            .body("Error processing event: " + throwable.getMessage()));
+                });
     }
 
     @GetMapping("/health")

@@ -16,3 +16,5 @@ RUN chmod +x consumer.py
 CMD ["python", "consumer.py"]
 
 
+
+
