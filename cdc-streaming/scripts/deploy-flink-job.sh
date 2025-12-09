@@ -5,7 +5,7 @@
 set -e
 
 FLINK_REST_URL="${FLINK_REST_URL:-http://localhost:8082}"
-SQL_FILE="${1:-./flink-jobs/routing.sql}"
+SQL_FILE="${1:-./flink-jobs/routing-local-docker.sql}"
 
 # Colors
 RED='\033[0;31m'

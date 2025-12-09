@@ -2,7 +2,7 @@
   "type": "record",
   "name": "RawBusinessEvent",
   "namespace": "com.example.cdc",
-  "doc": "Raw business event schema - Flink compatible (all nested fields non-nullable)",
+  "doc": "Raw business event schema - Flink compatible (all nested fields non-nullable). Based on data/schemas/event/event.json. Example events: data/schemas/event/samples/loan-created-event.json",
   "fields": [
     {
       "name": "eventHeader",
@@ -59,7 +59,7 @@
                   {
                     "name": "entityType",
                     "type": "string",
-                    "doc": "Type of entity (Car, Loan, LoanPayment, ServiceRecord, etc.)"
+                    "doc": "Type of entity (Car, Loan, LoanPayment, ServiceRecord, etc.). Car entity example: data/entities/car/car-large.json"
                   },
                   {
                     "name": "entityId",

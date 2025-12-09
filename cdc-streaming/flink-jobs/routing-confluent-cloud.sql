@@ -5,6 +5,11 @@
 -- Source: filters.yaml
 -- Target: Confluent Cloud Flink
 -- 
+-- Example structures:
+-- - Car entity: data/entities/car/car-large.json
+-- - Loan created event: data/schemas/event/samples/loan-created-event.json
+-- - Loan payment event: data/schemas/event/samples/loan-payment-submitted-event.json
+--
 -- DEPLOYMENT NOTE: Deploy statements in order:
 -- 1. Source table (raw-business-events)
 -- 2. Sink tables (filtered-*-events)
@@ -35,11 +40,31 @@ CREATE TABLE `raw-business-events` (
 -- ============================================================================
 -- Step 2: Create Sink Tables
 -- ============================================================================
--- Sink Table: Loan Events Filter
+-- Sink Table: Loan Created Events Filter
+-- Filters LoanCreated events based on data/schemas/event/samples/loan-created-event.json
 -- Note: Table name must match topic name exactly in Confluent Cloud
 -- Solution 1C: Keep Debezium format (flat structure, no nested ROWs)
 -- Note: Excluding __ts_ms to avoid Flink eventtime inference
 CREATE TABLE `filtered-loan-events` (
+    `id` STRING,
+    `car_id` STRING,
+    `entity_type` STRING,
+    `created_at` STRING,
+    `updated_at` STRING,
+    `data` STRING,
+    `__op` STRING,
+    `__table` STRING
+) WITH (
+    'connector' = 'confluent',
+    'value.format' = 'json-registry'
+);
+
+-- Sink Table: Loan Payment Events Filter
+-- Filters LoanPaymentSubmitted events based on data/schemas/event/samples/loan-payment-submitted-event.json
+-- Note: Table name must match topic name exactly in Confluent Cloud
+-- Solution 1C: Keep Debezium format (flat structure, no nested ROWs)
+-- Note: Excluding __ts_ms to avoid Flink eventtime inference
+CREATE TABLE `filtered-loan-payment-events` (
     `id` STRING,
     `car_id` STRING,
     `entity_type` STRING,
@@ -96,9 +121,10 @@ CREATE TABLE `filtered-car-events` (
 -- Each INSERT statement should be deployed as a separate statement
 
 -- ============================================================================
--- INSERT Statement: Loan Events Filter
--- Statement Name: loan-events-filter-insert
--- Filters events related to loans (LoanCreated, LoanPaymentSubmitted)-- Solution 1C: Simple SELECT with filtering (no transformation)
+-- INSERT Statement: Loan Created Events Filter
+-- Statement Name: loan-created-filter-insert
+-- Filters LoanCreated events where loans reference car entities. Based on loan-created-event.json example structure.
+-- Solution 1C: Simple SELECT with filtering (no transformation)
 -- ============================================================================
 INSERT INTO `filtered-loan-events`
 SELECT 
@@ -111,13 +137,34 @@ SELECT
     `__op`,
     `__table`
 FROM `raw-business-events`
-WHERE ((`entity_type` = 'Loan' AND `__op` = 'c') OR (`entity_type` = 'LoanPayment' AND `__op` = 'c')) AND `entity_type` IN ('Loan', 'LoanPayment')
+WHERE (`entity_type` = 'Loan' AND `__op` = 'c')
+;
+
+-- ============================================================================
+-- INSERT Statement: Loan Payment Events Filter
+-- Statement Name: loan-payment-filter-insert
+-- Filters LoanPaymentSubmitted events
+-- Solution 1C: Simple SELECT with filtering (no transformation)
+-- ============================================================================
+INSERT INTO `filtered-loan-payment-events`
+SELECT 
+    `id`,
+    `car_id`,
+    `entity_type`,
+    `created_at`,
+    `updated_at`,
+    `data`,
+    `__op`,
+    `__table`
+FROM `raw-business-events`
+WHERE (`entity_type` = 'LoanPayment' AND `__op` = 'c')
 ;
 
 -- ============================================================================
 -- INSERT Statement: Service Events Filter
 -- Statement Name: service-events-filter-insert
--- Filters events related to car services (CarServiceDone)-- Solution 1C: Simple SELECT with filtering (no transformation)
+-- Filters events related to car services (CarServiceDone)
+-- Solution 1C: Simple SELECT with filtering (no transformation)
 -- ============================================================================
 INSERT INTO `filtered-service-events`
 SELECT 
@@ -130,13 +177,14 @@ SELECT
     `__op`,
     `__table`
 FROM `raw-business-events`
-WHERE `entity_type` = 'CarServiceDone' AND `entity_type` = 'ServiceRecord'
+WHERE `entity_type` = 'ServiceRecord' AND `__op` = 'c'
 ;
 
 -- ============================================================================
 -- INSERT Statement: Car Creation Filter
 -- Statement Name: car-creation-filter-insert
--- Filters car creation events-- Solution 1C: Simple SELECT with filtering (no transformation)
+-- Filters car creation events. Based on car-large.json example structure.
+-- Solution 1C: Simple SELECT with filtering (no transformation)
 -- ============================================================================
 INSERT INTO `filtered-car-events`
 SELECT 
@@ -151,4 +199,3 @@ SELECT
 FROM `raw-business-events`
 WHERE (`entity_type` = 'Car' AND `__op` = 'c')
 ;
-

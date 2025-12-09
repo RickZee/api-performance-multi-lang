@@ -3,6 +3,7 @@
     "eventHeader": {
       "uuid": "${uuid}",
       "eventName": "Car Created",
+      "eventType": "CarCreated",
       "createdDate": "${timestamp}",
       "savedDate": "${timestamp}"
     },
@@ -32,6 +33,7 @@
     "eventHeader": {
       "uuid": "${uuid}",
       "eventName": "Loan Created",
+      "eventType": "LoanCreated",
       "createdDate": "${timestamp}",
       "savedDate": "${timestamp}"
     },
@@ -61,6 +63,7 @@
     "eventHeader": {
       "uuid": "${uuid}",
       "eventName": "Loan Payment Submitted",
+      "eventType": "LoanPaymentSubmitted",
       "createdDate": "${timestamp}",
       "savedDate": "${timestamp}"
     },
@@ -83,6 +86,7 @@
     "eventHeader": {
       "uuid": "${uuid}",
       "eventName": "Car Service Done",
+      "eventType": "CarServiceDone",
       "createdDate": "${timestamp}",
       "savedDate": "${timestamp}"
     },

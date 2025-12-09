@@ -26,10 +26,11 @@
     },
     "eventType": {
       "type": "string",
-      "description": "Readable event description (deprecated: use eventName instead)"
+      "enum": ["CarCreated", "LoanCreated", "LoanPaymentSubmitted", "CarServiceDone"],
+      "description": "Event type enum identifier"
     }
   },
-  "required": ["uuid", "eventName", "createdDate", "savedDate"],
+  "required": ["uuid", "eventName", "eventType", "createdDate", "savedDate"],
   "additionalProperties": false
 }
 

@@ -40,9 +40,9 @@ Located in `schemas/event/`:
 - **`event-header.json`**: Common event header structure containing:
   - `uuid`: Unique identifier for the event (UUID format)
   - `eventName`: Readable event description (e.g., "Car Created", "Loan Created", "Loan Payment Submitted", "Car Service Done")
+  - `eventType`: Event type enum identifier (enum: CarCreated, LoanCreated, LoanPaymentSubmitted, CarServiceDone)
   - `createdDate`: ISO 8601 timestamp when the event was created
   - `savedDate`: ISO 8601 timestamp when the event was saved
-  - `eventType`: Readable event description (deprecated: use `eventName` instead)
 
 ### Entity Schemas
 
@@ -117,7 +117,7 @@ All entities must:
 
 ## Notes
 
-- The `eventType` field in event headers is deprecated but kept for backward compatibility. Use `eventName` instead.
+- The `eventType` field is a required enum identifier for programmatic event type detection, while `eventName` provides a human-readable description.
 - Entity timestamps (`createdAt`, `updatedAt`) are defined in the entity header, not as direct properties of the entity.
 - All date-time fields use ISO 8601 format.
 - All monetary amounts use `multipleOf: 0.01` for precision.

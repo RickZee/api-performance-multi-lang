@@ -1,0 +1,31 @@
+{
+  "eventHeader": {
+    "uuid": "550e8400-e29b-41d4-a716-446655440002",
+    "eventName": "Loan Created",
+    "eventType": "LoanCreated",
+    "createdDate": "2025-01-20T14:15:00Z",
+    "savedDate": "2025-01-20T14:15:03Z"
+  },
+  "entities": [
+    {
+      "entityHeader": {
+        "entityId": "LOAN-2025-001",
+        "entityType": "Loan",
+        "createdAt": "2025-01-20T14:15:00Z",
+        "updatedAt": "2025-01-20T14:15:00Z"
+      },
+      "id": "LOAN-2025-001",
+      "carId": "CAR-2025-001",
+      "financialInstitution": "First National Bank",
+      "balance": 45000.00,
+      "lastPaidDate": "2025-01-20T14:15:00Z",
+      "loanAmount": 50000.00,
+      "interestRate": 0.045,
+      "termMonths": 60,
+      "startDate": "2025-01-20T14:15:00Z",
+      "status": "active",
+      "monthlyPayment": 932.16
+    }
+  ]
+}
+

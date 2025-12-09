@@ -2,7 +2,7 @@
   "type": "record",
   "name": "FilteredBusinessEvent",
   "namespace": "com.example.cdc",
-  "doc": "Filtered business event schema - Flink compatible (all nested fields non-nullable)",
+  "doc": "Filtered business event schema - Flink compatible (all nested fields non-nullable). Based on data/schemas/event/event.json. Example events: data/schemas/event/samples/loan-created-event.json",
   "fields": [
     {
       "name": "eventHeader",
