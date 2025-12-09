@@ -11,6 +11,7 @@ This document provides comprehensive performance tuning strategies for the CDC s
 When using **Confluent Cloud** (managed service), the following performance aspects are handled automatically:
 
 #### Kafka Infrastructure
+
 - **Automatic Scaling**: Brokers automatically scale based on load (CKU scaling)
 - **Optimal Configuration**: Pre-tuned broker configurations for performance
 - **Network Optimization**: Optimized network paths and bandwidth allocation
@@ -19,11 +20,13 @@ When using **Confluent Cloud** (managed service), the following performance aspe
 - **Replication**: Automatic replication management and optimization
 
 #### Schema Registry
+
 - **Performance Optimization**: Pre-optimized Schema Registry configuration
 - **Caching**: Automatic schema caching for performance
 - **Load Balancing**: Automatic load balancing across instances
 
 #### Monitoring
+
 - **Built-in Metrics**: Comprehensive performance metrics in Confluent Cloud Console
 - **Performance Dashboards**: Pre-built dashboards for throughput, latency, lag
 - **Automatic Alerts**: Pre-configured alerts for performance degradation
@@ -33,12 +36,14 @@ When using **Confluent Cloud** (managed service), the following performance aspe
 Even with Confluent Cloud, you need to optimize:
 
 #### Application Configuration
+
 - **Producer Settings**: Batch size, compression, acks, retries
 - **Consumer Settings**: Fetch size, poll intervals, batch processing
 - **Topic Configuration**: Partitions, retention, compression (you configure, Confluent manages)
 - **Client Configuration**: Connection pooling, timeouts, buffer sizes
 
 #### Flink Performance
+
 - **Parallelism**: Set parallelism to match partition count
 - **Checkpoint Configuration**: Interval, timeout, mode
 - **State Backend**: Choose and configure state backend (RocksDB, filesystem)
@@ -47,12 +52,14 @@ Even with Confluent Cloud, you need to optimize:
 - **Resource Allocation**: Memory, CPU allocation per TaskManager
 
 #### Connector Performance
+
 - **Batch Settings**: Batch size, poll interval
 - **Parallel Tasks**: Number of connector tasks
 - **Error Handling**: Retry logic, dead letter queues
 - **Offset Management**: Offset commit frequency
 
 #### Consumer Applications
+
 - **Batch Processing**: Implement batch processing for efficiency
 - **Parallel Processing**: Multi-threaded or multi-process consumers
 - **Consumer Group Scaling**: Optimal number of consumer instances
@@ -61,6 +68,7 @@ Even with Confluent Cloud, you need to optimize:
 ### Confluent Cloud-Specific Tuning
 
 #### Cluster Sizing
+
 ```bash
 # Scale CKUs (Confluent Kafka Units) for higher throughput
 confluent kafka cluster update prod-kafka-east --cku 4
@@ -70,6 +78,7 @@ confluent kafka cluster describe prod-kafka-east
 ```
 
 #### Topic Configuration
+
 ```bash
 # Configure partitions (you set, Confluent manages)
 confluent kafka topic update raw-business-events \
@@ -92,6 +101,7 @@ confluent kafka topic update raw-business-events \
   - Backpressure detected
 
 **Compute Pool Operations**:
+
 ```bash
 # Create compute pool
 confluent flink compute-pool create prod-flink-east \
@@ -112,6 +122,7 @@ confluent flink statement describe ss-456789 \
 ```
 
 **Auto-Scaling Behavior**:
+
 - Confluent Cloud automatically scales within max-cfu limit
 - Scales based on input topic rates and processing load
 - No manual intervention required
@@ -142,11 +153,13 @@ confluent flink statement describe ss-456789 \
 
 #### Partition Count
 
-**Rule of Thumb**: 
+**Rule of Thumb**:
+
 - Target: 1 partition per 1,000 messages/sec
 - Maximum: 10,000 partitions per broker
 
 **Calculation**:
+
 ```bash
 # Calculate optimal partition count
 THROUGHPUT=100000  # messages/sec
@@ -158,6 +171,7 @@ echo "Optimal partitions: $OPTIMAL_PARTITIONS"
 ```
 
 **Example Configuration** (Confluent Cloud):
+
 ```bash
 # Create topic with optimal partitions
 confluent kafka topic create raw-business-events \
@@ -170,6 +184,7 @@ confluent kafka topic create raw-business-events \
 **Benefits**: Reduces network bandwidth and storage
 
 **Configuration** (Confluent Cloud):
+
 ```bash
 # Enable compression at topic level
 confluent kafka topic update raw-business-events \
@@ -177,6 +192,7 @@ confluent kafka topic update raw-business-events \
 ```
 
 **Compression Types** (performance vs. ratio):
+
 - `snappy`: Fast, moderate compression (recommended)
 - `lz4`: Very fast, good compression
 - `gzip`: Slower, best compression
@@ -279,6 +295,7 @@ heartbeat.interval.ms=1000
   - **Heavy Workload**: 8-16 CFU (200K+ events/sec)
 
 **Compute Pool Configuration**:
+
 ```bash
 # Create compute pool with appropriate CFU limit
 confluent flink compute-pool create prod-flink-east \
@@ -295,6 +312,7 @@ confluent flink compute-pool describe prod-flink-east
 ```
 
 **Auto-Scaling**:
+
 - Confluent Cloud automatically scales compute pools based on input topic rates
 - No manual intervention required
 - Scales up during peak loads and down during low activity
@@ -303,6 +321,7 @@ confluent flink compute-pool describe prod-flink-east
 #### SQL Statement Parallelism
 
 **Set Parallelism in SQL**:
+
 ```sql
 -- Set default parallelism for statement
 SET 'parallelism.default' = '12';
@@ -328,6 +347,7 @@ CREATE TABLE filtered_loan_events (
 ```
 
 **Parallelism Guidelines**:
+
 - **Match Partition Count**: Set parallelism equal to Kafka topic partition count
 - **Optimal Range**: 1-2x partition count for best performance
 - **Maximum**: Limited by compute pool CFU capacity
@@ -335,12 +355,14 @@ CREATE TABLE filtered_loan_events (
 #### Checkpoint Configuration
 
 **Confluent Cloud Managed Checkpoints**:
+
 - Checkpoints are automatically managed by Confluent Cloud
 - Default checkpoint interval: 60 seconds
 - Checkpoints stored in managed storage
 - Automatic recovery from checkpoints on failure
 
 **Configure Checkpoint Interval** (in SQL):
+
 ```sql
 -- Set checkpoint interval (milliseconds)
 SET 'execution.checkpointing.interval' = '30000';  -- 30 seconds
@@ -355,12 +377,14 @@ SET 'execution.checkpointing.timeout' = '600000';  -- 10 minutes
 #### State Backend
 
 **Confluent Cloud State Management**:
+
 - State backend is automatically managed
 - RocksDB is used for large state
 - State is stored in managed storage
 - No manual configuration required
 
 **State Size Monitoring**:
+
 ```bash
 # Check statement metrics for state size
 confluent flink statement describe ss-456789 \
@@ -373,6 +397,7 @@ confluent flink statement describe ss-456789 \
 #### JobManager Configuration
 
 **Memory Settings**:
+
 ```yaml
 # flink-conf.yaml
 jobmanager.memory.process.size: 2048m
@@ -380,6 +405,7 @@ jobmanager.memory.jvm-metaspace.size: 512m
 ```
 
 **Checkpoint Configuration**:
+
 ```yaml
 # Checkpoint interval (balance latency vs. recovery)
 execution.checkpointing.interval: 30000  # 30 seconds
@@ -400,6 +426,7 @@ execution.checkpointing.mode: EXACTLY_ONCE
 #### TaskManager Configuration
 
 **Memory Settings**:
+
 ```yaml
 # Total process memory
 taskmanager.memory.process.size: 4096m
@@ -414,6 +441,7 @@ taskmanager.memory.network.max: 1gb
 ```
 
 **Parallelism**:
+
 ```yaml
 # Default parallelism (should match Kafka partition count)
 parallelism.default: 12
@@ -423,6 +451,7 @@ parallelism.max: 128
 ```
 
 **Task Slots**:
+
 ```yaml
 # Number of task slots per TaskManager
 taskmanager.numberOfTaskSlots: 4
@@ -434,6 +463,7 @@ taskmanager.numberOfTaskSlots: 4
 #### State Backend Tuning
 
 **RocksDB Configuration** (Recommended for Large State):
+
 ```yaml
 state.backend: rocksdb
 state.backend.incremental: true
@@ -575,6 +605,7 @@ SELECT * FROM raw_business_events;
 #### Parallel Processing
 
 **Multiple Tasks**:
+
 ```json
 {
   "tasks.max": "3",
@@ -589,6 +620,7 @@ SELECT * FROM raw_business_events;
 ### Batch Processing
 
 **Python Consumer Example**:
+
 ```python
 from confluent_kafka import Consumer
 import json
@@ -638,11 +670,13 @@ while True:
 ### Consumer Group Scaling
 
 **Horizontal Scaling**:
+
 - Add more consumer instances to the same consumer group
 - Kafka automatically rebalances partitions
 - Each consumer processes different partitions in parallel
 
 **Optimal Consumer Count**:
+
 ```bash
 # Rule: Number of consumers <= Number of partitions
 PARTITIONS=12
@@ -661,6 +695,7 @@ CONSUMERS=6  # Each consumer handles 2 partitions
 #### Kafka Metrics (Confluent Cloud)
 
 **Producer Metrics**:
+
 - `record-send-rate`: Records sent per second
 - `byte-rate`: Bytes sent per second
 - `record-retry-rate`: Retry rate
@@ -668,12 +703,14 @@ CONSUMERS=6  # Each consumer handles 2 partitions
 - `request-latency-avg`: Average request latency
 
 **Consumer Metrics**:
+
 - `records-consumed-rate`: Records consumed per second
 - `bytes-consumed-rate`: Bytes consumed per second
 - `records-lag`: Consumer lag
 - `fetch-latency-avg`: Average fetch latency
 
 **Broker Metrics**:
+
 - `messages-in-per-sec`: Messages received per second
 - `bytes-in-per-sec`: Bytes received per second
 - `bytes-out-per-sec`: Bytes sent per second
@@ -684,6 +721,7 @@ CONSUMERS=6  # Each consumer handles 2 partitions
 **Confluent Cloud Flink Metrics**:
 
 **Statement Metrics** (via Confluent Cloud Console or CLI):
+
 - `numRecordsInPerSecond`: Input records per second
 - `numRecordsOutPerSecond`: Output records per second
 - `latency`: End-to-end latency
@@ -694,11 +732,13 @@ CONSUMERS=6  # Each consumer handles 2 partitions
 - `cfu-usage`: Current CFU utilization
 
 **Compute Pool Metrics**:
+
 - `cfu-utilization`: Percentage of max CFU used
 - `auto-scaling-events`: Number of auto-scaling events
 - `statement-count`: Number of active statements
 
 **Access Metrics**:
+
 ```bash
 # Get statement metrics
 confluent flink statement describe ss-456789 \
@@ -713,12 +753,14 @@ confluent flink compute-pool describe cp-east-123 \
 **Self-Managed Flink Metrics**:
 
 **Job Metrics**:
+
 - `numRecordsInPerSecond`: Input records per second
 - `numRecordsOutPerSecond`: Output records per second
 - `latency`: End-to-end latency
 - `backpressured-time-per-second`: Backpressure time
 
 **Checkpoint Metrics**:
+
 - `checkpoint-duration`: Checkpoint duration
 - `checkpoint-size`: Checkpoint size
 - `checkpoint-alignment-time`: Alignment time
@@ -728,6 +770,7 @@ confluent flink compute-pool describe cp-east-123 \
 #### Confluent Cloud Console
 
 **Built-in Dashboards**:
+
 - Throughput metrics
 - Latency metrics
 - Consumer lag
@@ -735,6 +778,7 @@ confluent flink compute-pool describe cp-east-123 \
 - Topic metrics
 
 **Custom Dashboards**:
+
 - Create custom dashboards in Confluent Cloud Console
 - Export metrics to Prometheus/Grafana
 - Set up custom alerts
@@ -748,6 +792,7 @@ confluent flink compute-pool describe cp-east-123 \
 #### Kafka Load Test
 
 **Producer Load Test**:
+
 ```bash
 # Use kafka-producer-perf-test
 kafka-producer-perf-test.sh \
@@ -765,12 +810,14 @@ kafka-producer-perf-test.sh \
 #### Flink Load Test
 
 **Generate Test Data**:
+
 ```bash
 # Generate events using k6
 k6 run --vus 100 --duration 300s load-test-script.js
 ```
 
 **Monitor Performance** (Confluent Cloud):
+
 ```bash
 # Watch Flink statement metrics
 confluent flink statement describe ss-456789 \
@@ -787,6 +834,7 @@ confluent flink statement describe ss-456789 \
 ```
 
 **Monitor Performance** (Self-Managed):
+
 ```bash
 # Watch Flink metrics via REST API
 watch -n 1 'curl -s http://flink-jobmanager:8081/jobs/$JOB_ID/metrics | jq ".[\"numRecordsInPerSecond\"]"'
@@ -797,6 +845,7 @@ watch -n 1 'curl -s http://flink-jobmanager:8081/jobs/$JOB_ID/metrics | jq ".[\"
 #### Baseline Metrics
 
 **Establish Baseline**:
+
 ```bash
 # Run baseline test
 ./scripts/performance-test.sh --baseline
@@ -816,32 +865,40 @@ watch -n 1 'curl -s http://flink-jobmanager:8081/jobs/$JOB_ID/metrics | jq ".[\"
 **Symptoms**: P99 latency > 500ms
 
 **Diagnosis** (Confluent Cloud):
+
 1. Check consumer lag: `confluent kafka consumer-group describe <group>`
 2. Check Flink backpressure: Confluent Cloud Console or CLI
+
    ```bash
    confluent flink statement describe ss-456789 \
      --compute-pool cp-east-123 \
      | jq '.metrics.backpressured_time_per_second'
    ```
+
 3. Check statement latency:
+
    ```bash
    confluent flink statement describe ss-456789 \
      --compute-pool cp-east-123 \
      | jq '.metrics.latency'
    ```
+
 4. Check CFU utilization:
+
    ```bash
    confluent flink compute-pool describe cp-east-123 \
      | jq '.metrics.cfu_utilization'
    ```
 
 **Diagnosis** (Self-Managed):
+
 1. Check consumer lag: `kafka-consumer-groups.sh --describe`
 2. Check Flink backpressure: Flink Web UI
 3. Check network latency: `ping kafka-broker`
 4. Check disk I/O: `iostat -x 1`
 
 **Solutions**:
+
 - Increase parallelism
 - Increase batch sizes
 - Optimize network (reduce hops)
@@ -853,12 +910,14 @@ watch -n 1 'curl -s http://flink-jobmanager:8081/jobs/$JOB_ID/metrics | jq ".[\"
 **Symptoms**: Throughput < 50,000 events/sec
 
 **Diagnosis**:
+
 1. Check CPU usage: `top` or `htop`
 2. Check memory usage: `free -h`
 3. Check network utilization: `iftop`
 4. Check Kafka metrics: Producer/consumer rates
 
 **Solutions** (Confluent Cloud):
+
 - Increase partitions: `confluent kafka topic update <topic> --config partitions=24`
 - Increase parallelism: Set in SQL statement
 - Increase batch sizes: Configure in producer/consumer settings
@@ -867,6 +926,7 @@ watch -n 1 'curl -s http://flink-jobmanager:8081/jobs/$JOB_ID/metrics | jq ".[\"
 - Monitor auto-scaling: Check if CFU limit needs adjustment
 
 **Solutions** (Self-Managed):
+
 - Increase partitions
 - Increase parallelism
 - Increase batch sizes
@@ -878,6 +938,7 @@ watch -n 1 'curl -s http://flink-jobmanager:8081/jobs/$JOB_ID/metrics | jq ".[\"
 **Symptoms**: Consumer lag > 10,000 messages
 
 **Diagnosis**:
+
 ```bash
 # Check lag (Confluent Cloud)
 confluent kafka consumer-group describe loan-consumer-group \
@@ -885,6 +946,7 @@ confluent kafka consumer-group describe loan-consumer-group \
 ```
 
 **Solutions**:
+
 - Increase number of consumers
 - Increase `max.partition.fetch.bytes`
 - Increase `fetch.min.bytes`
@@ -904,6 +966,7 @@ Performance tuning is an iterative process that requires continuous monitoring, 
 5. **Balance Trade-offs**: Optimize for your specific use case (throughput vs. latency)
 
 **Recommended Tuning Order**:
+
 1. Kafka broker and topic configuration
 2. Producer/consumer settings
 3. Flink parallelism and state backend
@@ -912,4 +975,3 @@ Performance tuning is an iterative process that requires continuous monitoring, 
 6. JVM and GC tuning
 
 Regular performance testing and monitoring ensure the system maintains optimal performance as load and requirements evolve.
-

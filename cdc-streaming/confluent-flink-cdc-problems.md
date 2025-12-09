@@ -56,9 +56,7 @@ API Data Model (nested JSON)
 
 Each transformation loses or changes structure.
 
----
-
-### Solutions for Large Regulated Financial Organizations
+### Solutions
 
 ## Category 1: Data Model Changes
 
@@ -88,13 +86,11 @@ Each transformation loses or changes structure.
 - Requires coordination with all API consumers
 - Loss of type information (everything becomes strings)
 
-**Regulatory Considerations**:
+**Considerations**:
 
+- Can complicate or break data lineage
 - Requires API versioning (v1 → v2)
 - Full audit trail for schema changes
-- Client migration plan needed
-
----
 
 ### Solution 1B: Store `updatedAttributes` as JSON String
 
@@ -132,13 +128,11 @@ WHERE CAST(JSON_VALUE(`data`, '$.loan.loanAmount') AS DOUBLE) > 100000;
 - More complex SQL queries
 - Type casting required for comparisons
 
-**Regulatory Considerations**:
+**Considerations**:
 
 - Data integrity preserved (original structure maintained)
 - Full audit capability
 - Compliance-friendly (no data loss)
-
----
 
 ### Solution 1C: Schema-First Design with Avro
 
@@ -195,13 +189,11 @@ CREATE TABLE raw_business_events (
 - Less flexible than JSON
 - Breaking change for dynamic attributes
 
-**Regulatory Considerations**:
+**Considerations**:
 
 - Strong data contracts (compliance-friendly)
 - Schema versioning for audit trails
 - Backward/forward compatibility configurable
-
----
 
 ## Category 2: Confluent Cloud Customizations
 
@@ -232,7 +224,6 @@ WHERE CAST(JSON_VALUE(`data`, '$.loan.loanAmount') AS DOUBLE) > 100000;
 
 **Pros**:
 
-- Already partially implemented
 - Compatible with Confluent Cloud
 - Preserves original data
 
@@ -240,14 +231,12 @@ WHERE CAST(JSON_VALUE(`data`, '$.loan.loanAmount') AS DOUBLE) > 100000;
 
 - JSON parsing overhead
 - More complex filter generation
-- Limited optimization by Flink
+- Limited optimization by Flink?
 
-**Regulatory Considerations**:
+**Considerations**:
 
 - Full data preservation
 - Auditable transformations
-
----
 
 ### Solution 2B: Multi-Stage Flink Processing Pipeline
 
@@ -297,13 +286,11 @@ WHERE CAST(loan_amount AS DOUBLE) > 100000;
 - Extra Kafka topic storage
 - More CFUs required
 
-**Regulatory Considerations**:
+**Considerations**:
 
+- Can complicate or break data lineage
 - Clear audit trail at each stage
 - Intermediate data can be retained for compliance
-- Easier to trace data lineage
-
----
 
 ### Solution 2C: Custom UDF for JSON Processing
 
@@ -334,26 +321,24 @@ WHERE JsonExtractDouble(data, '/loan/loanAmount') > 100000;
 
 **Pros**:
 
-- Custom logic for complex transformations
 - Optimized for your specific data model
 - Can handle edge cases
 
 **Cons**:
 
+- Custom logic for complex transformations
 - Requires UDF deployment to Confluent Cloud
 - Additional maintenance burden
 - May have CFU overhead
 
-**Regulatory Considerations**:
+**Considerations**:
 
 - UDF code must be version-controlled and audited
 - Testing requirements for financial accuracy
 
----
-
 ### Solution 2D: Eventtime Handling Configuration
 
-**Description**: Explicit eventtime configuration to avoid automatic inference issues.
+**Description**: Explicit eventtime configuration to avoid automatic inference issues (not supported by Confluent?).
 
 **For Source Tables**:
 
@@ -388,299 +373,3 @@ CREATE TABLE `filtered-loan-events` (
 
 - Must remember to exclude from sinks
 - Different schemas source vs. sink
-
----
-
-## Category 3: Alternative Stream Processing Options
-
-### Solution 3A: Apache Kafka Streams (ksqlDB)
-
-**Description**: Use ksqlDB instead of Flink for stream processing.
-
-**ksqlDB Query**:
-
-```sql
-CREATE STREAM raw_events (
-    id VARCHAR,
-    data VARCHAR,
-    entity_type VARCHAR
-) WITH (
-    KAFKA_TOPIC='raw-business-events',
-    VALUE_FORMAT='JSON'
-);
-
-CREATE STREAM filtered_loans AS
-SELECT 
-    id,
-    data,
-    EXTRACTJSONFIELD(data, '$.loan.loanAmount') AS loan_amount
-FROM raw_events
-WHERE entity_type = 'Loan'
-  AND CAST(EXTRACTJSONFIELD(data, '$.loan.loanAmount') AS DOUBLE) > 100000
-EMIT CHANGES;
-```
-
-**Pros**:
-
-- Native Confluent product (good support)
-- Simpler SQL dialect
-- Good JSON handling
-- No eventtime inference issues
-
-**Cons**:
-
-- Different feature set than Flink
-- May not support all windowing operations
-- Separate learning curve
-
-**Regulatory Considerations**:
-
-- ksqlDB is part of Confluent ecosystem (enterprise support available)
-- Queryable state for audit queries
-
----
-
-### Solution 3B: Self-Managed Apache Flink
-
-**Description**: Deploy self-managed Flink cluster instead of Confluent Cloud Flink.
-
-**Benefits**:
-
-- Full control over configuration
-- No dialect differences from Apache Flink
-- `PROCTIME()` and all standard features available
-- Custom connectors and formats
-
-**Deployment Options**:
-
-1. **Kubernetes (EKS/GKE)**: Flink on Kubernetes Operator
-2. **AWS EMR**: Managed Flink service
-3. **Docker Compose**: For development (already in your codebase)
-
-**Configuration**:
-
-```yaml
-# flink-conf.yaml
-taskmanager.memory.process.size: 4096m
-parallelism.default: 12
-state.backend: rocksdb
-execution.checkpointing.interval: 30000
-```
-
-**Pros**:
-
-- Full Flink feature set
-- No SQL dialect translation needed
-- `MAP<STRING, STRING>` can be replaced with proper types
-
-**Cons**:
-
-- Operational overhead
-- Must manage HA, scaling, upgrades
-- No Confluent auto-scaling
-
-**Regulatory Considerations**:
-
-- More control over data residency
-- Can deploy in private VPC
-- Full audit of infrastructure
-
----
-
-### Solution 3C: AWS Kinesis Data Analytics (Flink)
-
-**Description**: Use AWS-managed Apache Flink via Kinesis Data Analytics.
-
-**Setup**:
-
-1. Use Kafka connector to read from Confluent Cloud
-2. Process with standard Apache Flink SQL
-3. Write back to Kafka or other sinks
-
-**Pros**:
-
-- AWS-managed (familiar for many organizations)
-- Standard Apache Flink (no dialect issues)
-- Integrates with AWS security/compliance tools
-
-**Cons**:
-
-- Cross-cloud data transfer costs
-- Latency from Confluent ↔ AWS
-- Separate billing
-
-**Regulatory Considerations**:
-
-- AWS compliance certifications (SOC 2, PCI-DSS, etc.)
-- Can use AWS KMS for encryption
-- AWS CloudTrail for auditing
-
----
-
-### Solution 3D: Databricks Structured Streaming
-
-**Description**: Use Databricks for stream processing with Spark Structured Streaming.
-
-**Implementation**:
-
-```python
-from pyspark.sql.functions import from_json, col, get_json_object
-
-# Read from Kafka
-df = spark.readStream \
-    .format("kafka") \
-    .option("kafka.bootstrap.servers", "confluent-cloud:9092") \
-    .option("subscribe", "raw-business-events") \
-    .load()
-
-# Parse and filter
-parsed = df.select(
-    from_json(col("value").cast("string"), schema).alias("data")
-)
-
-filtered = parsed.filter(
-    get_json_object("data.updatedAttributes", "$.loan.loanAmount").cast("double") > 100000
-)
-
-# Write to filtered topic
-filtered.writeStream \
-    .format("kafka") \
-    .option("kafka.bootstrap.servers", "confluent-cloud:9092") \
-    .option("topic", "filtered-loan-events") \
-    .start()
-```
-
-**Pros**:
-
-- Excellent JSON handling
-- Unified batch/streaming
-- Strong ML integration
-- Delta Lake for exactly-once guarantees
-
-**Cons**:
-
-- Databricks license costs
-- Different programming model
-- Higher latency than Flink for streaming
-
-**Regulatory Considerations**:
-
-- Databricks Unity Catalog for data governance
-- Audit logging built-in
-- SOC 2, HIPAA compliant
-
----
-
-## Category 4: Hybrid/Enterprise Solutions
-
-### Solution 4A: Event Schema Evolution Strategy
-
-**Description**: Implement a phased schema evolution to migrate from flexible JSON to typed schemas.
-
-**Phase 1**: Add schema validation at API level
-**Phase 2**: Dual-write (old + new format) for transition
-**Phase 3**: Migrate consumers to new schema
-**Phase 4**: Deprecate old format
-
-**Tools**:
-
-- Schema Registry compatibility modes (BACKWARD, FORWARD, FULL)
-- Confluent Schema Validation (broker-side)
-- API Gateway schema validation
-
-**Regulatory Considerations**:
-
-- Full audit trail of schema evolution
-- No data loss during transition
-- Backward compatibility maintained
-
----
-
-### Solution 4B: Data Quality Layer
-
-**Description**: Add a data quality/validation layer before stream processing.
-
-**Architecture**:
-
-```
-[CDC] → [Data Quality Service] → [Validated Topic] → [Flink] → [Filtered Topics]
-```
-
-**Data Quality Checks**:
-
-- Schema validation
-- Type coercion (string → number)
-- Null handling
-- Data enrichment
-
-**Tools**:
-
-- Great Expectations (Python)
-- Deequ (Spark)
-- Custom validation service
-
-**Regulatory Considerations**:
-
-- Data quality metrics for compliance reporting
-- Rejection handling (dead letter queue)
-- Audit trail of validation decisions
-
----
-
-### Solution 4C: Multi-Format CDC Pipeline
-
-**Description**: Run parallel CDC pipelines with different formats for different use cases.
-
-**Architecture**:
-
-```
-PostgreSQL
-    ├── [Debezium JSON] → raw-events-json → [ksqlDB filters]
-    └── [Debezium Avro] → raw-events-avro → [Flink typed processing]
-```
-
-**Pros**:
-
-- Use best tool for each use case
-- Gradual migration path
-- Fallback capability
-
-**Cons**:
-
-- Duplicate data
-- Higher storage costs
-- More complex operations
-
----
-
-## Recommendation for Large Regulated Financial Organization
-
-Given your context (large, highly regulated financial organization), I recommend a **phased hybrid approach**:
-
-### Phase 1: Immediate (1-2 weeks)
-
-- **Solution 2A**: Continue with Debezium flat format + JSON functions
-- **Solution 2D**: Explicit eventtime handling in all tables
-- Update `generate-flink-sql.py` to use `JSON_VALUE()` for nested attributes
-
-### Phase 2: Short-term (1-2 months)
-
-- **Solution 1C**: Design Avro schemas for core entity types
-- **Solution 2B**: Implement multi-stage pipeline for complex transformations
-- Add data quality validation
-
-### Phase 3: Long-term (3-6 months)
-
-- **Solution 4A**: Full schema evolution to typed Avro
-- Evaluate **Solution 3A** (ksqlDB) for simpler filters
-- Consider **Solution 3B** (self-managed Flink) for maximum control
-
-### Key Enterprise Considerations
-
-1. **Audit trails**: Every transformation must be logged
-2. **Data lineage**: Track data from source to destination
-3. **Schema governance**: Schema Registry with strict compatibility
-4. **Encryption**: TLS in transit, encryption at rest
-5. **Access control**: RBAC on all topics and compute resources
-6. **Disaster recovery**: Multi-region with documented RTO/RPO
-7. **Testing**: Regular DR drills and performance testing
