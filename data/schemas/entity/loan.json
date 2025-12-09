@@ -1,12 +1,12 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://example.com/schemas/schema.entity.loan.json",
+  "$id": "https://example.com/schemas/entity/loan.json",
   "title": "Loan Entity Schema",
   "description": "JSON schema for Loan entity in the event-based processing system",
   "type": "object",
   "properties": {
-    "entity": {
-      "$ref": "schema.entity.header.json"
+    "entityHeader": {
+      "$ref": "entity-header.json"
     },
     "id": {
       "type": "string",
@@ -65,16 +65,6 @@
       "multipleOf": 0.01,
       "description": "Monthly payment amount"
     },
-    "createdAt": {
-      "type": "string",
-      "format": "date-time",
-      "description": "ISO 8601 timestamp when the loan was created"
-    },
-    "updatedAt": {
-      "type": "string",
-      "format": "date-time",
-      "description": "ISO 8601 timestamp when the loan was last updated"
-    },
     "downPayment": {
       "type": "number",
       "minimum": 0,
@@ -89,11 +79,11 @@
     "payments": {
       "type": "array",
       "items": {
-        "$ref": "schema.entity.loan-payment.json"
+        "$ref": "loan-payment.json"
       },
       "description": "Array of payment records for this loan"
     }
   },
-  "required": ["entity", "id", "carId", "financialInstitution", "balance", "lastPaidDate", "loanAmount", "interestRate", "termMonths", "startDate", "status", "monthlyPayment", "createdAt", "updatedAt"],
+  "required": ["entityHeader", "id", "carId", "financialInstitution", "balance", "lastPaidDate", "loanAmount", "interestRate", "termMonths", "startDate", "status", "monthlyPayment"],
   "additionalProperties": false
 }

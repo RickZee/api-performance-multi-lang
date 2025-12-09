@@ -1,12 +1,12 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://example.com/schemas/schema.entity.part-used.json",
+  "$id": "https://example.com/schemas/entity/part-used.json",
   "title": "PartUsed Entity Schema",
   "description": "JSON schema for PartUsed entity in the event-based processing system",
   "type": "object",
   "properties": {
-    "entity": {
-      "$ref": "schema.entity.header.json"
+    "entityHeader": {
+      "$ref": "entity-header.json"
     },
     "id": {
       "type": "string",
@@ -34,18 +34,8 @@
       "minimum": 0,
       "multipleOf": 0.01,
       "description": "Cost of the part"
-    },
-    "createdAt": {
-      "type": "string",
-      "format": "date-time",
-      "description": "ISO 8601 timestamp when the part used record was created"
-    },
-    "updatedAt": {
-      "type": "string",
-      "format": "date-time",
-      "description": "ISO 8601 timestamp when the part used record was last updated"
     }
   },
-  "required": ["entity", "id", "serviceId", "partNumber", "partName", "quantity", "cost", "createdAt", "updatedAt"],
+  "required": ["entityHeader", "id", "serviceId", "partNumber", "partName", "quantity", "cost"],
   "additionalProperties": false
 }

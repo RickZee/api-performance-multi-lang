@@ -1,0 +1,19 @@
+{
+  "entityHeader": {
+    "entityId": "CAR-2025-003",
+    "entityType": "Car",
+    "createdAt": "2025-02-01T08:30:00Z",
+    "updatedAt": "2025-02-01T08:30:00Z"
+  },
+  "id": "CAR-2025-003",
+  "vin": "2HGFC2F57LH123456",
+  "make": "Honda",
+  "model": "Civic",
+  "year": 2023,
+  "color": "Midnight Blue",
+  "mileage": 15000,
+  "lastServiceDate": "2025-02-01T00:00:00Z",
+  "totalBalance": 0.0,
+  "lastLoanPaymentDate": "2025-02-01T00:00:00Z",
+  "owner": "Bob Johnson"
+}
