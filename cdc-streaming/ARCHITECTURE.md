@@ -14,6 +14,19 @@ Change Data Capture (CDC) streaming architecture that enables real-time event pr
 - **Code Generation**: Automated SQL generation from declarative filter configurations
 - **CI/CD Integration**: Infrastructure-as-code ready with validation and testing capabilities
 
+### Example Data Structures
+
+This architecture uses specific example structures for validation and testing:
+
+- **Car Entity**: [`data/entities/car/car-large.json`](../../data/entities/car/car-large.json) - Large car entity with all required fields
+- **Loan Created Event**: [`data/schemas/event/samples/loan-created-event.json`](../../data/schemas/event/samples/loan-created-event.json) - Complete loan created event structure
+
+These examples are used throughout the system for:
+- Filter configuration (specifically targeting `LoanCreated` events)
+- Test data generation
+- Entity validation
+- Schema documentation
+
 ## System Architecture Overview
 
 ### High-Level Data Flow
@@ -260,6 +273,7 @@ CREATE TABLE raw_business_events (
 );
 
 -- Sink: Write to filtered-loan-events topic
+-- Filters LoanCreated events based on data/schemas/event/samples/loan-created-event.json
 CREATE TABLE filtered_loan_events (
   eventHeader ROW<uuid STRING, eventName STRING, createdDate BIGINT, savedDate BIGINT, eventType STRING>,
   eventBody ROW<entities ARRAY<ROW<entityType STRING, entityId STRING, updatedAttributes MAP<STRING, STRING>>>>,

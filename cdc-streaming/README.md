@@ -18,6 +18,26 @@ The system captures database changes via CDC, streams them through Kafka, and us
 
 For comprehensive architecture documentation including detailed data flow diagrams, component deep dives, and how consumers interact with the system, see [ARCHITECTURE.md](ARCHITECTURE.md).
 
+## Example Data Structures
+
+This system uses specific example structures for car entities and loan created events:
+
+- **Car Entity Example**: [`data/entities/car/car-large.json`](../../data/entities/car/car-large.json)
+  - Large car entity structure with all required fields
+  - Used as reference for car entity validation and test data generation
+  
+- **Loan Created Event Example**: [`data/schemas/event/samples/loan-created-event.json`](../../data/schemas/event/samples/loan-created-event.json)
+  - Complete loan created event structure
+  - Used as reference for loan event filtering and validation
+
+These examples are used by:
+- Test data generation scripts (`scripts/generate-test-data-from-examples.sh`)
+- Entity validation scripts (`scripts/validate-entity-structure.py`)
+- Filter configuration (`flink-jobs/filters.yaml`) - specifically targets `LoanCreated` events
+- Schema documentation and examples
+
+For generating test data based on these examples, see the [Test Data Generation](#test-data-generation) section.
+
 ## Prerequisites
 
 ### For Docker Compose (Local Development)
@@ -207,7 +227,7 @@ Deploy the Flink SQL routing job to self-managed Flink cluster. This option is i
 # Submit the job via Flink REST API or SQL Client
 
 # Using Flink SQL Client (from Flink container)
-docker exec -it cdc-flink-jobmanager ./bin/sql-client.sh embedded -f /opt/flink/jobs/routing.sql
+docker exec -it cdc-flink-jobmanager ./bin/sql-client.sh embedded -f /opt/flink/jobs/routing-local-docker.sql
 
 # Or using Flink REST API
 curl -X POST http://localhost:8081/v1/jobs \
@@ -288,7 +308,7 @@ python scripts/validate-sql.py --sql flink-jobs/routing-generated.sql
 - Generated file: `flink-jobs/routing-generated.sql`
 
 **Option 2: Manual SQL**
-- Edit `flink-jobs/routing.sql` manually for custom queries
+- Edit `flink-jobs/routing-local-docker.sql` manually for custom queries
 - See `flink-jobs/routing-examples.sql` for comprehensive examples
 
 For detailed Flink SQL examples, query types, table definitions, and deployment patterns, see [ARCHITECTURE.md](ARCHITECTURE.md).
@@ -768,7 +788,24 @@ Access Confluent Cloud Console at: https://confluent.cloud
 
 ### Generate Test Events
 
-#### Using the Test Data Generation Script (Recommended)
+#### Using Example-Based Test Data Generation (Recommended for Loan Created Events)
+
+Generate test data based on the example structures (`car-large.json` and `loan-created-event.json`):
+
+```bash
+cd cdc-streaming/scripts
+
+# Generate test events from examples
+./generate-test-data-from-examples.sh
+```
+
+This script:
+- Reads `data/entities/car/car-large.json` for car entity structure
+- Reads `data/schemas/event/samples/loan-created-event.json` for loan created event structure
+- Generates events matching these exact structures
+- Sends events to the producer API
+
+#### Using the k6 Test Data Generation Script
 
 Use the provided script to generate test data using k6 and the Java REST API:
 

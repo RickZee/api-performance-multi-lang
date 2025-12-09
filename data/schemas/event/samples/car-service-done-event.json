@@ -1,0 +1,28 @@
+{
+  "eventHeader": {
+    "uuid": "550e8400-e29b-41d4-a716-446655440004",
+    "eventName": "Car Service Done",
+    "eventType": "CarServiceDone",
+    "createdDate": "2025-03-10T11:30:00Z",
+    "savedDate": "2025-03-10T11:30:04Z"
+  },
+  "entities": [
+    {
+      "entityHeader": {
+        "entityId": "SERVICE-2025-001",
+        "entityType": "ServiceRecord",
+        "createdAt": "2025-03-10T11:30:00Z",
+        "updatedAt": "2025-03-10T11:30:00Z"
+      },
+      "id": "SERVICE-2025-001",
+      "carId": "CAR-2025-001",
+      "serviceDate": "2025-03-10T11:30:00Z",
+      "amountPaid": 350.00,
+      "dealerId": "DEALER-001",
+      "dealerName": "Tesla Service Center - San Francisco",
+      "mileageAtService": 5000,
+      "description": "Regular maintenance service including tire rotation, brake inspection, and fluid top-up"
+    }
+  ]
+}
+

@@ -1,6 +1,10 @@
 -- Flink SQL Job for Event Filtering and Routing
 -- This file contains Flink SQL statements to filter and route events from raw-business-events
 -- to consumer-specific topics based on filter rules defined in filters.yaml
+--
+-- Example structures:
+-- - Car entity: data/entities/car/car-large.json
+-- - Loan created event: data/schemas/event/samples/loan-created-event.json
 
 -- ============================================================================
 -- Source Table: Raw Business Events from Kafka
@@ -40,6 +44,8 @@ CREATE TABLE raw_business_events (
 
 -- ============================================================================
 -- Sink Table: Filtered Loan Events
+-- Filters LoanCreated events based on data/schemas/event/samples/loan-created-event.json
+-- Example: Events where eventType='LoanCreated' and entityType='Loan'
 -- ============================================================================
 CREATE TABLE filtered_loan_events (
     `eventHeader` ROW<
@@ -150,24 +156,79 @@ CREATE TABLE filtered_car_events (
 );
 
 -- ============================================================================
+-- Sink Table: Filtered Loan Payment Events
+-- Filters LoanPaymentSubmitted events based on data/schemas/event/samples/loan-payment-submitted-event.json
+-- Example: Events where eventType='LoanPaymentSubmitted' and entityType='LoanPayment'
+-- ============================================================================
+CREATE TABLE filtered_loan_payment_events (
+    `eventHeader` ROW<
+        `uuid` STRING,
+        `eventName` STRING,
+        `createdDate` BIGINT,
+        `savedDate` BIGINT,
+        `eventType` STRING
+    >,
+    `eventBody` ROW<
+        `entities` ARRAY<ROW<
+            `entityType` STRING,
+            `entityId` STRING,
+            `updatedAttributes` MAP<STRING, STRING>
+        >>
+    >,
+    `sourceMetadata` ROW<
+        `table` STRING,
+        `operation` STRING,
+        `timestamp` BIGINT
+    >,
+    `filterMetadata` ROW<
+        `filterId` STRING,
+        `consumerId` STRING,
+        `filteredAt` BIGINT
+    >
+) WITH (
+    'connector' = 'kafka',
+    'topic' = 'filtered-loan-payment-events',
+    'properties.bootstrap.servers' = 'kafka:29092',
+    'format' = 'avro',
+    'avro.schema-registry.url' = 'http://schema-registry:8081',
+    'sink.partitioner' = 'fixed'
+);
+
+-- ============================================================================
 -- Filtering and Routing Queries
 -- ============================================================================
 
--- Route Loan-related events (LoanCreated, LoanPaymentSubmitted)
+-- Route Loan Created events (only LoanCreated, not LoanPaymentSubmitted)
 INSERT INTO filtered_loan_events
 SELECT 
     `eventHeader`,
     `eventBody`,
     `sourceMetadata`,
     ROW(
-        'loan-events-filter',
+        'loan-created-filter',
         'loan-consumer',
         UNIX_TIMESTAMP() * 1000
     ) AS `filterMetadata`
 FROM raw_business_events
 WHERE 
-    (`eventHeader`.`eventName` = 'LoanCreated' OR `eventHeader`.`eventName` = 'LoanPaymentSubmitted')
-    OR (`eventBody`.`entities`[1].`entityType` = 'Loan' OR `eventBody`.`entities`[1].`entityType` = 'LoanPayment');
+    (`eventHeader`.`eventType` = 'LoanCreated' AND `eventHeader`.`eventName` = 'Loan Created')
+    OR (`eventBody`.`entities`[1].`entityType` = 'Loan' AND `eventHeader`.`eventType` = 'LoanCreated');
+
+-- Route Loan Payment Submitted events
+INSERT INTO filtered_loan_payment_events
+SELECT 
+    `eventHeader`,
+    `eventBody`,
+    `sourceMetadata`,
+    ROW(
+        'loan-payment-filter',
+        'loan-consumer',
+        UNIX_TIMESTAMP() * 1000
+    ) AS `filterMetadata`
+FROM raw_business_events
+WHERE 
+    (`eventHeader`.`eventType` = 'LoanPaymentSubmitted' AND `eventHeader`.`eventName` = 'Loan Payment Submitted')
+    OR (`eventBody`.`entities`[1].`entityType` = 'LoanPayment' AND `eventHeader`.`eventType` = 'LoanPaymentSubmitted');
 
 -- Route Service-related events (CarServiceDone)
 INSERT INTO filtered_service_events

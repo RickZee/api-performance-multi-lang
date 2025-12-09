@@ -2,6 +2,9 @@
 # Generate Test Data for CDC Streaming Pipeline
 # This script uses k6 to send events to the Java REST API, which stores them in Postgres
 # The Postgres CDC connector will then capture these changes and stream them to Kafka
+#
+# For generating test data based on example structures (car-large.json and loan-created-event.json),
+# use: generate-test-data-from-examples.sh
 
 set -e
 
