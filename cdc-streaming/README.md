@@ -136,7 +136,7 @@ Create the necessary Kafka topics:
 This creates:
 - `raw-business-events` (3 partitions)
 
-**Note**: Filtered topics (`filtered-loan-events`, `filtered-service-events`, etc.) are automatically created by Flink when it writes to them for the first time. No manual creation is required.
+**Note**: Filtered topics (`filtered-loan-created-events`, `filtered-car-created-events`, `filtered-loan-payment-submitted-events`, `filtered-service-events`, etc.) are automatically created by Flink when it writes to them for the first time. No manual creation is required.
 
 #### Option B: Confluent Cloud (Production)
 
@@ -261,14 +261,14 @@ confluent kafka topic describe raw-business-events --output json | jq '.partitio
 confluent flink statement list --compute-pool <compute-pool-id>
 
 # Check filtered topics have messages
-confluent kafka topic describe filtered-loan-events --output json | jq '.partitions[].offset'
+confluent kafka topic describe filtered-loan-created-events --output json | jq '.partitions[].offset'
 
 # Check consumer groups
 confluent kafka consumer-group describe <consumer-group-name>
 
 # Consume sample messages
 confluent kafka topic consume raw-business-events --max-messages 10
-confluent kafka topic consume filtered-loan-events --max-messages 10
+confluent kafka topic consume filtered-loan-created-events --max-messages 10
 ```
 
 **Via Confluent Cloud Console:**
@@ -619,7 +619,7 @@ docker exec -it cdc-kafka kafka-console-consumer.sh \
 # Filtered loan events
 docker exec -it cdc-kafka kafka-console-consumer.sh \
   --bootstrap-server localhost:9092 \
-  --topic filtered-loan-events \
+  --topic filtered-loan-created-events \
   --from-beginning
 ```
 
@@ -630,11 +630,11 @@ Monitor topics via Confluent Cloud:
 ```bash
 # Consume messages via CLI
 confluent kafka topic consume raw-business-events --from-beginning
-confluent kafka topic consume filtered-loan-events --from-beginning
+confluent kafka topic consume filtered-loan-created-events --from-beginning
 
 # View topic details and metrics
 confluent kafka topic describe raw-business-events
-confluent kafka topic describe filtered-loan-events
+confluent kafka topic describe filtered-loan-created-events
 
 # View topic metrics (message count, throughput, etc.)
 confluent kafka topic describe raw-business-events --output json | jq '.metrics'

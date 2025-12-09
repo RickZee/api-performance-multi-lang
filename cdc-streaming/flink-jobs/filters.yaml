@@ -9,7 +9,7 @@ filters:
     name: "Loan Created Events Filter"
     description: "Filters LoanCreated events where loans reference car entities. Based on loan-created-event.json example structure."
     consumerId: loan-consumer
-    outputTopic: filtered-loan-events
+    outputTopic: filtered-loan-created-events
     conditions:
       - field: eventHeader.eventType
         operator: equals
@@ -22,12 +22,12 @@ filters:
         value: "Loan"
     enabled: true
 
-  # Loan Payment events filter (kept separate for LoanPaymentSubmitted events)
-  - id: loan-payment-filter
-    name: "Loan Payment Events Filter"
+  # Loan Payment Submitted events filter - specifically targets LoanPaymentSubmitted events
+  - id: loan-payment-submitted-filter
+    name: "Loan Payment Submitted Events Filter"
     description: "Filters LoanPaymentSubmitted events"
     consumerId: loan-consumer
-    outputTopic: filtered-loan-payment-events
+    outputTopic: filtered-loan-payment-submitted-events
     conditions:
       - field: eventHeader.eventType
         operator: equals
@@ -67,12 +67,12 @@ filters:
         value: 50000
     enabled: false  # Disabled by default, enable as needed
 
-  # Car creation events filter - based on data/entities/car/car-large.json structure
-  - id: car-creation-filter
-    name: "Car Creation Filter"
-    description: "Filters car creation events. Based on car-large.json example structure."
+  # Car Created events filter - based on data/entities/car/car-large.json structure
+  - id: car-created-filter
+    name: "Car Created Events Filter"
+    description: "Filters CarCreated events. Based on car-large.json example structure."
     consumerId: car-consumer
-    outputTopic: filtered-car-events
+    outputTopic: filtered-car-created-events
     conditions:
       - field: eventHeader.eventType
         operator: equals

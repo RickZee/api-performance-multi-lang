@@ -43,11 +43,11 @@ CREATE TABLE raw_business_events (
 );
 
 -- ============================================================================
--- Sink Table: Filtered Loan Events
+-- Sink Table: Filtered Loan Created Events
 -- Filters LoanCreated events based on data/schemas/event/samples/loan-created-event.json
 -- Example: Events where eventType='LoanCreated' and entityType='Loan'
 -- ============================================================================
-CREATE TABLE filtered_loan_events (
+CREATE TABLE filtered_loan_created_events (
     `eventHeader` ROW<
         `uuid` STRING,
         `eventName` STRING,
@@ -74,7 +74,7 @@ CREATE TABLE filtered_loan_events (
     >
 ) WITH (
     'connector' = 'kafka',
-    'topic' = 'filtered-loan-events',
+    'topic' = 'filtered-loan-created-events',
     'properties.bootstrap.servers' = 'kafka:29092',
     'format' = 'avro',
     'avro.schema-registry.url' = 'http://schema-registry:8081',
@@ -119,9 +119,10 @@ CREATE TABLE filtered_service_events (
 );
 
 -- ============================================================================
--- Sink Table: Filtered Car Events
+-- Sink Table: Filtered Car Created Events
+-- Filters CarCreated events based on data/schemas/event/samples/car-created-event.json
 -- ============================================================================
-CREATE TABLE filtered_car_events (
+CREATE TABLE filtered_car_created_events (
     `eventHeader` ROW<
         `uuid` STRING,
         `eventName` STRING,
@@ -148,7 +149,7 @@ CREATE TABLE filtered_car_events (
     >
 ) WITH (
     'connector' = 'kafka',
-    'topic' = 'filtered-car-events',
+    'topic' = 'filtered-car-created-events',
     'properties.bootstrap.servers' = 'kafka:29092',
     'format' = 'avro',
     'avro.schema-registry.url' = 'http://schema-registry:8081',
@@ -156,11 +157,11 @@ CREATE TABLE filtered_car_events (
 );
 
 -- ============================================================================
--- Sink Table: Filtered Loan Payment Events
+-- Sink Table: Filtered Loan Payment Submitted Events
 -- Filters LoanPaymentSubmitted events based on data/schemas/event/samples/loan-payment-submitted-event.json
 -- Example: Events where eventType='LoanPaymentSubmitted' and entityType='LoanPayment'
 -- ============================================================================
-CREATE TABLE filtered_loan_payment_events (
+CREATE TABLE filtered_loan_payment_submitted_events (
     `eventHeader` ROW<
         `uuid` STRING,
         `eventName` STRING,
@@ -187,7 +188,7 @@ CREATE TABLE filtered_loan_payment_events (
     >
 ) WITH (
     'connector' = 'kafka',
-    'topic' = 'filtered-loan-payment-events',
+    'topic' = 'filtered-loan-payment-submitted-events',
     'properties.bootstrap.servers' = 'kafka:29092',
     'format' = 'avro',
     'avro.schema-registry.url' = 'http://schema-registry:8081',
@@ -198,8 +199,8 @@ CREATE TABLE filtered_loan_payment_events (
 -- Filtering and Routing Queries
 -- ============================================================================
 
--- Route Loan Created events (only LoanCreated, not LoanPaymentSubmitted)
-INSERT INTO filtered_loan_events
+-- Route Loan Created events (filter by eventType: LoanCreated)
+INSERT INTO filtered_loan_created_events
 SELECT 
     `eventHeader`,
     `eventBody`,
@@ -210,25 +211,21 @@ SELECT
         UNIX_TIMESTAMP() * 1000
     ) AS `filterMetadata`
 FROM raw_business_events
-WHERE 
-    (`eventHeader`.`eventType` = 'LoanCreated' AND `eventHeader`.`eventName` = 'Loan Created')
-    OR (`eventBody`.`entities`[1].`entityType` = 'Loan' AND `eventHeader`.`eventType` = 'LoanCreated');
+WHERE `eventHeader`.`eventType` = 'LoanCreated';
 
--- Route Loan Payment Submitted events
-INSERT INTO filtered_loan_payment_events
+-- Route Loan Payment Submitted events (filter by eventType: LoanPaymentSubmitted)
+INSERT INTO filtered_loan_payment_submitted_events
 SELECT 
     `eventHeader`,
     `eventBody`,
     `sourceMetadata`,
     ROW(
-        'loan-payment-filter',
+        'loan-payment-submitted-filter',
         'loan-consumer',
         UNIX_TIMESTAMP() * 1000
     ) AS `filterMetadata`
 FROM raw_business_events
-WHERE 
-    (`eventHeader`.`eventType` = 'LoanPaymentSubmitted' AND `eventHeader`.`eventName` = 'Loan Payment Submitted')
-    OR (`eventBody`.`entities`[1].`entityType` = 'LoanPayment' AND `eventHeader`.`eventType` = 'LoanPaymentSubmitted');
+WHERE `eventHeader`.`eventType` = 'LoanPaymentSubmitted';
 
 -- Route Service-related events (CarServiceDone)
 INSERT INTO filtered_service_events
@@ -246,21 +243,19 @@ WHERE
     `eventHeader`.`eventName` = 'CarServiceDone'
     OR `eventBody`.`entities`[1].`entityType` = 'ServiceRecord';
 
--- Route Car creation events
-INSERT INTO filtered_car_events
+-- Route Car Created events (filter by eventType: CarCreated)
+INSERT INTO filtered_car_created_events
 SELECT 
     `eventHeader`,
     `eventBody`,
     `sourceMetadata`,
     ROW(
-        'car-creation-filter',
+        'car-created-filter',
         'car-consumer',
         UNIX_TIMESTAMP() * 1000
     ) AS `filterMetadata`
 FROM raw_business_events
-WHERE 
-    `eventHeader`.`eventName` = 'CarCreated'
-    AND `eventBody`.`entities`[1].`entityType` = 'Car';
+WHERE `eventHeader`.`eventType` = 'CarCreated';
 
 
 
