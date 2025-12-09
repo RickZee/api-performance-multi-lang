@@ -1,0 +1,30 @@
+{
+  "eventHeader": {
+    "uuid": "B14AA317-3192-43B0-BBDF-1CD0CABDCCC6",
+    "eventName": "Car Created",
+    "eventType": "CarCreated",
+    "createdDate": "2025-12-09T22:29:04Z",
+    "savedDate": "2025-12-09T22:29:04Z"
+  },
+  "entities": [
+    {
+      "entityHeader": {
+        "entityId": "CAR-20251209-129",
+        "entityType": "Car",
+        "createdAt": "2025-12-09T22:29:04Z",
+        "updatedAt": "2025-12-09T22:29:04Z"
+      },
+      "id": "CAR-20251209-129",
+      "vin": "5TDJKRFH4LS123456",
+      "make": "Tesla",
+      "model": "Model S",
+      "year": 2025,
+      "color": "Midnight Silver",
+      "mileage": 0,
+      "lastServiceDate": "2025-01-15T10:30:00Z",
+      "totalBalance": 0.0,
+      "lastLoanPaymentDate": "2025-01-15T10:30:00Z",
+      "owner": "John Doe"
+    }
+  ]
+}

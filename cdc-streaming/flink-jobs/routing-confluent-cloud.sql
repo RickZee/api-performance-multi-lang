@@ -45,7 +45,7 @@ CREATE TABLE `raw-business-events` (
 -- Note: Table name must match topic name exactly in Confluent Cloud
 -- Solution 1C: Keep Debezium format (flat structure, no nested ROWs)
 -- Note: Excluding __ts_ms to avoid Flink eventtime inference
-CREATE TABLE `filtered-loan-events` (
+CREATE TABLE `filtered-loan-created-events` (
     `id` STRING,
     `car_id` STRING,
     `entity_type` STRING,
@@ -59,12 +59,12 @@ CREATE TABLE `filtered-loan-events` (
     'value.format' = 'json-registry'
 );
 
--- Sink Table: Loan Payment Events Filter
+-- Sink Table: Loan Payment Submitted Events Filter
 -- Filters LoanPaymentSubmitted events based on data/schemas/event/samples/loan-payment-submitted-event.json
 -- Note: Table name must match topic name exactly in Confluent Cloud
 -- Solution 1C: Keep Debezium format (flat structure, no nested ROWs)
 -- Note: Excluding __ts_ms to avoid Flink eventtime inference
-CREATE TABLE `filtered-loan-payment-events` (
+CREATE TABLE `filtered-loan-payment-submitted-events` (
     `id` STRING,
     `car_id` STRING,
     `entity_type` STRING,
@@ -96,11 +96,12 @@ CREATE TABLE `filtered-service-events` (
     'value.format' = 'json-registry'
 );
 
--- Sink Table: Car Creation Filter
+-- Sink Table: Car Created Events Filter
+-- Filters CarCreated events based on data/schemas/event/samples/car-created-event.json
 -- Note: Table name must match topic name exactly in Confluent Cloud
 -- Solution 1C: Keep Debezium format (flat structure, no nested ROWs)
 -- Note: Excluding __ts_ms to avoid Flink eventtime inference
-CREATE TABLE `filtered-car-events` (
+CREATE TABLE `filtered-car-created-events` (
     `id` STRING,
     `car_id` STRING,
     `entity_type` STRING,
@@ -123,10 +124,10 @@ CREATE TABLE `filtered-car-events` (
 -- ============================================================================
 -- INSERT Statement: Loan Created Events Filter
 -- Statement Name: loan-created-filter-insert
--- Filters LoanCreated events where loans reference car entities. Based on loan-created-event.json example structure.
--- Solution 1C: Simple SELECT with filtering (no transformation)
+-- Filters LoanCreated events by eventType. Based on loan-created-event.json example structure.
+-- Solution 1C: Filter by eventType extracted from data JSON field
 -- ============================================================================
-INSERT INTO `filtered-loan-events`
+INSERT INTO `filtered-loan-created-events`
 SELECT 
     `id`,
     `car_id`,
@@ -137,16 +138,16 @@ SELECT
     `__op`,
     `__table`
 FROM `raw-business-events`
-WHERE (`entity_type` = 'Loan' AND `__op` = 'c')
+WHERE JSON_VALUE(`data`, '$.eventHeader.eventType') = 'LoanCreated' AND `__op` = 'c'
 ;
 
 -- ============================================================================
--- INSERT Statement: Loan Payment Events Filter
--- Statement Name: loan-payment-filter-insert
--- Filters LoanPaymentSubmitted events
--- Solution 1C: Simple SELECT with filtering (no transformation)
+-- INSERT Statement: Loan Payment Submitted Events Filter
+-- Statement Name: loan-payment-submitted-filter-insert
+-- Filters LoanPaymentSubmitted events by eventType
+-- Solution 1C: Filter by eventType extracted from data JSON field
 -- ============================================================================
-INSERT INTO `filtered-loan-payment-events`
+INSERT INTO `filtered-loan-payment-submitted-events`
 SELECT 
     `id`,
     `car_id`,
@@ -157,7 +158,7 @@ SELECT
     `__op`,
     `__table`
 FROM `raw-business-events`
-WHERE (`entity_type` = 'LoanPayment' AND `__op` = 'c')
+WHERE JSON_VALUE(`data`, '$.eventHeader.eventType') = 'LoanPaymentSubmitted' AND `__op` = 'c'
 ;
 
 -- ============================================================================
@@ -181,12 +182,12 @@ WHERE `entity_type` = 'ServiceRecord' AND `__op` = 'c'
 ;
 
 -- ============================================================================
--- INSERT Statement: Car Creation Filter
--- Statement Name: car-creation-filter-insert
--- Filters car creation events. Based on car-large.json example structure.
--- Solution 1C: Simple SELECT with filtering (no transformation)
+-- INSERT Statement: Car Created Events Filter
+-- Statement Name: car-created-filter-insert
+-- Filters CarCreated events by eventType. Based on car-created-event.json example structure.
+-- Solution 1C: Filter by eventType extracted from data JSON field
 -- ============================================================================
-INSERT INTO `filtered-car-events`
+INSERT INTO `filtered-car-created-events`
 SELECT 
     `id`,
     `car_id`,
@@ -197,5 +198,5 @@ SELECT
     `__op`,
     `__table`
 FROM `raw-business-events`
-WHERE (`entity_type` = 'Car' AND `__op` = 'c')
+WHERE JSON_VALUE(`data`, '$.eventHeader.eventType') = 'CarCreated' AND `__op` = 'c'
 ;

@@ -1,0 +1,23 @@
+{
+  "eventHeader": {
+    "uuid": "FDFAD3FA-3D86-4106-B881-54EF29723A3E",
+    "eventName": "Loan Payment Submitted",
+    "eventType": "LoanPaymentSubmitted",
+    "createdDate": "2026-01-13T22:29:04Z",
+    "savedDate": "2026-01-13T22:29:04Z"
+  },
+  "entities": [
+    {
+      "entityHeader": {
+        "entityId": "PAYMENT-20251209-946",
+        "entityType": "LoanPayment",
+        "createdAt": "2026-01-13T22:29:04Z",
+        "updatedAt": "2026-01-13T22:29:04Z"
+      },
+      "id": "PAYMENT-20251209-946",
+      "loanId": "LOAN-20251209-037",
+      "amount": 932.16,
+      "paymentDate": "2026-01-13T22:29:04Z"
+    }
+  ]
+}

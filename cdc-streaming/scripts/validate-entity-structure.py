@@ -49,12 +49,17 @@ class EntityValidator:
         """Load a JSON schema file.
         
         Args:
-            schema_path: Relative path to schema from data_dir
+            schema_path: Relative path to schema from schemas_dir (e.g., "entity/car.json")
             
         Returns:
             Parsed JSON schema
         """
-        full_path = self.data_dir / schema_path
+        # If path starts with "entity/" or "event/", use schemas_dir
+        if schema_path.startswith("entity/") or schema_path.startswith("event/"):
+            full_path = self.schemas_dir / schema_path
+        else:
+            full_path = self.data_dir / schema_path
+        
         if not full_path.exists():
             raise FileNotFoundError(f"Schema not found: {full_path}")
         
