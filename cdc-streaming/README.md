@@ -165,9 +165,18 @@ For detailed connector setup steps, configuration examples, and CI/CD alternativ
 
 ### 4. Deploy Flink SQL Jobs
 
-#### Option A: Confluent Cloud Flink (Recommended for Production)
+#### Option A: Confluent Cloud Flink (Recommended)
 
-Deploy Flink SQL statements to Confluent Cloud compute pools:
+Deploy Flink SQL statements to Confluent Cloud compute pools. This option provides:
+
+- **Managed Infrastructure**: No need to manage JobManager or TaskManager instances
+- **Auto-Scaling**: Automatically adjusts compute resources based on workload demands
+- **High Availability**: Automatic failover and data replication
+- **Built-in Integration**: Seamless integration with Schema Registry, RBAC, and private networking
+- **SQL-Based Deployment**: Deploy jobs as SQL statements without JAR files
+- **Built-in Monitoring**: Real-time metrics and execution logs
+
+Deploy Flink SQL statements:
 
 ```bash
 # Create compute pool
@@ -189,9 +198,9 @@ confluent flink statement describe ss-456789 \
 
 For detailed Flink SQL deployment steps, SQL configuration, and CI/CD alternatives (Terraform, REST API, GitHub Actions, Jenkins, Kubernetes), see [CONFLUENT_CLOUD_SETUP_GUIDE.md](CONFLUENT_CLOUD_SETUP_GUIDE.md).
 
-#### Option B: Self-Managed Flink (Docker Compose)
+#### Option B: Self-Managed Flink (Local Development Only)
 
-Deploy the Flink SQL routing job to self-managed Flink cluster:
+Deploy the Flink SQL routing job to self-managed Flink cluster. This option is intended for local development and testing only:
 
 ```bash
 # Copy SQL file to Flink job directory (already mounted in docker-compose)
@@ -210,8 +219,6 @@ curl -X POST http://localhost:8081/v1/jobs \
 }
 EOF
 ```
-
-**Note**: For production deployments, Confluent Cloud Flink is recommended for managed infrastructure, auto-scaling, and high availability.
 
 ### 5. Verify Pipeline
 
@@ -326,6 +333,105 @@ The **deeply nested data model** uses hierarchical JSON structures where attribu
 }
 ```
 
+**Database Schema (DDL):**
+```sql
+CREATE TABLE loan_entities (
+    id VARCHAR(255) PRIMARY KEY,
+    entity_type VARCHAR(255) NOT NULL,
+    created_at TIMESTAMP WITH TIME ZONE,
+    updated_at TIMESTAMP WITH TIME ZONE,
+    updated_attributes JSONB NOT NULL
+);
+
+-- Index for JSONB queries
+CREATE INDEX idx_loan_entities_updated_attributes_gin 
+    ON loan_entities USING GIN (updated_attributes);
+
+-- Example query accessing nested structure
+SELECT 
+    id,
+    updated_attributes->'loan'->>'loanAmount' as loan_amount,
+    updated_attributes->'borrower'->>'name' as borrower_name
+FROM loan_entities
+WHERE (updated_attributes->'loan'->>'loanAmount')::numeric > 100000;
+```
+
+**Data Transfer Object (DTO):**
+```typescript
+// TypeScript/JavaScript example
+interface LoanAttributes {
+  loanAmount: number;
+  balance: number;
+  status: string;
+}
+
+interface BorrowerAttributes {
+  name: string;
+  creditScore: number;
+}
+
+interface UpdatedAttributes {
+  loan: LoanAttributes;
+  borrower: BorrowerAttributes;
+}
+
+interface EntityUpdate {
+  entityType: string;
+  entityId: string;
+  updatedAttributes: UpdatedAttributes;
+}
+
+// Go example
+type LoanAttributes struct {
+    LoanAmount int64  `json:"loanAmount"`
+    Balance    int64  `json:"balance"`
+    Status     string `json:"status"`
+}
+
+type BorrowerAttributes struct {
+    Name       string `json:"name"`
+    CreditScore int   `json:"creditScore"`
+}
+
+type UpdatedAttributes struct {
+    Loan     LoanAttributes     `json:"loan"`
+    Borrower BorrowerAttributes `json:"borrower"`
+}
+
+type EntityUpdate struct {
+    EntityType        string           `json:"entityType"`
+    EntityID          string           `json:"entityId"`
+    UpdatedAttributes UpdatedAttributes `json:"updatedAttributes"`
+}
+
+// Java example
+public class LoanAttributes {
+    private Long loanAmount;
+    private Long balance;
+    private String status;
+    // getters and setters
+}
+
+public class BorrowerAttributes {
+    private String name;
+    private Integer creditScore;
+    // getters and setters
+}
+
+public class UpdatedAttributes {
+    private LoanAttributes loan;
+    private BorrowerAttributes borrower;
+    // getters and setters
+}
+
+public class EntityUpdate {
+    private String entityType;
+    private String entityId;
+    private UpdatedAttributes updatedAttributes;
+    // getters and setters
+}
+```
+
 **Characteristics:**
 - Preserves type information (numbers, booleans, strings)
 - Maintains logical grouping of related attributes
@@ -353,6 +459,79 @@ The **flat data model** uses a key-value map structure where all values are stri
     "borrower.creditScore": "750"
   }
 }
+```
+
+**Database Schema (DDL):**
+```sql
+CREATE TABLE loan_entities (
+    id VARCHAR(255) PRIMARY KEY,
+    entity_type VARCHAR(255) NOT NULL,
+    created_at TIMESTAMP WITH TIME ZONE,
+    updated_at TIMESTAMP WITH TIME ZONE,
+    updated_attributes JSONB NOT NULL
+);
+
+-- Index for JSONB queries
+CREATE INDEX idx_loan_entities_updated_attributes_gin 
+    ON loan_entities USING GIN (updated_attributes);
+
+-- Example query accessing flat structure
+SELECT 
+    id,
+    updated_attributes->>'loan.loanAmount' as loan_amount,
+    updated_attributes->>'borrower.name' as borrower_name
+FROM loan_entities
+WHERE (updated_attributes->>'loan.loanAmount')::numeric > 100000;
+```
+
+**Data Transfer Object (DTO):**
+```typescript
+// TypeScript/JavaScript example
+interface EntityUpdate {
+  entityType: string;
+  entityId: string;
+  updatedAttributes: Record<string, string>; // Map<string, string>
+}
+
+// Example usage:
+const entity: EntityUpdate = {
+  entityType: "Loan",
+  entityId: "loan-123",
+  updatedAttributes: {
+    "loan.loanAmount": "50000",
+    "loan.balance": "50000",
+    "loan.status": "active",
+    "borrower.name": "John Doe",
+    "borrower.creditScore": "750"
+  }
+};
+
+// Go example
+type EntityUpdate struct {
+    EntityType        string            `json:"entityType"`
+    EntityID          string            `json:"entityId"`
+    UpdatedAttributes map[string]string `json:"updatedAttributes"`
+}
+
+// Java example
+public class EntityUpdate {
+    private String entityType;
+    private String entityId;
+    private Map<String, String> updatedAttributes; // All values are strings
+    // getters and setters
+}
+
+// Example usage:
+EntityUpdate entity = new EntityUpdate();
+entity.setEntityType("Loan");
+entity.setEntityId("loan-123");
+Map<String, String> attrs = new HashMap<>();
+attrs.put("loan.loanAmount", "50000");
+attrs.put("loan.balance", "50000");
+attrs.put("loan.status", "active");
+attrs.put("borrower.name", "John Doe");
+attrs.put("borrower.creditScore", "750");
+entity.setUpdatedAttributes(attrs);
 ```
 
 **Characteristics:**

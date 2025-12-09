@@ -1,0 +1,43 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.com/schemas/schema.event.json",
+  "title": "Event Schema",
+  "description": "Schema for events in the event-based processing system, consisting of an event header and an array of entities",
+  "type": "object",
+  "properties": {
+    "eventHeader": {
+      "$ref": "schema.event-header.json",
+      "description": "Event header containing metadata about the event"
+    },
+    "entities": {
+      "type": "array",
+      "description": "Array of entities affected by this event",
+      "items": {
+        "oneOf": [
+          {
+            "$ref": "schema.entity.car.json"
+          },
+          {
+            "$ref": "schema.entity.loan.json"
+          },
+          {
+            "$ref": "schema.entity.loan-payment.json"
+          },
+          {
+            "$ref": "schema.entity.service-record.json"
+          },
+          {
+            "$ref": "schema.entity.service-details.json"
+          },
+          {
+            "$ref": "schema.entity.part-used.json"
+          }
+        ]
+      },
+      "minItems": 1
+    }
+  },
+  "required": ["eventHeader", "entities"],
+  "additionalProperties": false
+}
+

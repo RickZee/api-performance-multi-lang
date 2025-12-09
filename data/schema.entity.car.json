@@ -1,12 +1,12 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://example.com/schemas/entity.schema.car.json",
+  "$id": "https://example.com/schemas/schema.entity.car.json",
   "title": "Car Entity Schema",
   "description": "JSON schema for Car entity in the event-based processing system",
   "type": "object",
   "properties": {
     "entity": {
-      "$ref": "entity.schema.header.json"
+      "$ref": "schema.entity.header.json"
     },
     "id": {
       "type": "string",
@@ -74,14 +74,14 @@
     "serviceRecords": {
       "type": "array",
       "items": {
-        "$ref": "entity.schema.service-record.json"
+        "$ref": "schema.entity.service-record.json"
       },
       "description": "Array of service records for this car"
     },
     "loans": {
       "type": "array",
       "items": {
-        "$ref": "entity.schema.loan.json"
+        "$ref": "schema.entity.loan.json"
       },
       "description": "Array of loans associated with this car"
     }
