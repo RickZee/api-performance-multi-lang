@@ -14,25 +14,9 @@ This CDC streaming system captures changes from PostgreSQL database tables and s
 
 ## Architecture
 
-### Data Flow
+The system captures database changes via CDC, streams them through Kafka, and uses Flink SQL to filter and route events to consumer-specific topics. Key components include Confluent Platform (Kafka, Schema Registry, Kafka Connect), Flink for stream processing, and Debezium-based PostgreSQL CDC connector.
 
-```
-[PostgreSQL Entity Tables] 
-  → [Confluent Postgres Source Connector (Debezium)] 
-  → [Kafka: raw-business-events topic]
-  → [Flink SQL Jobs (filtering/routing)]
-  → [Consumer-specific Kafka topics]
-  → [Example Consumers]
-```
-
-### Components
-
-- **Confluent Platform**: Kafka, Schema Registry, Kafka Connect, Control Center
-- **Flink Cluster**: JobManager, TaskManager, Flink SQL for stream processing
-- **Postgres Source Connector**: Debezium-based CDC connector
-- **Consumer Applications**: Process filtered events from consumer-specific topics
-
-For detailed architecture information, component deep dives, and how consumers interact with the system, see [ARCHITECTURE.md](ARCHITECTURE.md).
+For comprehensive architecture documentation including detailed data flow diagrams, component deep dives, and how consumers interact with the system, see [ARCHITECTURE.md](ARCHITECTURE.md).
 
 ## Prerequisites
 
@@ -316,6 +300,107 @@ Edit `connectors/postgres-source-connector.json` to modify connector configurati
   }
 }
 ```
+
+## Data Model Comparison
+
+This system supports two different data model approaches for representing entity attributes: **deeply nested** and **flat**. Understanding the differences is important for filtering, processing, and schema design decisions.
+
+### Deeply Nested Data Model
+
+The **deeply nested data model** uses hierarchical JSON structures where attributes can contain nested objects and arrays. This is the natural structure used by producer APIs when creating events.
+
+**Example Structure:**
+```json
+{
+  "updatedAttributes": {
+    "loan": {
+      "loanAmount": 50000,
+      "balance": 50000,
+      "status": "active"
+    },
+    "borrower": {
+      "name": "John Doe",
+      "creditScore": 750
+    }
+  }
+}
+```
+
+**Characteristics:**
+- Preserves type information (numbers, booleans, strings)
+- Maintains logical grouping of related attributes
+- Supports complex nested structures
+- Natural representation for API consumers
+- Stored as JSONB in PostgreSQL
+
+**Limitations:**
+- Cannot directly filter on nested paths in Flink SQL with `MAP<STRING, STRING>` type
+- Requires JSON parsing functions for nested field access
+- More complex query syntax for filtering
+
+### Flat Data Model
+
+The **flat data model** uses a key-value map structure where all values are strings and nested paths are represented using dot notation in keys.
+
+**Example Structure:**
+```json
+{
+  "updatedAttributes": {
+    "loan.loanAmount": "50000",
+    "loan.balance": "50000",
+    "loan.status": "active",
+    "borrower.name": "John Doe",
+    "borrower.creditScore": "750"
+  }
+}
+```
+
+**Characteristics:**
+- Compatible with Flink SQL `MAP<STRING, STRING>` type
+- Simple filtering syntax: `updatedAttributes['loan.loanAmount']`
+- Direct key-value access without JSON parsing
+- All values are strings (type information lost)
+- Requires flattening transformation at API or CDC level
+
+**Limitations:**
+- Loss of type information (everything becomes strings)
+- Requires type casting for numeric comparisons
+- Breaking change to API contract if implemented at API level
+- Less intuitive for API consumers
+
+### Current Implementation
+
+The current implementation uses a **hybrid approach**:
+
+1. **Producer APIs**: Accept deeply nested JSON structures
+2. **PostgreSQL Storage**: Stores as JSONB (preserves nested structure)
+3. **CDC Capture**: Debezium captures the JSONB as-is
+4. **Flink SQL Processing**: Uses `MAP<STRING, STRING>` for `updatedAttributes`, which requires:
+   - Flattening nested structures before filtering, OR
+   - Using JSON parsing functions for nested field access
+
+**Schema Definition:**
+- `schemas/raw-event.avsc`: Defines `updatedAttributes` as `MAP<STRING, STRING>`
+- `schemas/filtered-event.avsc`: Same structure with added `filterMetadata`
+
+### Trade-offs
+
+| Aspect | Deeply Nested | Flat |
+|--------|---------------|------|
+| **Type Safety** | Preserves types | All strings |
+| **Filtering Simplicity** | Requires JSON parsing | Direct key access |
+| **API Compatibility** | Natural structure | Breaking change |
+| **Performance** | JSON parsing overhead | Direct access |
+| **Flexibility** | Supports any structure | Limited to key-value |
+| **Schema Evolution** | Flexible | Key naming conventions |
+
+### Recommendations
+
+- **For New Implementations**: Consider flattening at the API level if filtering performance is critical and you can coordinate API versioning
+- **For Existing Systems**: Use JSON parsing functions in Flink SQL to access nested fields, preserving API compatibility
+- **For Type Safety**: Consider Avro schema-first design with explicit nested record types (see `confluent-flink-cdc-problems.md` for details)
+
+For detailed solutions, workarounds, and implementation patterns addressing nested vs flat data model challenges, see [confluent-flink-cdc-problems.md](confluent-flink-cdc-problems.md).
 
 ## Monitoring
 
@@ -850,15 +935,7 @@ This CDC streaming system integrates with:
 
 ## Production Considerations
 
-For production deployment:
-
-1. **Multi-Region**: Use Confluent Cluster Linking for multi-region replication
-2. **Security**: Enable SASL/SSL for Kafka, use IAM roles for AWS
-3. **Monitoring**: Integrate with ELK stack for centralized logging
-4. **CI/CD**: Deploy Flink jobs via Jenkins pipelines with Terraform or REST API
-5. **Schema Evolution**: Use Schema Registry compatibility modes for schema evolution
-6. **Backup**: Configure Flink savepoints for job state backup
-7. **Scaling**: Adjust Flink parallelism and Kafka partitions based on load
+Production deployment requires careful consideration of multi-region setup, security, monitoring, CI/CD, schema evolution, backup strategies, and scaling. For comprehensive production deployment considerations including disaster recovery procedures, performance tuning strategies, and detailed implementation guidance, see [ARCHITECTURE.md](ARCHITECTURE.md) (specifically the "Production Deployment Considerations" section).
 
 ## References
 

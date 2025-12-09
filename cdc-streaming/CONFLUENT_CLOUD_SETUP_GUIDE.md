@@ -578,7 +578,7 @@ Confluent Cloud Flink uses a **different SQL dialect** than Apache Flink:
 |---------|--------------|-----------------|
 | Connector | `'kafka'` | `'confluent'` |
 | Topic specification | `'topic' = 'name'` | Table name = topic name |
-| Processing time | `PROCTIME()` | ❌ Not supported |
+| Processing time | `PROCTIME()` | Not supported |
 | Formats | `'json'`, `'avro'` | Requires Schema Registry or specific configuration |
 
 **Recommendation**: Use the **Confluent Cloud Web Console SQL Workspace** for initial development. It provides:
@@ -1150,7 +1150,7 @@ SELECT * FROM `cdc-raw.public.car_entities`;
 |---------|--------------|-----------------|
 | Connector | `'kafka'` | `'confluent'` |
 | Topic config | `'topic' = 'name'` | Table name IS topic name |
-| PROCTIME() | ✅ Supported | ❌ Not supported |
+| PROCTIME() | Supported | Not supported |
 | JSON format | Simple | Needs Schema Registry or special config |
 
 **Impact**: SQL written for Apache Flink often won't work in Confluent Cloud without significant changes.
@@ -1203,15 +1203,15 @@ SELECT * FROM pg_replication_slots;
 ### Working CDC Pipeline Components
 
 **What's Proven to Work**:
-1. ✅ PostgreSQL (Docker) → Debezium → Kafka Connect → Confluent Cloud Topics
-2. ✅ JSON format for CDC data (simpler than Avro for initial capture)
-3. ✅ ExtractNewRecordState transform to flatten Debezium envelope
-4. ✅ Direct consumption from topics to verify data flow
+1. PostgreSQL (Docker) → Debezium → Kafka Connect → Confluent Cloud Topics
+2. JSON format for CDC data (simpler than Avro for initial capture)
+3. ExtractNewRecordState transform to flatten Debezium envelope
+4. Direct consumption from topics to verify data flow
 
 **What Requires More Setup**:
-1. ⚠️ Avro format requires schema compatibility between Debezium and custom schemas
-2. ⚠️ Flink SQL deployment via CLI (Web Console is much easier)
-3. ⚠️ Complex Flink transformations with nested JSON parsing
+1. Avro format requires schema compatibility between Debezium and custom schemas
+2. Flink SQL deployment via CLI (Web Console is much easier)
+3. Complex Flink transformations with nested JSON parsing
 
 ### Recommended Development Flow
 
@@ -1307,15 +1307,15 @@ After completing basic setup:
 
 This guide covers the complete setup process for Confluent Cloud:
 
-1. ✅ Account creation and authentication
-2. ✅ Environment and cluster setup
-3. ✅ Topic creation
-4. ✅ Schema Registry configuration
-5. ✅ Flink compute pool setup
-6. ✅ Connector deployment
-7. ✅ Flink SQL configuration and deployment
-8. ✅ Testing and verification
-9. ✅ Troubleshooting common issues
+1. Account creation and authentication
+2. Environment and cluster setup
+3. Topic creation
+4. Schema Registry configuration
+5. Flink compute pool setup
+6. Connector deployment
+7. Flink SQL configuration and deployment
+8. Testing and verification
+9. Troubleshooting common issues
 
 After completing this guide, your CDC streaming pipeline will be fully operational in Confluent Cloud with:
 - Real-time CDC from PostgreSQL
