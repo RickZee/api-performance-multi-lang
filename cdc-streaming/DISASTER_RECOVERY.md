@@ -11,6 +11,7 @@ This document provides comprehensive disaster recovery procedures for the CDC st
 When using **Confluent Cloud** (managed service), the following disaster recovery aspects are handled automatically:
 
 #### Kafka Infrastructure
+
 - **Automatic Broker Failover**: Brokers automatically failover within the same region (multi-zone deployment)
 - **Automatic Replication**: 3x replication is configured and managed automatically
 - **Automatic Scaling**: Brokers scale up/down based on load
@@ -19,18 +20,21 @@ When using **Confluent Cloud** (managed service), the following disaster recover
 - **Zero-Downtime Updates**: Rolling updates without service interruption
 
 #### Schema Registry
+
 - **High Availability**: Schema Registry is automatically replicated across zones
 - **Automatic Failover**: Failover handled automatically within region
 - **Schema Backups**: Schema versions are automatically backed up
 - **Multi-Region Replication**: Available with Stream Governance Advanced package
 
 #### Cluster Linking (Multi-Region)
+
 - **Automatic Replication**: Cluster Linking automatically replicates topics between regions
 - **Lag Monitoring**: Built-in lag monitoring and alerting
 - **Exactly-Once Semantics**: Automatic exactly-once configuration
 - **Connection Management**: Automatic connection health monitoring
 
 #### Monitoring and Alerting
+
 - **Built-in Metrics**: Comprehensive metrics dashboard in Confluent Cloud Console
 - **Automatic Alerts**: Pre-configured alerts for critical issues
 - **Health Dashboards**: Real-time health monitoring
@@ -40,18 +44,21 @@ When using **Confluent Cloud** (managed service), the following disaster recover
 Even with Confluent Cloud, you are responsible for:
 
 #### Application-Level Recovery
+
 - **Flink Jobs**: Job configuration, checkpoint management, savepoint creation
 - **Connectors**: Connector configuration, offset management, error handling
 - **Consumer Applications**: Application code, consumer group management, offset commits
 - **Custom Monitoring**: Application-specific metrics and alerting
 
 #### Data Backup and Recovery
+
 - **Flink State**: Savepoint creation and management
 - **Connector Offsets**: Backup and restore of connector offsets
 - **Application State**: Any application-level state outside of Kafka
 - **Long-Term Backups**: Snapshot backups for compliance (beyond replication)
 
 #### Multi-Region Failover
+
 - **DNS/Load Balancer Updates**: Routing traffic to secondary region
 - **Client Configuration**: Updating bootstrap servers in applications
 - **Flink Job Deployment**: Deploying jobs to secondary region compute pools
@@ -59,6 +66,7 @@ Even with Confluent Cloud, you are responsible for:
 - **Failover Automation**: Custom scripts for automated failover
 
 #### Testing and Validation
+
 - **Disaster Recovery Drills**: Regular testing of failover procedures
 - **Data Integrity Verification**: Post-recovery data validation
 - **Performance Testing**: Ensuring secondary region can handle load

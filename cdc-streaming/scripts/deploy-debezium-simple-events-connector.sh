@@ -81,3 +81,4 @@ echo "  Delete:         curl -X DELETE $KAFKA_CONNECT_URL/connectors/$CONNECTOR_
 echo ""
 
 
+
