@@ -1,0 +1,19 @@
+{
+  "entityHeader": {
+    "entityId": "CAR-2025-002",
+    "entityType": "Car",
+    "createdAt": "2025-03-15T10:20:00Z",
+    "updatedAt": "2025-03-15T10:20:00Z"
+  },
+  "id": "CAR-2025-002",
+  "vin": "4T1BF1AK5CU123789",
+  "make": "Toyota",
+  "model": "Camry",
+  "year": 2024,
+  "color": "Pearl White",
+  "mileage": 25000,
+  "lastServiceDate": "2025-03-15T00:00:00Z",
+  "totalBalance": 0.0,
+  "lastLoanPaymentDate": "2025-03-15T00:00:00Z",
+  "owner": "Jane Smith"
+}

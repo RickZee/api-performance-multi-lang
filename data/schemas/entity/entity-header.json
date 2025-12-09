@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://example.com/schemas/schema.entity.header.json",
+  "$id": "https://example.com/schemas/entity/entity-header.json",
   "title": "Entity Header Schema",
   "description": "Common entity header/metadata structure for all entities in the event-based processing system",
   "type": "object",

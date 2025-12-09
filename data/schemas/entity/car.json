@@ -1,12 +1,12 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://example.com/schemas/schema.entity.car.json",
+  "$id": "https://example.com/schemas/entity/car.json",
   "title": "Car Entity Schema",
   "description": "JSON schema for Car entity in the event-based processing system",
   "type": "object",
   "properties": {
-    "entity": {
-      "$ref": "schema.entity.header.json"
+    "entityHeader": {
+      "$ref": "entity-header.json"
     },
     "id": {
       "type": "string",
@@ -61,31 +61,21 @@
       "type": "string",
       "description": "Name of the car owner"
     },
-    "createdAt": {
-      "type": "string",
-      "format": "date-time",
-      "description": "ISO 8601 timestamp when the car record was created"
-    },
-    "updatedAt": {
-      "type": "string",
-      "format": "date-time",
-      "description": "ISO 8601 timestamp when the car record was last updated"
-    },
     "serviceRecords": {
       "type": "array",
       "items": {
-        "$ref": "schema.entity.service-record.json"
+        "$ref": "service-record.json"
       },
       "description": "Array of service records for this car"
     },
     "loans": {
       "type": "array",
       "items": {
-        "$ref": "schema.entity.loan.json"
+        "$ref": "loan.json"
       },
       "description": "Array of loans associated with this car"
     }
   },
-  "required": ["entity", "id", "vin", "make", "model", "year", "color", "mileage", "lastServiceDate", "totalBalance", "lastLoanPaymentDate", "owner", "createdAt", "updatedAt"],
+  "required": ["entityHeader", "id", "vin", "make", "model", "year", "color", "mileage", "lastServiceDate", "totalBalance", "lastLoanPaymentDate", "owner"],
   "additionalProperties": false
 }

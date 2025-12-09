@@ -1,0 +1,108 @@
+{
+  "CarCreated": {
+    "eventHeader": {
+      "uuid": "${uuid}",
+      "eventName": "Car Created",
+      "createdDate": "${timestamp}",
+      "savedDate": "${timestamp}"
+    },
+    "entities": [
+      {
+        "entityHeader": {
+          "entityId": "${carId}",
+          "entityType": "Car",
+          "createdAt": "${timestamp}",
+          "updatedAt": "${timestamp}"
+        },
+        "id": "${carId}",
+        "vin": "${vin}",
+        "make": "${make}",
+        "model": "${model}",
+        "year": ${year},
+        "color": "${color}",
+        "mileage": ${mileage},
+        "lastServiceDate": "${timestamp}",
+        "totalBalance": ${totalBalance},
+        "lastLoanPaymentDate": "${timestamp}",
+        "owner": "${owner}"
+      }
+    ]
+  },
+  "LoanCreated": {
+    "eventHeader": {
+      "uuid": "${uuid}",
+      "eventName": "Loan Created",
+      "createdDate": "${timestamp}",
+      "savedDate": "${timestamp}"
+    },
+    "entities": [
+      {
+        "entityHeader": {
+          "entityId": "${loanId}",
+          "entityType": "Loan",
+          "createdAt": "${timestamp}",
+          "updatedAt": "${timestamp}"
+        },
+        "id": "${loanId}",
+        "carId": "${carId}",
+        "financialInstitution": "${financialInstitution}",
+        "balance": ${balance},
+        "lastPaidDate": "${timestamp}",
+        "loanAmount": ${loanAmount},
+        "interestRate": ${interestRate},
+        "termMonths": ${termMonths},
+        "startDate": "${timestamp}",
+        "status": "active",
+        "monthlyPayment": ${monthlyPayment}
+      }
+    ]
+  },
+  "LoanPaymentSubmitted": {
+    "eventHeader": {
+      "uuid": "${uuid}",
+      "eventName": "Loan Payment Submitted",
+      "createdDate": "${timestamp}",
+      "savedDate": "${timestamp}"
+    },
+    "entities": [
+      {
+        "entityHeader": {
+          "entityId": "${paymentId}",
+          "entityType": "LoanPayment",
+          "createdAt": "${timestamp}",
+          "updatedAt": "${timestamp}"
+        },
+        "id": "${paymentId}",
+        "loanId": "${loanId}",
+        "amount": ${amount},
+        "paymentDate": "${timestamp}"
+      }
+    ]
+  },
+  "CarServiceDone": {
+    "eventHeader": {
+      "uuid": "${uuid}",
+      "eventName": "Car Service Done",
+      "createdDate": "${timestamp}",
+      "savedDate": "${timestamp}"
+    },
+    "entities": [
+      {
+        "entityHeader": {
+          "entityId": "${serviceId}",
+          "entityType": "ServiceRecord",
+          "createdAt": "${timestamp}",
+          "updatedAt": "${timestamp}"
+        },
+        "id": "${serviceId}",
+        "carId": "${carId}",
+        "serviceDate": "${timestamp}",
+        "amountPaid": ${amountPaid},
+        "dealerId": "${dealerId}",
+        "dealerName": "${dealerName}",
+        "mileageAtService": ${mileageAtService},
+        "description": "${description}"
+      }
+    ]
+  }
+}

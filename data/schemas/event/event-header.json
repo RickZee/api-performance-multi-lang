@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://example.com/schemas/schema.event-header.json",
+  "$id": "https://example.com/schemas/event/event-header.json",
   "title": "Event Header Schema",
   "description": "Common event header/metadata structure for all events in the event-based processing system",
   "type": "object",
@@ -12,8 +12,7 @@
     },
     "eventName": {
       "type": "string",
-      "enum": ["CarCreated", "LoanCreated", "LoanPaymentSubmitted", "CarServiceDone"],
-      "description": "Name of the event type"
+      "description": "Readable event description (e.g., 'Car Created', 'Loan Created', 'Loan Payment Submitted', 'Car Service Done')"
     },
     "createdDate": {
       "type": "string",
@@ -27,11 +26,10 @@
     },
     "eventType": {
       "type": "string",
-      "enum": ["CarCreated", "LoanCreated", "LoanPaymentSubmitted", "CarServiceDone"],
-      "description": "Type of the event (typically matches eventName)"
+      "description": "Readable event description (deprecated: use eventName instead)"
     }
   },
-  "required": ["uuid", "eventName", "createdDate", "savedDate", "eventType"],
+  "required": ["uuid", "eventName", "createdDate", "savedDate"],
   "additionalProperties": false
 }
 
