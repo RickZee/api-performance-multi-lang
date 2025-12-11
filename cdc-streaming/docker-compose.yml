@@ -1,163 +1,16 @@
 version: '3.8'
 
 services:
-  # Zookeeper
-  zookeeper:
-    image: confluentinc/cp-zookeeper:7.5.0
-    container_name: cdc-zookeeper
-    hostname: zookeeper
-    environment:
-      ZOOKEEPER_CLIENT_PORT: 2181
-      ZOOKEEPER_TICK_TIME: 2000
-    ports:
-      - "2181:2181"
-    networks:
-      - cdc-network
-    healthcheck:
-      test: ["CMD", "nc", "-z", "localhost", "2181"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-
-  # Kafka Broker
-  kafka:
-    image: confluentinc/cp-kafka:7.5.0
-    container_name: cdc-kafka
-    hostname: kafka
-    depends_on:
-      zookeeper:
-        condition: service_healthy
-    ports:
-      - "9092:9092"
-      - "9101:9101"
-    environment:
-      KAFKA_BROKER_ID: 1
-      KAFKA_ZOOKEEPER_CONNECT: 'zookeeper:2181'
-      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,PLAINTEXT_INTERNAL:PLAINTEXT
-      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://localhost:9092,PLAINTEXT_INTERNAL://kafka:29092
-      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
-      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
-      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
-      KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0
-      KAFKA_JMX_PORT: 9101
-      KAFKA_JMX_HOSTNAME: localhost
-      KAFKA_AUTO_CREATE_TOPICS_ENABLE: 'true'
-    networks:
-      - cdc-network
-    healthcheck:
-      test: ["CMD", "kafka-broker-api-versions", "--bootstrap-server", "localhost:9092"]
-      interval: 10s
-      timeout: 10s
-      retries: 5
-
-  # Schema Registry
-  schema-registry:
-    image: confluentinc/cp-schema-registry:7.5.0
-    container_name: cdc-schema-registry
-    hostname: schema-registry
-    depends_on:
-      kafka:
-        condition: service_healthy
-    ports:
-      - "8081:8081"
-    environment:
-      SCHEMA_REGISTRY_HOST_NAME: schema-registry
-      SCHEMA_REGISTRY_KAFKASTORE_BOOTSTRAP_SERVERS: 'kafka:29092'
-      SCHEMA_REGISTRY_LISTENERS: http://0.0.0.0:8081
-    networks:
-      - cdc-network
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8081/subjects"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-
-  # Kafka Connect
-  kafka-connect:
-    image: confluentinc/cp-kafka-connect:7.5.0
-    container_name: cdc-kafka-connect
-    hostname: kafka-connect
-    depends_on:
-      kafka:
-        condition: service_healthy
-      schema-registry:
-        condition: service_healthy
-    ports:
-      - "8083:8083"
-    environment:
-      CONNECT_BOOTSTRAP_SERVERS: 'kafka:29092'
-      CONNECT_REST_ADVERTISED_HOST_NAME: kafka-connect
-      CONNECT_REST_PORT: 8083
-      CONNECT_GROUP_ID: compose-connect-group
-      CONNECT_CONFIG_STORAGE_TOPIC: docker-connect-configs
-      CONNECT_CONFIG_STORAGE_REPLICATION_FACTOR: 1
-      CONNECT_OFFSET_FLUSH_INTERVAL_MS: 10000
-      CONNECT_OFFSET_STORAGE_TOPIC: docker-connect-offsets
-      CONNECT_OFFSET_STORAGE_REPLICATION_FACTOR: 1
-      CONNECT_STATUS_STORAGE_TOPIC: docker-connect-status
-      CONNECT_STATUS_STORAGE_REPLICATION_FACTOR: 1
-      CONNECT_KEY_CONVERTER: io.confluent.connect.avro.AvroConverter
-      CONNECT_VALUE_CONVERTER: io.confluent.connect.avro.AvroConverter
-      CONNECT_KEY_CONVERTER_SCHEMA_REGISTRY_URL: http://schema-registry:8081
-      CONNECT_VALUE_CONVERTER_SCHEMA_REGISTRY_URL: http://schema-registry:8081
-      CONNECT_PLUGIN_PATH: "/usr/share/java,/usr/share/confluent-hub-components"
-      CONNECT_LOG4J_LOGGERS: org.apache.zookeeper=ERROR,org.I0Itec.zkclient=ERROR,org.reflections=ERROR
-    volumes:
-      - ./connectors:/connectors
-    networks:
-      - cdc-network
-      - car_network
-    command:
-      - bash
-      - -c
-      - |
-        echo "Installing Confluent Hub Postgres Source Connector..."
-        confluent-hub install --no-prompt confluentinc/kafka-connect-jdbc:10.7.4 || true
-        confluent-hub install --no-prompt debezium/debezium-connector-postgresql:2.4.0 || true
-        /etc/confluent/docker/run
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8083/connectors"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-
-  # Control Center (optional, for monitoring)
-  control-center:
-    image: confluentinc/cp-enterprise-control-center:7.5.0
-    container_name: cdc-control-center
-    hostname: control-center
-    depends_on:
-      kafka:
-        condition: service_healthy
-      schema-registry:
-        condition: service_healthy
-    ports:
-      - "9021:9021"
-    environment:
-      CONTROL_CENTER_BOOTSTRAP_SERVERS: 'kafka:29092'
-      CONTROL_CENTER_REPLICATION_FACTOR: 1
-      CONTROL_CENTER_INTERNAL_TOPICS_PARTITIONS: 1
-      CONTROL_CENTER_MONITORING_INTERCEPTOR_TOPIC_PARTITIONS: 1
-      CONTROL_CENTER_CONNECT_CLUSTER: 'http://kafka-connect:8083'
-      CONTROL_CENTER_SCHEMA_REGISTRY_URL: http://schema-registry:8081
-      CONTROL_CENTER_KSQL_KSQLDB1_URL: http://ksqldb-server:8088
-      CONTROL_CENTER_KSQL_KSQLDB1_ADVERTISED_URL: http://localhost:8088
-      CONTROL_CENTER_STREAMS_KSQL_KSQLDB1_COUNT: 1
-    networks:
-      - cdc-network
-    profiles:
-      - monitoring
+  # Note: Using Confluent Cloud for Kafka, Schema Registry, and Kafka Connect
+  # Local Zookeeper and Kafka services have been removed
+  # Schema Registry, Kafka Connect, and Control Center are managed in Confluent Cloud
 
   # Flink JobManager
+  # Note: For production, use Confluent Cloud Flink. This local Flink is for development/testing only.
   flink-jobmanager:
     image: flink:1.18.0-scala_2.12
     container_name: cdc-flink-jobmanager
     hostname: flink-jobmanager
-    depends_on:
-      kafka:
-        condition: service_healthy
-      schema-registry:
-        condition: service_healthy
     ports:
       - "8082:8081"
     command: jobmanager
@@ -211,40 +64,78 @@ services:
     networks:
       - cdc-network
 
-  # Loan Consumer Example
+  # Loan Consumer
   loan-consumer:
     build:
       context: ./consumers/loan-consumer
       dockerfile: Dockerfile
     container_name: cdc-loan-consumer
     hostname: loan-consumer
-    depends_on:
-      kafka:
-        condition: service_healthy
     environment:
-      KAFKA_BOOTSTRAP_SERVERS: kafka:29092
+      # Set KAFKA_BOOTSTRAP_SERVERS to your Confluent Cloud bootstrap servers
+      # Example: pkc-xxxxx.us-east-1.aws.confluent.cloud:9092
+      KAFKA_BOOTSTRAP_SERVERS: ${KAFKA_BOOTSTRAP_SERVERS}
       KAFKA_TOPIC: filtered-loan-created-events
-      SCHEMA_REGISTRY_URL: http://schema-registry:8081
+      KAFKA_API_KEY: ${KAFKA_API_KEY:-}
+      KAFKA_API_SECRET: ${KAFKA_API_SECRET:-}
       CONSUMER_GROUP_ID: loan-consumer-group
     networks:
       - cdc-network
     restart: unless-stopped
 
-  # Service Consumer Example
+  # Loan Payment Consumer
+  loan-payment-consumer:
+    build:
+      context: ./consumers/loan-payment-consumer
+      dockerfile: Dockerfile
+    container_name: cdc-loan-payment-consumer
+    hostname: loan-payment-consumer
+    environment:
+      # Set KAFKA_BOOTSTRAP_SERVERS to your Confluent Cloud bootstrap servers
+      # Example: pkc-xxxxx.us-east-1.aws.confluent.cloud:9092
+      KAFKA_BOOTSTRAP_SERVERS: ${KAFKA_BOOTSTRAP_SERVERS}
+      KAFKA_TOPIC: filtered-loan-payment-submitted-events
+      KAFKA_API_KEY: ${KAFKA_API_KEY:-}
+      KAFKA_API_SECRET: ${KAFKA_API_SECRET:-}
+      CONSUMER_GROUP_ID: loan-payment-consumer-group
+    networks:
+      - cdc-network
+    restart: unless-stopped
+
+  # Service Consumer
   service-consumer:
     build:
       context: ./consumers/service-consumer
       dockerfile: Dockerfile
     container_name: cdc-service-consumer
     hostname: service-consumer
-    depends_on:
-      kafka:
-        condition: service_healthy
     environment:
-      KAFKA_BOOTSTRAP_SERVERS: kafka:29092
+      # Set KAFKA_BOOTSTRAP_SERVERS to your Confluent Cloud bootstrap servers
+      # Example: pkc-xxxxx.us-east-1.aws.confluent.cloud:9092
+      KAFKA_BOOTSTRAP_SERVERS: ${KAFKA_BOOTSTRAP_SERVERS}
       KAFKA_TOPIC: filtered-service-events
-      SCHEMA_REGISTRY_URL: http://schema-registry:8081
+      KAFKA_API_KEY: ${KAFKA_API_KEY:-}
+      KAFKA_API_SECRET: ${KAFKA_API_SECRET:-}
       CONSUMER_GROUP_ID: service-consumer-group
+    networks:
+      - cdc-network
+    restart: unless-stopped
+
+  # Car Consumer
+  car-consumer:
+    build:
+      context: ./consumers/car-consumer
+      dockerfile: Dockerfile
+    container_name: cdc-car-consumer
+    hostname: car-consumer
+    environment:
+      # Set KAFKA_BOOTSTRAP_SERVERS to your Confluent Cloud bootstrap servers
+      # Example: pkc-xxxxx.us-east-1.aws.confluent.cloud:9092
+      KAFKA_BOOTSTRAP_SERVERS: ${KAFKA_BOOTSTRAP_SERVERS}
+      KAFKA_TOPIC: filtered-car-created-events
+      KAFKA_API_KEY: ${KAFKA_API_KEY:-}
+      KAFKA_API_SECRET: ${KAFKA_API_SECRET:-}
+      CONSUMER_GROUP_ID: car-consumer-group
     networks:
       - cdc-network
     restart: unless-stopped

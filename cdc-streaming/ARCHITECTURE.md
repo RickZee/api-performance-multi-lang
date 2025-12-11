@@ -9,7 +9,7 @@ Change Data Capture (CDC) streaming architecture that enables real-time event pr
 - **Real-time CDC**: Captures database changes (INSERT, UPDATE, DELETE) from PostgreSQL tables and streams them to Kafka
 - **Intelligent Filtering**: Configurable YAML-based filter definitions that automatically generate Flink SQL for event filtering
 - **Multi-topic Routing**: Routes filtered events to consumer-specific Kafka topics based on business rules
-- **Schema Management**: Avro schema enforcement via Schema Registry for data contract validation
+- **Schema Management**: Schema Registry available for schema validation (currently using JSON format, Avro schemas available for future use)
 - **Scalable Processing**: Apache Flink for stateful stream processing with horizontal scaling
 - **Code Generation**: Automated SQL generation from declarative filter configurations
 - **CI/CD Integration**: Infrastructure-as-code ready with validation and testing capabilities
@@ -22,6 +22,7 @@ This architecture uses specific example structures for validation and testing:
 - **Loan Created Event**: [`data/schemas/event/samples/loan-created-event.json`](../../data/schemas/event/samples/loan-created-event.json) - Complete loan created event structure
 
 These examples are used throughout the system for:
+
 - Filter configuration (specifically targeting `LoanCreated` events)
 - Test data generation
 - Entity validation
@@ -34,31 +35,43 @@ These examples are used throughout the system for:
 ```text
 ┌─────────────────────────────────────────────────────────────────────────┐
 │                         PostgreSQL Database                             │
-│  ┌──────────────┐  ┌──────────────┐  ┌───────────────┐                  │
-│  │ car_entities │  │loan_entities │  |service_record │  ...             │
-│  └──────────────┘  └──────────────┘  └───────────────┘                  │
+│  ┌──────────────────────────────────────────────────────────────────┐   │
+│  │ business_events table                                           │   │
+│  │ - id, event_name, event_type, created_date, saved_date         │   │
+│  │ - event_data (JSONB) - full event structure                    │   │
+│  └──────────────────────────────────────────────────────────────────┘   │
 └──────────────────────────────┬──────────────────────────────────────────┘
                                │
-                               │ CDC Capture (Debezium)
+                               │ CDC Capture (Logical Replication)
+                               │ Captures flat columns + event_data JSONB
                                ▼
 ┌─────────────────────────────────────────────────────────────────────────┐
 │                 Kafka Connect (Source Connector)                        │
-│              Confluent Postgres Source Connector                        │
-│                   (Debezium-based CDC)                                  │
+│  ┌──────────────────────────────────────────────────────────────────┐  │
+│  │ Confluent Managed PostgresCdcSource OR Debezium Connector        │  │
+│  │ - Extracts flat columns (id, event_name, event_type, etc.)      │  │
+│  │ - Includes event_data as JSON string                             │  │
+│  │ - Adds CDC metadata (__op, __table, __ts_ms)                    │  │
+│  │ - Uses ExtractNewRecordState transform                           │  │
+│  └──────────────────────────────────────────────────────────────────┘  │
 └──────────────────────────────┬──────────────────────────────────────────┘
                                │
-                               │ Avro Serialized Events
+                               │ JSON Serialized Events
+                               │ (Flat structure with event_data JSONB)
                                ▼
 ┌─────────────────────────────────────────────────────────────────────────┐
 │                        Schema Registry                                  │
-│                 Schema Validation & Evolution                           │
+│  Available for schema validation (currently JSON format)                │
+│  Avro schemas available for future use                                  │
 └──────────────────────────────┬──────────────────────────────────────────┘
                                │
-                               │ Validated Events
+                               │ JSON Events
                                ▼
 ┌─────────────────────────────────────────────────────────────────────────┐
 │                    Kafka: raw-business-events                           │
-│                        (Avro format)                                    │
+│  Format: JSON                                                          │
+│  Structure: id, event_name, event_type, created_date, saved_date,    │
+│            event_data (JSON string), __op, __table, __ts_ms           │
 └──────────────────────────────┬──────────────────────────────────────────┘
                                │
                                │ Stream Processing
@@ -67,19 +80,23 @@ These examples are used throughout the system for:
 │                    Confluent Flink                                     │
 │                                                                        │
 │  Flink SQL Jobs:                                                       │
-│  - Filter by eventName, entityType, values                             │
+│  - Filter by event_type, __op (operation type)                        │
 │  - Route to consumer-specific topics                                   │
-│  - Add filterMetadata (filterId, consumerId, timestamp)                │
+│  - Preserves flat structure + event_data                               │
 └──────────────────────────────┬─────────────────────────────────────────┘
                                │
-                               │ Filtered & Routed Events
+                               │ Filtered & Routed Events (JSON)
                                ▼
 ┌─────────────────────────────────────────────────────────────────────────┐
 │                    Consumer-Specific Kafka Topics                       │
-│  ┌──────────────────────┐  ┌──────────────────────┐  ┌──────────────┐   │
-│  │filtered-loan-events  │  │filtered-service-     │  │filtered-car- │   │
-│  │                      │  │events                │  │events        │   │
-│  └──────────────────────┘  └──────────────────────┘  └──────────────┘   │
+│  ┌──────────────────────────┐  ┌──────────────────────────┐         │
+│  │filtered-loan-created-     │  │filtered-service-events    │         │
+│  │events                      │  └──────────────────────────┘         │
+│  └──────────────────────────┘  ┌──────────────────────────┐            │
+│  ┌──────────────────────────┐  │filtered-car-created-  │            │
+│  │filtered-loan-payment-     │  │events                   │            │
+│  │submitted-events           │  └──────────────────────────┘            │
+│  └──────────────────────────┘                                          │
 └──────────────────────────────┬──────────────────────────────────────────┘
                                │
                                │ Consume Events
@@ -87,10 +104,25 @@ These examples are used throughout the system for:
 ┌─────────────────────────────────────────────────────────────────────────┐
 │                    Consumer Applications                                │
 │  ┌──────────────────┐  ┌──────────────────┐  ┌──────────────────┐       │
-│  │ Loan Consumer    │  │Service Consumer  │  │  Car Consumer    │       │
-│  │ - Processes      │  │ - Processes      │  │  - Processes     │       │
-│  │   loan events    │  │   service events │  │   car events     │       │
-│  └──────────────────┘  └──────────────────┘  └──────────────────┘       │
+│  │ Loan Consumer    │  │Loan Payment      │  │Service Consumer  │       │
+│  │ - Topic:         │  │Consumer          │  │ - Topic:         │       │
+│  │   filtered-loan- │  │ - Topic:         │  │   filtered-      │       │
+│  │   created-events  │  │   filtered-loan-  │  │   service-events │       │
+│  │ - Parses flat    │  │   payment-        │  │ - Parses flat    │       │
+│  │   structure +    │  │   submitted-     │  │   structure +    │       │
+│  │   event_data     │  │   events          │  │   event_data     │       │
+│  │   JSON string    │  │ - Parses flat    │  │   JSON string    │       │
+│  └──────────────────┘  │   structure +    │  └──────────────────┘       │
+│  ┌──────────────────┐  │   event_data     │  ┌──────────────────┐       │
+│  │ Car Consumer     │  │   JSON string    │  │ All consumers   │       │
+│  │ - Topic:         │  └──────────────────┘  │ connect to       │       │
+│  │   filtered-car-  │                       │ Confluent Cloud   │       │
+│  │   created-events  │                       │ with SASL_SSL      │       │
+│  │ - Parses flat    │                       │ authentication    │       │
+│  │   structure +    │                       └──────────────────┘       │
+│  │   event_data     │                                                      │
+│  │   JSON string    │                                                      │
+│  └──────────────────┘                                                      │
 └─────────────────────────────────────────────────────────────────────────┘
 ```
 
@@ -98,32 +130,187 @@ These examples are used throughout the system for:
 
 **Complete Flow**:
 
-1. **PostgreSQL** → Database changes captured via CDC
-2. **CDC Connector** → Publishes to `raw-business-events` Kafka topic
+1. **PostgreSQL** → `business_events` table stores events with:
+   - Flat columns: `id`, `event_name`, `event_type`, `created_date`, `saved_date`
+   - JSONB column: `event_data` (contains full nested event structure)
+2. **CDC Connector** → Captures changes and publishes to `raw-business-events` Kafka topic:
+   - Extracts flat column values
+   - Includes `event_data` as JSON string
+   - Adds CDC metadata: `__op` (operation: 'c'=create, 'u'=update, 'd'=delete), `__table`, `__ts_ms`
+   - Format: JSON (not Avro)
 3. **Flink SQL Job** →
    - Consumes from `raw-business-events` (acts as Kafka consumer)
-   - Filters events
+   - Filters events using flat columns (`event_type`, `__op`)
    - **Writes to filtered Kafka topics** (acts as Kafka producer):
-     - `filtered-loan-events`
+     - `filtered-loan-created-events`
+     - `filtered-loan-payment-submitted-events`
      - `filtered-service-events`
-     - `filtered-car-events`
+     - `filtered-car-created-events`
+   - Preserves flat structure + `event_data` JSONB field
 4. **Consumer Applications** →
    - Connect to Kafka brokers
    - Subscribe to filtered topics using Kafka consumer groups
+   - Parse flat structure for filtering metadata
+   - Extract and parse `event_data` JSONB field to access nested event structure
    - Process events independently of Flink
+
+## Data Model Architecture
+
+### Hybrid Data Model: Flat Columns + JSONB
+
+The architecture uses a **hybrid data model** that combines the benefits of both flat relational structures and nested JSON:
+
+**Database Layer (PostgreSQL)**:
+
+```sql
+CREATE TABLE business_events (
+    -- Flat columns for efficient filtering and querying
+    id VARCHAR(255) PRIMARY KEY,
+    event_name VARCHAR(255) NOT NULL,
+    event_type VARCHAR(255),
+    created_date TIMESTAMP WITH TIME ZONE,
+    saved_date TIMESTAMP WITH TIME ZONE,
+    
+    -- JSONB column for full event structure
+    event_data JSONB NOT NULL  -- Contains: {eventHeader: {...}, eventBody: {...}}
+);
+```
+
+**Benefits of This Approach**:
+
+1. **Efficient Filtering**: Flat columns (`event_type`, `event_name`) enable fast filtering in Flink SQL without JSON parsing
+2. **Full Data Preservation**: JSONB `event_data` column preserves complete nested event structure
+3. **Index Support**: PostgreSQL can index flat columns for fast queries
+4. **Flexibility**: Consumers can access both flat metadata and nested entity data
+5. **CDC Compatibility**: CDC connectors can efficiently capture both column values and JSONB content
+
+**Data Flow Through the System**:
+
+1. **Producer APIs** → Insert events with:
+   - Flat columns extracted from `eventHeader`
+   - Full event JSON stored in `event_data` JSONB column
+
+2. **CDC Connector** → Captures:
+   - Flat column values as separate fields
+   - `event_data` JSONB as JSON string
+   - Adds CDC metadata (`__op`, `__table`, `__ts_ms`)
+
+3. **Kafka Topics** → Store events as JSON with:
+   - Flat structure: `id`, `event_name`, `event_type`, `created_date`, `saved_date`
+   - `event_data`: JSON string containing full nested structure
+   - CDC metadata: `__op`, `__table`, `__ts_ms`
+
+4. **Flink SQL** → Filters using:
+   - Flat columns (`event_type`, `__op`) for efficient filtering
+   - Preserves `event_data` JSON string for consumers
+
+5. **Consumers** → Process events by:
+   - Using flat columns for routing/metadata
+   - Parsing `event_data` JSON string to access nested structure
+
+**Example Event Structure**:
+
+**In Database (business_events table)**:
+
+```sql
+id: "event-123"
+event_name: "LoanCreated"
+event_type: "LoanCreated"
+created_date: "2024-01-15T10:30:00Z"
+saved_date: "2024-01-15T10:30:05Z"
+event_data: {
+  "eventHeader": {
+    "uuid": "event-123",
+    "eventName": "LoanCreated",
+    "createdDate": 1705312200000,
+    "savedDate": 1705312205000,
+    "eventType": "LoanCreated"
+  },
+  "eventBody": {
+    "entities": [{
+      "entityType": "Loan",
+      "entityId": "loan-456",
+      "updatedAttributes": {
+        "loan": {
+          "loanAmount": 50000,
+          "balance": 50000,
+          "status": "active"
+        }
+      }
+    }]
+  }
+}
+```
+
+**In Kafka (raw-business-events topic)**:
+
+```json
+{
+  "id": "event-123",
+  "event_name": "LoanCreated",
+  "event_type": "LoanCreated",
+  "created_date": "2024-01-15T10:30:00Z",
+  "saved_date": "2024-01-15T10:30:05Z",
+  "event_data": "{\"eventHeader\":{...},\"eventBody\":{...}}",
+  "__op": "c",
+  "__table": "business_events",
+  "__ts_ms": 1705312205000
+}
+```
+
+**Trade-offs**:
+
+| Aspect | Flat Columns | JSONB Column |
+|--------|--------------|--------------|
+| **Filtering Performance** | Fast (indexed columns) | Requires JSON parsing |
+| **Data Completeness** | Limited to extracted fields | Full nested structure |
+| **Schema Evolution** | Requires DDL changes | Flexible (JSON) |
+| **Query Complexity** | Simple SQL | JSON path queries |
+| **Storage** | Normalized | Denormalized |
+
+**Recommendation**: This hybrid approach provides the best of both worlds - efficient filtering for stream processing and complete data preservation for consumers.
 
 ## Component Deep Dive
 
 ### 1. PostgreSQL Database (Source)
 
-**Purpose**: The source of truth for business entities (loans, cars, service records, etc.)
+**Purpose**: The source of truth for business events stored in the `business_events` table
+
+**Database Schema**:
+
+The `business_events` table uses a hybrid approach combining flat columns for efficient filtering and a JSONB column for full event data:
+
+```sql
+CREATE TABLE business_events (
+    id VARCHAR(255) PRIMARY KEY,              -- From eventHeader.uuid
+    event_name VARCHAR(255) NOT NULL,         -- From eventHeader.eventName
+    event_type VARCHAR(255),                  -- From eventHeader.eventType
+    created_date TIMESTAMP WITH TIME ZONE,    -- From eventHeader.createdDate
+    saved_date TIMESTAMP WITH TIME ZONE,      -- From eventHeader.savedDate
+    event_data JSONB NOT NULL                 -- Full event JSON (eventHeader + eventBody)
+);
+
+-- Indexes for efficient filtering
+CREATE INDEX idx_business_events_event_type ON business_events(event_type);
+CREATE INDEX idx_business_events_created_date ON business_events(created_date);
+```
+
+**Data Model**:
+
+- **Flat Columns**: `id`, `event_name`, `event_type`, `created_date`, `saved_date` - extracted from `eventHeader` for efficient querying and filtering
+- **JSONB Column**: `event_data` - stores the complete event structure including:
+  - `eventHeader`: UUID, eventName, createdDate, savedDate, eventType
+  - `eventBody`: entities array with entityType, entityId, updatedAttributes
+  - Full nested structure preserved for consumers
 
 **How It Works**:
 
-- Stores entity data in normalized tables
+- Producer APIs insert events into `business_events` table with both flat columns and full JSONB data
 - PostgreSQL Write-Ahead Log (WAL) records all changes
 - Logical replication slots enable CDC capture without impacting database performance
-- Tables are monitored for INSERT, UPDATE, DELETE operations
+- CDC connector captures both flat column values and the `event_data` JSONB content
+- Flat columns enable efficient filtering in Flink SQL
+- JSONB column preserves full event structure for consumers
 
 **Configuration**:
 
@@ -134,42 +321,108 @@ ALTER SYSTEM SET max_replication_slots = 10;
 ALTER SYSTEM SET max_wal_senders = 10;
 
 -- Create replication slot (done by connector)
-SELECT pg_create_logical_replication_slot('debezium_slot', 'pgoutput');
+SELECT pg_create_logical_replication_slot('business_events_cdc_slot', 'pgoutput');
 ```
 
-### 2. Confluent Postgres Source Connector (Debezium)
+### 2. CDC Source Connector
 
-**Purpose**: Captures database changes and streams them to Kafka
+**Purpose**: Captures database changes from `business_events` table and streams them to Kafka
+
+**Connector Options**:
+
+The system supports two connector implementations:
+
+1. **Confluent Managed PostgresCdcSource Connector** (Recommended for Confluent Cloud)
+   - Fully managed connector service
+   - Automatic scaling and monitoring
+   - Configuration: `connectors/postgres-cdc-source-business-events-confluent-cloud.json`
+
+2. **Debezium PostgreSQL Connector** (Self-managed or Confluent Cloud)
+   - Open-source Debezium connector
+   - More configuration flexibility
+   - Configuration: `connectors/postgres-debezium-business-events-confluent-cloud.json`
 
 **How It Works**:
 
-- Uses Debezium PostgreSQL connector (based on logical replication)
-- Connects to PostgreSQL replication slot
-- Reads WAL changes and converts them to change events
-- Publishes events to Kafka topics in Avro format
+- Connects to PostgreSQL replication slot (created automatically)
+- Reads WAL changes via logical replication
+- Captures flat column values (`id`, `event_name`, `event_type`, `created_date`, `saved_date`)
+- Captures `event_data` JSONB column as JSON string
+- Applies **ExtractNewRecordState** transform to unwrap Debezium envelope:
+  - Extracts actual record data (not before/after structure)
+  - Adds CDC metadata: `__op` (operation: 'c'=create, 'u'=update, 'd'=delete), `__table`, `__ts_ms`
+- Applies **RegexRouter** transform to route to `raw-business-events` topic
+- Publishes events to Kafka in **JSON format** (not Avro)
 - Maintains offset tracking for exactly-once semantics
 
-**Configuration**: See `connectors/postgres-source-connector.json`
+**Event Structure Output**:
+
+The connector outputs events with the following flat structure:
+
+```json
+{
+  "id": "event-uuid-123",
+  "event_name": "LoanCreated",
+  "event_type": "LoanCreated",
+  "created_date": "2024-01-15T10:30:00Z",
+  "saved_date": "2024-01-15T10:30:05Z",
+  "event_data": "{\"eventHeader\":{...},\"eventBody\":{...}}",
+  "__op": "c",
+  "__table": "business_events",
+  "__ts_ms": 1705312205000
+}
+```
+
+**Key Configuration**:
+
+- **Format**: JSON (using `JsonConverter` with `schemas.enable=false`)
+- **Transform**: `ExtractNewRecordState` to unwrap Debezium envelope
+- **Transform**: `RegexRouter` to route to `raw-business-events` topic
+- **Table**: `public.business_events`
+- **Replication Slot**: Created automatically by connector
+
+**Configuration Files**:
+
+- `connectors/postgres-cdc-source-business-events-confluent-cloud.json` - Confluent managed connector
+- `connectors/postgres-debezium-business-events-confluent-cloud.json` - Debezium connector
 
 ### 3. Kafka Broker
 
 **Key Topics**:
 
 - `raw-business-events`: All CDC events from PostgreSQL (3 partitions)
-- `filtered-loan-events`: Loan-related events (3 partitions)
-- `filtered-service-events`: Service-related events (3 partitions)
-- `filtered-car-events`: Car-related events (3 partitions)
+  - Format: JSON
+  - Structure: Flat columns + `event_data` JSONB + CDC metadata
+- `filtered-loan-created-events`: Loan created events (auto-created by Flink)
+- `filtered-loan-payment-submitted-events`: Loan payment events (auto-created by Flink)
+- `filtered-service-events`: Service-related events (auto-created by Flink)
+- `filtered-car-created-events`: Car created events (auto-created by Flink)
+
+**Topic Format**: All topics use JSON format (not Avro). Schema Registry is available for future Avro migration.
 
 ### 4. Schema Registry
 
-**Purpose**: Centralized schema management and validation for Avro-formatted events
+**Purpose**: Centralized schema management and validation (available for future use)
 
-**How It Works**:
+**Current Implementation**:
+
+- **Format**: Currently using JSON format for Kafka messages (no schema validation)
+- **Avro Schemas**: Avro schema files exist in `schemas/` directory:
+  - `schemas/raw-event.avsc` - Raw event Avro schema
+  - `schemas/filtered-event.avsc` - Filtered event Avro schema
+- **Future Use**: Avro schemas are available for migration when schema validation is needed
+
+**How It Works** (when using Avro):
 
 - Stores Avro schemas for Kafka topics
 - Validates producer messages against registered schemas
 - Enforces schema evolution policies (BACKWARD, FORWARD, FULL)
 - Provides schema versioning and compatibility checking
+
+**When to Use Avro vs JSON**:
+
+- **JSON (Current)**: Simpler setup, no schema enforcement, easier debugging
+- **Avro (Future)**: Schema validation, better performance, type safety, schema evolution
 
 ### 5. Flink Cluster
 
@@ -203,12 +456,13 @@ SELECT pg_create_logical_replication_slot('debezium_slot', 'pgoutput');
 **How It Works**:
 
 - **Consumes from Kafka**: Reads events from `raw-business-events` topic (acts as Kafka consumer)
-- **Applies Filtering**: Applies filtering logic defined in Flink SQL statements
+- **Applies Filtering**: Applies filtering logic defined in Flink SQL statements using flat columns (`event_type`, `__op`)
 - **Writes to Kafka**: Writes filtered events to consumer-specific Kafka topics (acts as Kafka producer)
-  - `filtered-loan-events`
+  - `filtered-loan-created-events`
+  - `filtered-loan-payment-submitted-events`
   - `filtered-service-events`
-  - `filtered-car-events`
-- **Enriches Events**: Adds `filterMetadata` (filterId, consumerId, timestamp) to each event
+  - `filtered-car-created-events`
+- **Preserves Structure**: Maintains flat structure + `event_data` JSONB field for consumers
 - **Maintains State**: Maintains exactly-once semantics via automatic checkpoints
 - **Auto-Scales**: Automatically adjusts compute resources based on throughput
 
@@ -250,57 +504,89 @@ In **Confluent Cloud**, Flink jobs are deployed as **SQL statements** rather tha
 - **Routing**: Routes matching events to different Kafka topics based on filter conditions
 - **Fault Tolerance**: Automatic checkpoints ensure exactly-once semantics (managed by Confluent Cloud)
 
-**Example Flink SQL Statement**:
+**Example Flink SQL Statement** (from `flink-jobs/business-events-routing-confluent-cloud.sql`):
 
 ```sql
--- Source: Read from raw-business-events topic
-CREATE TABLE raw_business_events (
-  eventHeader ROW<uuid STRING, eventName STRING, createdDate BIGINT, savedDate BIGINT, eventType STRING>,
-  eventBody ROW<entities ARRAY<ROW<entityType STRING, entityId STRING, updatedAttributes MAP<STRING, STRING>>>>,
-  sourceMetadata ROW<table STRING, operation STRING, timestamp BIGINT>,
-  proctime AS PROCTIME(),
-  eventtime AS TO_TIMESTAMP_LTZ(eventHeader.createdDate, 3),
-  WATERMARK FOR eventtime AS eventtime - INTERVAL '5' SECOND
+-- ============================================================================
+-- Step 1: Create Source Table
+-- ============================================================================
+-- Source Table: Raw Business Events from Kafka (CDC connector output)
+-- Structure matches the flat output from CDC connector
+CREATE TABLE `raw-business-events` (
+    `id` STRING,                    -- Event UUID
+    `event_name` STRING,            -- Event name (e.g., "LoanCreated")
+    `event_type` STRING,           -- Event type (e.g., "LoanCreated")
+    `created_date` STRING,          -- Created timestamp
+    `saved_date` STRING,           -- Saved timestamp
+    `event_data` STRING,            -- Full event JSON as string (from JSONB column)
+    `__op` STRING,                  -- CDC operation: 'c'=create, 'u'=update, 'd'=delete
+    `__table` STRING,               -- Source table name: "business_events"
+    `__ts_ms` BIGINT                -- CDC capture timestamp
 ) WITH (
-  'connector' = 'kafka',
-  'topic' = 'raw-business-events',  -- Input topic
-  'properties.bootstrap.servers' = 'pkc-xxxxx.us-east-1.aws.confluent.cloud:9092',
-  'properties.security.protocol' = 'SASL_SSL',
-  'properties.sasl.jaas.config' = 'org.apache.kafka.common.security.plain.PlainLoginModule required username="..." password="...";',
-  'format' = 'avro',
-  'avro.schema-registry.url' = 'https://psrc-xxxxx.us-east-1.aws.confluent.cloud',
-  'scan.startup.mode' = 'earliest-offset'
+    'connector' = 'confluent',
+    'value.format' = 'json-registry',
+    'scan.startup.mode' = 'earliest-offset'
 );
 
--- Sink: Write to filtered-loan-events topic
--- Filters LoanCreated events based on data/schemas/event/samples/loan-created-event.json
-CREATE TABLE filtered_loan_events (
-  eventHeader ROW<uuid STRING, eventName STRING, createdDate BIGINT, savedDate BIGINT, eventType STRING>,
-  eventBody ROW<entities ARRAY<ROW<entityType STRING, entityId STRING, updatedAttributes MAP<STRING, STRING>>>>,
-  sourceMetadata ROW<table STRING, operation STRING, timestamp BIGINT>,
-  filterMetadata ROW<filterId STRING, consumerId STRING, filteredAt BIGINT>
+-- ============================================================================
+-- Step 2: Create Sink Table
+-- ============================================================================
+-- Sink Table: Filtered Loan Created Events
+CREATE TABLE `filtered-loan-created-events` (
+    `id` STRING,
+    `event_name` STRING,
+    `event_type` STRING,
+    `created_date` STRING,
+    `saved_date` STRING,
+    `event_data` STRING,            -- Preserves full event JSON
+    `__op` STRING,
+    `__table` STRING
 ) WITH (
-  'connector' = 'kafka',
-  'topic' = 'filtered-loan-events',  -- Output topic (consumers read from here)
-  'properties.bootstrap.servers' = 'pkc-xxxxx.us-east-1.aws.confluent.cloud:9092',
-  'properties.security.protocol' = 'SASL_SSL',
-  'properties.sasl.jaas.config' = 'org.apache.kafka.common.security.plain.PlainLoginModule required username="..." password="...";',
-  'format' = 'avro',
-  'avro.schema-registry.url' = 'https://psrc-xxxxx.us-east-1.aws.confluent.cloud',
-  'sink.partitioner' = 'fixed'
+    'connector' = 'confluent',
+    'value.format' = 'json-registry'
 );
 
--- Filter and route: Flink writes filtered events to the sink topic
-INSERT INTO filtered_loan_events
+-- ============================================================================
+-- Step 3: INSERT Statement - Filter and Route
+-- ============================================================================
+-- Filter LoanCreated events and route to filtered topic
+INSERT INTO `filtered-loan-created-events`
 SELECT 
-  eventHeader,
-  eventBody,
-  sourceMetadata,
-  ROW('loan-events-filter', 'loan-consumer', UNIX_TIMESTAMP() * 1000) AS filterMetadata
-FROM raw_business_events
-WHERE eventHeader.eventName = 'LoanCreated' 
-   OR eventHeader.eventName = 'LoanPaymentSubmitted';
+    `id`,
+    `event_name`,
+    `event_type`,
+    `created_date`,
+    `saved_date`,
+    `event_data`,                   -- Full event JSON preserved
+    `__op`,
+    `__table`
+FROM `raw-business-events`
+WHERE `event_type` = 'LoanCreated' AND `__op` = 'c';  -- Filter by event_type and operation
+
+-- Additional filters for other event types:
+-- Loan Payment Submitted Events
+INSERT INTO `filtered-loan-payment-submitted-events`
+SELECT * FROM `raw-business-events`
+WHERE `event_type` = 'LoanPaymentSubmitted' AND `__op` = 'c';
+
+-- Car Created Events
+INSERT INTO `filtered-car-created-events`
+SELECT * FROM `raw-business-events`
+WHERE `event_type` = 'CarCreated' AND `__op` = 'c';
+
+-- Service Events (filtered by event_name)
+INSERT INTO `filtered-service-events`
+SELECT * FROM `raw-business-events`
+WHERE `event_name` = 'CarServiceDone' AND `__op` = 'c';
 ```
+
+**Key Differences from Nested Structure**:
+
+- **Flat Structure**: Uses flat columns (`id`, `event_name`, `event_type`, etc.) instead of nested `eventHeader`/`eventBody`
+- **JSON Format**: Uses `json-registry` format (not Avro)
+- **CDC Metadata**: Includes `__op`, `__table`, `__ts_ms` from CDC connector
+- **Event Data**: `event_data` is a STRING containing the full JSON event (consumers parse this)
+- **Filtering**: Filters on flat columns (`event_type`, `__op`) for efficiency
 
 **Deployment** (Confluent Cloud):
 
@@ -324,44 +610,253 @@ confluent flink statement list --compute-pool cp-east-123
 confluent flink statement describe ss-456789 --compute-pool cp-east-123
 ```
 
-**Topic Creation**: Filtered topics (`filtered-loan-events`, etc.) are automatically created by Flink when it writes to them for the first time. No manual topic creation is required for filtered topics. Only the `raw-business-events` topic needs to be created manually before deploying the CDC connector.
+**Topic Creation**: Filtered topics (`filtered-loan-created-events`, `filtered-service-events`, etc.) are automatically created by Flink when it writes to them for the first time. No manual topic creation is required for filtered topics. Only the `raw-business-events` topic needs to be created manually before deploying the CDC connector.
 
 **Filter Types Supported**:
 
-- **Event Name Filtering**: Filter by `eventHeader.eventName`
-- **Entity Type Filtering**: Filter by `eventBody.entities[].entityType`
-- **Value-Based Filtering**: Numeric comparisons (>, <, >=, <=, BETWEEN)
-- **Pattern Matching**: Regex patterns for string fields
-- **Multi-Condition Filtering**: Combine conditions with AND/OR logic
+- **Event Type Filtering**: Filter by `event_type` column (e.g., `'LoanCreated'`, `'CarCreated'`)
+- **Event Name Filtering**: Filter by `event_name` column (e.g., `'CarServiceDone'`)
+- **Operation Type Filtering**: Filter by `__op` to capture only creates (`'c'`), updates (`'u'`), or deletes (`'d'`)
+- **Multi-Condition Filtering**: Combine conditions with AND/OR logic (e.g., `event_type = 'LoanCreated' AND __op = 'c'`)
+- **Value-Based Filtering**: Can filter on flat column values (dates, IDs, etc.)
+- **JSON Data Filtering**: For nested filtering, parse `event_data` JSON string using JSON functions (advanced)
+
+**Note**: The current implementation filters on flat columns for efficiency. To filter on nested data within `event_data`, you would need to parse the JSON string using Flink's JSON functions.
 
 ### 7. Consumer Applications
 
 **Purpose**: Process filtered events from consumer-specific Kafka topics
 
+**Available Consumers**:
+
+The system includes 4 dockerized consumers, one for each filtered topic:
+
+1. **Loan Consumer** (`consumers/loan-consumer/`)
+   - Topic: `filtered-loan-created-events`
+   - Consumer Group: `loan-consumer-group`
+   - Processes `LoanCreated` events
+
+2. **Loan Payment Consumer** (`consumers/loan-payment-consumer/`)
+   - Topic: `filtered-loan-payment-submitted-events`
+   - Consumer Group: `loan-payment-consumer-group`
+   - Processes `LoanPaymentSubmitted` events
+
+3. **Service Consumer** (`consumers/service-consumer/`)
+   - Topic: `filtered-service-events`
+   - Consumer Group: `service-consumer-group`
+   - Processes `CarServiceDone` events
+
+4. **Car Consumer** (`consumers/car-consumer/`)
+   - Topic: `filtered-car-created-events`
+   - Consumer Group: `car-consumer-group`
+   - Processes `CarCreated` events
+
 **How Consumers Get Filtered Events**:
 
-Consumers **do NOT connect to Flink**. Instead, they connect directly to **Kafka** and subscribe to the filtered topics that Flink writes to. Here's the complete flow:
+Consumers **do NOT connect to Flink**. Instead, they connect directly to **Kafka** (local or Confluent Cloud) and subscribe to the filtered topics that Flink writes to. Here's the complete flow:
 
 1. **Flink SQL Jobs Write to Kafka Topics**:
    - Flink SQL jobs consume from `raw-business-events` topic
    - After filtering and transformation, Flink writes filtered events to consumer-specific Kafka topics:
-     - `filtered-loan-events`
+     - `filtered-loan-created-events`
+     - `filtered-loan-payment-submitted-events`
      - `filtered-service-events`
-     - `filtered-car-events`
-   - These topics are **created in Kafka** (either manually or automatically by Flink)
+     - `filtered-car-created-events`
+   - These topics are **created in Kafka** automatically by Flink when it first writes to them
    - Flink acts as a **producer** to these filtered topics
+   - Events maintain the flat structure: `id`, `event_name`, `event_type`, `created_date`, `saved_date`, `event_data` (JSON string), `__op`, `__table`
 
 2. **Consumers Connect to Kafka**:
    - Consumer applications connect to Kafka brokers using `bootstrap.servers`
    - They subscribe to the filtered topics using Kafka consumer groups
    - Consumers are standard Kafka consumers - they have no direct connection to Flink
+   - Consumers receive JSON messages with flat structure
+
+**Confluent Cloud Connection**:
+
+All consumers support connecting to both local Kafka (for development) and Confluent Cloud (for production). Configuration is done via environment variables:
+
+**Local Kafka (Development)**:
+```yaml
+environment:
+  KAFKA_BOOTSTRAP_SERVERS: kafka:29092
+  KAFKA_TOPIC: filtered-loan-created-events
+  CONSUMER_GROUP_ID: loan-consumer-group
+```
+
+**Confluent Cloud (Production)**:
+```yaml
+environment:
+  KAFKA_BOOTSTRAP_SERVERS: pkc-xxxxx.us-east-1.aws.confluent.cloud:9092
+  KAFKA_TOPIC: filtered-loan-created-events
+  KAFKA_API_KEY: <your-api-key>
+  KAFKA_API_SECRET: <your-api-secret>
+  CONSUMER_GROUP_ID: loan-consumer-group
+```
+
+When `KAFKA_API_KEY` and `KAFKA_API_SECRET` are provided, consumers automatically use SASL_SSL authentication:
+
+```python
+consumer_config = {
+    'bootstrap.servers': KAFKA_BOOTSTRAP_SERVERS,
+    'security.protocol': 'SASL_SSL',
+    'sasl.mechanism': 'PLAIN',
+    'sasl.username': KAFKA_API_KEY,
+    'sasl.password': KAFKA_API_SECRET,
+    'group.id': CONSUMER_GROUP_ID,
+    'auto.offset.reset': 'earliest',
+    'enable.auto.commit': True,
+}
+```
+
+**Docker Compose Configuration**:
+
+All consumers are defined in `docker-compose.yml` and can be started together:
+
+```bash
+# Start all consumers
+docker-compose up -d loan-consumer loan-payment-consumer service-consumer car-consumer
+
+# View logs
+docker-compose logs -f loan-consumer
+docker-compose logs -f loan-payment-consumer
+docker-compose logs -f service-consumer
+docker-compose logs -f car-consumer
+```
+
+To connect to Confluent Cloud, set environment variables before starting:
+
+```bash
+export KAFKA_BOOTSTRAP_SERVERS="pkc-xxxxx.us-east-1.aws.confluent.cloud:9092"
+export KAFKA_API_KEY="<your-api-key>"
+export KAFKA_API_SECRET="<your-api-secret>"
+docker-compose up -d
+```
+
+**Event Processing in Consumers**:
+
+Consumers receive events in the following flat structure:
+
+```json
+{
+  "id": "event-uuid-123",
+  "event_name": "LoanCreated",
+  "event_type": "LoanCreated",
+  "created_date": "2024-01-15T10:30:00Z",
+  "saved_date": "2024-01-15T10:30:05Z",
+  "event_data": "{\"eventHeader\":{\"uuid\":\"...\",\"eventName\":\"LoanCreated\",...},\"eventBody\":{\"entities\":[...]}}",
+  "__op": "c",
+  "__table": "business_events"
+}
+```
+
+**Consumer Implementation Pattern**:
+
+1. **Parse Flat Structure**: Extract filtering metadata from flat columns (`event_type`, `event_name`, `__op`)
+2. **Parse Event Data**: Extract and parse the `event_data` JSON string to access nested event structure:
+
+   ```python
+   import json
+   
+   # Parse flat structure
+   event_type = message['event_type']
+   event_name = message['event_name']
+   
+   # Parse nested structure from event_data
+   event_data = json.loads(message['event_data'])
+   event_header = event_data['eventHeader']
+   event_body = event_data['eventBody']
+   entities = event_body['entities']
+   ```
+
+3. **Process Entities**: Access nested entity data from the parsed `event_data`
+
+**Example Consumer Implementation** (from `consumers/loan-consumer/consumer.py`):
+
+All consumers follow the same pattern for parsing flat structure events:
+
+```python
+def process_event(event_value):
+    """Process a loan event"""
+    # Extract flat structure fields
+    event_id = event_value.get('id', 'Unknown')
+    event_name = event_value.get('event_name', 'Unknown')
+    event_type = event_value.get('event_type', 'Unknown')
+    created_date = event_value.get('created_date', 'Unknown')
+    saved_date = event_value.get('saved_date', 'Unknown')
+    cdc_op = event_value.get('__op', 'Unknown')
+    cdc_table = event_value.get('__table', 'Unknown')
+    
+    # Parse event_data JSON string to access nested structure
+    event_data_str = event_value.get('event_data', '{}')
+    try:
+        event_data = json.loads(event_data_str) if isinstance(event_data_str, str) else event_data_str
+    except json.JSONDecodeError as e:
+        logger.error(f"Failed to parse event_data JSON: {e}")
+        event_data = {}
+    
+    # Extract nested structure
+    event_header = event_data.get('eventHeader', {})
+    event_body = event_data.get('eventBody', {})
+    entities = event_body.get('entities', [])
+    
+    # Process entities with nested structure
+    for entity in entities:
+        entity_type = entity.get('entityType', 'Unknown')
+        entity_id = entity.get('entityId', 'Unknown')
+        updated_attrs = entity.get('updatedAttributes', {})
+        
+        # Access nested attributes based on entity type
+        if entity_type == 'Loan':
+            loan_data = updated_attrs.get('loan', {})
+            loan_amount = loan_data.get('loanAmount')
+            balance = loan_data.get('balance')
+            status = loan_data.get('status')
+```
+
+**Key Points**:
+
+- All consumers parse the **flat structure** first (id, event_name, event_type, etc.)
+- The `event_data` field is a **JSON string** that must be parsed with `json.loads()`
+- After parsing `event_data`, consumers can access the nested structure (eventHeader, eventBody, entities)
+- Each consumer processes entity-specific attributes based on the entity type
 
 **Topic Creation**:
 
-- Filtered topics can be created:
-  1. **Manually**: Using `kafka-topics.sh` or Confluent Cloud Console before deploying Flink jobs
-  2. **Automatically (anti-pattern)**: By Flink when it first writes to the topic (if `auto.create.topics.enable=true` in Kafka)
-  3. **Via Infrastructure as Code**: Using Terraform or similar tools
+- Filtered topics are automatically created by Flink when it first writes to them
+- No manual topic creation is required for filtered topics
+- Only the `raw-business-events` topic needs to be created manually before deploying the CDC connector
+
+**Consumer Deployment**:
+
+All 4 consumers are dockerized and can be deployed via Docker Compose:
+
+```bash
+# Build and start all consumers
+cd cdc-streaming
+docker-compose up -d loan-consumer loan-payment-consumer service-consumer car-consumer
+
+# Check consumer status
+docker-compose ps
+
+# View consumer logs
+docker-compose logs -f loan-consumer
+```
+
+For Confluent Cloud deployment, ensure environment variables are set:
+
+```bash
+export KAFKA_BOOTSTRAP_SERVERS="pkc-xxxxx.us-east-1.aws.confluent.cloud:9092"
+export KAFKA_API_KEY="<your-api-key>"
+export KAFKA_API_SECRET="<your-api-secret>"
+docker-compose up -d
+```
+
+Each consumer prints events to stdout with detailed information including:
+- Flat structure fields (id, event_name, event_type, created_date, saved_date)
+- CDC metadata (__op, __table)
+- Parsed nested structure from event_data (eventHeader, eventBody, entities)
+- Entity-specific attributes based on entity type
 
 ## Fundamentals Section
 

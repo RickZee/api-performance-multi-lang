@@ -66,29 +66,29 @@ For generating test data based on these examples, see the [Test Data Generation]
 
 #### Option A: Docker Compose (Local Development)
 
-Start the Confluent Platform stack and Flink cluster:
+**Note:** This setup uses Confluent Cloud for Kafka, Schema Registry, and Kafka Connect. Local Kafka and Zookeeper services have been removed.
+
+Start the local Flink cluster and consumers:
 
 ```bash
 cd cdc-streaming
+
+# Set your Confluent Cloud bootstrap servers (required)
+export KAFKA_BOOTSTRAP_SERVERS="pkc-xxxxx.us-east-1.aws.confluent.cloud:9092"
+export KAFKA_API_KEY="your-api-key"
+export KAFKA_API_SECRET="your-api-secret"
+
 docker-compose up -d
 ```
 
 This will start:
-- Zookeeper (port 2181)
-- Kafka (port 9092)
-- Schema Registry (port 8081)
-- Kafka Connect (port 8083)
-- Flink JobManager (port 8081)
+- Flink JobManager (port 8082)
 - Flink TaskManager
-- Example consumers (loan-consumer, service-consumer)
+- Example consumers (loan-consumer, loan-payment-consumer, service-consumer, car-consumer)
 
-Optional: Start Control Center for monitoring:
+**Note:** For production, use Confluent Cloud Flink instead of local Flink. Local Flink is for development/testing only.
 
-```bash
-docker-compose --profile monitoring up -d control-center
-```
-
-Access Control Center at: http://localhost:9021
+**Monitoring:** Use Confluent Cloud Console at https://confluent.cloud for monitoring Kafka, Schema Registry, connectors, and Flink statements.
 
 #### Option B: Confluent Cloud (Production)
 
@@ -104,41 +104,15 @@ The setup guide includes:
 
 ### 2. Create Kafka Topics
 
-#### Option A: Docker Compose (Local Development)
-
-Create the necessary Kafka topics:
-
-```bash
-./scripts/create-topics.sh
-```
-
-This creates:
-- `raw-business-events` (3 partitions)
-
-**Note**: Filtered topics (`filtered-loan-created-events`, `filtered-car-created-events`, `filtered-loan-payment-submitted-events`, `filtered-service-events`, etc.) are automatically created by Flink when it writes to them for the first time. No manual creation is required.
-
-#### Option B: Confluent Cloud (Production)
+**Note:** Topics are created in Confluent Cloud, not locally.
 
 For topic creation in Confluent Cloud, see [CONFLUENT_CLOUD_SETUP_GUIDE.md](CONFLUENT_CLOUD_SETUP_GUIDE.md) - [Topic Creation](#topic-creation) section.
 
-**Note**: Filtered topics are automatically created by Flink when it writes to them. Only `raw-business-events` needs manual creation.
+**Note**: Filtered topics (`filtered-loan-created-events`, `filtered-car-created-events`, `filtered-loan-payment-submitted-events`, `filtered-service-events`, etc.) are automatically created by Flink when it writes to them. Only `raw-business-events` needs manual creation.
 
 ### 3. Set Up Postgres Connector
 
-#### Option A: Docker Compose (Local Development)
-
-Register the Postgres Source Connector:
-
-```bash
-./scripts/setup-connector.sh
-```
-
-This will:
-- Register the connector with Kafka Connect
-- Configure it to capture changes from entity tables
-- Start streaming changes to `raw-business-events` topic
-
-#### Option B: Confluent Cloud (Production)
+**Note:** Connectors are deployed in Confluent Cloud, not locally.
 
 For connector deployment in Confluent Cloud, see:
 - [CONFLUENT_CONNECTOR_GUIDE.md](CONFLUENT_CONNECTOR_GUIDE.md) - Confluent managed connectors guide
@@ -544,25 +518,7 @@ For detailed solutions, workarounds, and implementation patterns addressing nest
 
 ### Kafka Topics
 
-#### Option A: Docker Compose (Local Development)
-
-Monitor topic messages:
-
-```bash
-# Raw events
-docker exec -it cdc-kafka kafka-console-consumer.sh \
-  --bootstrap-server localhost:9092 \
-  --topic raw-business-events \
-  --from-beginning
-
-# Filtered loan events
-docker exec -it cdc-kafka kafka-console-consumer.sh \
-  --bootstrap-server localhost:9092 \
-  --topic filtered-loan-created-events \
-  --from-beginning
-```
-
-#### Option B: Confluent Cloud (Production)
+**Note:** All Kafka topics are in Confluent Cloud. Use Confluent Cloud CLI or Console to monitor them.
 
 Monitor topics via Confluent Cloud:
 
@@ -645,16 +601,18 @@ confluent kafka consumer-group describe loan-consumer-group --output json | jq '
 
 ### Flink Dashboard
 
-#### Option A: Docker Compose (Local Development)
+#### Option A: Docker Compose (Local Development - Testing Only)
 
-Access Flink Web UI at: http://localhost:8081
+**Note:** For production, use Confluent Cloud Flink. Local Flink is for development/testing only.
+
+Access Flink Web UI at: http://localhost:8082
 
 - View running jobs
 - Monitor job metrics
 - Check checkpoint status
 - View task manager details
 
-#### Option B: Confluent Cloud (Production)
+#### Option B: Confluent Cloud (Production - Recommended)
 
 Monitor Flink statements via Confluent Cloud:
 
@@ -692,18 +650,9 @@ confluent flink compute-pool describe <compute-pool-id>
 - `checkpoint-duration`: Checkpoint duration
 - `cfu-usage`: Current CFU utilization
 
-### Control Center / Confluent Cloud Console
+### Confluent Cloud Console
 
-#### Option A: Docker Compose (Local Development)
-
-Access Control Center at: http://localhost:9021 (if enabled)
-
-- Monitor Kafka cluster health
-- View topic metrics
-- Monitor connectors
-- View consumer lag
-
-#### Option B: Confluent Cloud Console (Production)
+**Note:** Use Confluent Cloud Console for all monitoring. Local Control Center has been removed.
 
 Access Confluent Cloud Console at: https://confluent.cloud
 
