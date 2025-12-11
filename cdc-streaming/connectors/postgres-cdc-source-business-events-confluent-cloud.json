@@ -1,4 +1,5 @@
 {
+  "_comment": "⚠️ NOT RECOMMENDED: This config is missing the ExtractNewRecordState transform. Use postgres-cdc-source-business-events-confluent-cloud-fixed.json instead. See RECOMMENDED_APPROACH.md for details.",
   "name": "postgres-cdc-source-business-events",
   "config": {
     "connector.class": "PostgresCdcSource",

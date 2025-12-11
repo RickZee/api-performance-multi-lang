@@ -20,7 +20,6 @@ This guide provides a comprehensive, step-by-step walkthrough for setting up the
 8. [Flink SQL Configuration](#flink-sql-configuration)
 9. [Deploy Flink SQL Statements](#deploy-flink-sql-statements)
 10. [Testing and Verification](#testing-and-verification)
-11. [Troubleshooting](#troubleshooting)
 
 ### Advanced Topics (Optional)
 12. [Multi-Region Infrastructure Setup](#multi-region-infrastructure-setup)
@@ -1064,7 +1063,281 @@ confluent flink statement describe <statement-id> \
 # Verify bootstrap servers in SQL match cluster endpoint
 ```
 
-#### Issue 4: Connector Not Capturing Changes
+#### Issue 4: Database Schema Missing or Corrupted
+
+**Symptoms:**
+- API returns: `"relation \"business_events\" does not exist"`
+- Events cannot be inserted into database
+- Lambda functions fail with database errors
+
+**Solutions:**
+
+```bash
+# 1. Verify database connection details
+# Check .env.aurora file for current password
+cat .env.aurora | grep DB_PASSWORD
+
+# 2. Apply schema using Docker (if psql not available locally)
+export DATABASE_PASSWORD="<password-from-env-aurora>"
+AURORA_ENDPOINT="<aurora-endpoint>"
+docker run --rm -i -e PGPASSWORD="$DATABASE_PASSWORD" postgres:15-alpine \
+  psql -h "$AURORA_ENDPOINT" -U postgres -d car_entities -f - < data/schema.sql
+
+# 3. Or use Python script
+python3 scripts/init-aurora-schema.py
+
+# 4. Verify tables were created
+docker run --rm -i -e PGPASSWORD="$DATABASE_PASSWORD" postgres:15-alpine \
+  psql -h "$AURORA_ENDPOINT" -U postgres -d car_entities -c "\dt"
+
+# Expected output should show:
+# - business_events
+# - car_entities
+# - loan_entities
+# - loan_payment_entities
+# - service_record_entities
+```
+
+#### Issue 5: Flink Source Table Schema Registry Mismatch
+
+**Symptoms:**
+- Flink statement fails with: `"Schema Registry subject 'raw-business-events-value' doesn't match the existing one"`
+- Cannot recreate source table after cleanup
+- Source table status is FAILED
+- Existing RUNNING statements may still work but stop processing new events
+
+**Solutions:**
+
+```bash
+# Option 1: Delete and recreate Schema Registry subject (if safe to do)
+# Note: This will delete existing schemas for the topic
+confluent schema-registry subject delete raw-business-events-value --force
+
+# Then recreate the source table
+SOURCE_SQL="CREATE TABLE \`raw-business-events\` ( \`id\` STRING, \`event_name\` STRING, \`event_type\` STRING, \`created_date\` STRING, \`saved_date\` STRING, \`event_data\` STRING, \`__op\` STRING, \`__table\` STRING, \`__ts_ms\` BIGINT ) WITH ( 'connector' = 'confluent', 'value.format' = 'json-registry', 'scan.startup.mode' = 'earliest-offset' );"
+confluent flink statement create "source-raw-business-events" \
+  --compute-pool <compute-pool-id> \
+  --database <kafka-cluster-id> \
+  --sql "$SOURCE_SQL"
+
+# Option 2: Use existing RUNNING statements (if they exist)
+# Check for existing RUNNING statements that may still work
+confluent flink statement list --compute-pool <compute-pool-id> | grep RUNNING
+
+# Option 3: Contact Confluent Support to resolve schema compatibility
+```
+
+#### Issue 6: Checking Flink Statement Logs and Status
+
+**Symptoms:**
+- Need to verify Flink statements are processing events correctly
+- Want to check for errors or exceptions
+- Need to monitor statement health
+
+**How to Check:**
+
+```bash
+# 1. List all statements and their status
+confluent flink statement list --compute-pool <compute-pool-id>
+
+# 2. Get detailed information about a statement
+confluent flink statement describe <statement-name>
+
+# 3. Check for exceptions
+confluent flink statement exception list <statement-name>
+
+# 4. Get comprehensive status summary (using Python)
+python3 << 'PYEOF'
+import json
+import subprocess
+
+result = subprocess.run(
+    ['confluent', 'flink', 'statement', 'list', '--compute-pool', '<compute-pool-id>', '--output', 'json'],
+    capture_output=True,
+    text=True
+)
+
+if result.returncode == 0:
+    data = json.loads(result.stdout)
+    
+    # Source table status
+    source_tables = [s for s in data if 'source-raw-business-events' in s.get('name', '')]
+    print("Source Tables:")
+    for s in source_tables:
+        print(f"  {s['name']}: {s.get('status')} - {s.get('status_detail', 'N/A')[:100]}")
+    
+    # Running INSERT statements
+    running = [s for s in data if s.get('status') == 'RUNNING' and 'insert' in s.get('name', '').lower()]
+    print(f"\nRUNNING INSERT Statements: {len(running)}")
+    for s in running:
+        offsets = s.get('latest_offsets', {})
+        timestamp = s.get('latest_offsets_timestamp', 'N/A')
+        print(f"  {s['name']}:")
+        print(f"    Latest Offsets: {offsets}")
+        print(f"    Last Updated: {timestamp}")
+    
+    # Failed statements
+    failed = [s for s in data if s.get('status') == 'FAILED' and 'insert' in s.get('name', '').lower()]
+    if failed:
+        print(f"\nFAILED Statements: {len(failed)}")
+        for s in failed:
+            print(f"  {s['name']}: {s.get('status_detail', 'Unknown')[:150]}")
+PYEOF
+```
+
+**Key Metrics to Monitor:**
+- **Status**: Should be `RUNNING` for active statements
+- **Latest Offsets**: Shows which partition/offset Flink has processed
+- **Latest Offsets Timestamp**: Indicates when Flink last processed events
+- **Exceptions**: Should be empty for healthy statements
+
+**Note**: If `Latest Offsets Timestamp` is old (hours/days), it may indicate:
+- No new events in the source topic
+- Source table is FAILED and can't read new events
+- Statement is stuck or needs restart
+
+#### Issue 7: Flink Filter Not Matching Events - Data Structure Mismatch
+
+**Symptoms:**
+- Flink statement is RUNNING but no events in filtered topic
+- Statement shows offsets but filtered topic is empty
+- Filter condition uses `__op` or `__table` but events don't match
+
+**Root Cause:**
+The Flink statement expects CDC metadata fields (`__op`, `__table`, `__ts_ms`) that are added by the CDC connector transforms. If the connector doesn't add these fields, the Flink filter will not match any events.
+
+**Example Flink Statement:**
+```sql
+INSERT INTO `filtered-service-events`
+SELECT `id`, `event_name`, `event_type`, `created_date`, `saved_date`, `event_data`, `__op`, `__table`
+FROM `raw-business-events`
+WHERE `event_name` = 'CarServiceDone' AND `__op` = 'c';
+```
+
+**Expected Data Structure in raw-business-events:**
+```json
+{
+  "id": "uuid",
+  "event_name": "CarServiceDone",
+  "event_type": "CarServiceDone",
+  "created_date": "2025-12-11T21:26:10Z",
+  "saved_date": "2025-12-11T21:26:10Z",
+  "event_data": "{...}",
+  "__op": "c",           // ← REQUIRED by Flink filter
+  "__table": "business_events",
+  "__ts_ms": 1733941570000
+}
+```
+
+**Database Table Structure:**
+- Columns: `id`, `event_name`, `event_type`, `created_date`, `saved_date`, `event_data`
+- Note: `__op`, `__table`, `__ts_ms` are NOT in database - added by CDC connector
+
+**Solutions:**
+
+```bash
+# 1. Verify connector configuration includes ExtractNewRecordState transform
+confluent connect describe <connector-name> --output json | \
+  jq '.config | {transforms, unwrap_type: ."transforms.unwrap.type", add_fields: ."transforms.unwrap.add.fields"}'
+
+# Expected output should show:
+# {
+#   "transforms": "unwrap,route",
+#   "unwrap_type": "io.debezium.transforms.ExtractNewRecordState",
+#   "add_fields": "op,table,ts_ms"
+# }
+
+# 2. If connector doesn't have unwrap transform, update it:
+# Use postgres-cdc-source-business-events-confluent-cloud-fixed.json config
+# which includes:
+# - transforms: "unwrap,route"
+# - transforms.unwrap.type: "io.debezium.transforms.ExtractNewRecordState"
+# - transforms.unwrap.add.fields: "op,table,ts_ms"
+# - transforms.unwrap.add.fields.prefix: "__"
+
+# 3. Verify actual data structure in topic
+# Check a sample message to confirm __op field exists
+# (Note: Requires API key setup to consume)
+
+# 4. Alternative: Modify Flink filter to not require __op
+# Remove AND `__op` = 'c' condition if connector doesn't add it
+# But this is NOT recommended - you'll get all operations (insert, update, delete)
+```
+
+**Comparison Table:**
+
+| Component | Has `__op` Field? | Flink Filter Works? |
+|-----------|-------------------|---------------------|
+| Database Table | ❌ No | N/A |
+| Basic Connector (route only) | ❌ No | ❌ Filter fails |
+| Fixed Connector (unwrap + route) | ✅ Yes | ✅ Filter works |
+| Flink Statement Expects | ✅ Yes | ✅ If data has it |
+
+#### Issue 8: Flink Statements Not Processing New Events
+
+**Symptoms:**
+- Flink statements show status `RUNNING`
+- `Latest Offsets Timestamp` is old (hours/days ago)
+- No new events being processed despite new events in source topic
+- Source table may be FAILED
+
+**Diagnosis:**
+
+```bash
+# Check source table status
+confluent flink statement list --compute-pool <compute-pool-id> | grep source-raw-business-events
+
+# Check statement offsets and timestamps
+confluent flink statement describe <statement-name> | grep -E "(Latest Offsets|Timestamp)"
+
+# Compare current time with last processed timestamp
+date -u
+# If timestamp is hours/days old, statement may be stuck
+```
+
+**Solutions:**
+
+```bash
+# 1. If source table is FAILED, fix it first (see Issue 5)
+
+# 2. Restart the statement
+confluent flink statement stop <statement-name>
+confluent flink statement resume <statement-name>
+
+# 3. Check if source topic has new events
+confluent kafka topic describe raw-business-events
+
+# 4. Verify CDC connector is sending events
+confluent connector describe <connector-name> --output json | jq '.status'
+```
+
+#### Issue 9: Cleaning Up Flink Statements
+
+**Symptoms:**
+- Too many COMPLETED or FAILED statements cluttering the compute pool
+- Need to clean up old statements before redeploying
+
+**Solutions:**
+
+```bash
+# Use the cleanup script
+cd cdc-streaming
+bash scripts/cleanup-flink-statements.sh
+
+# Or manually delete COMPLETED/FAILED statements
+confluent flink statement list --compute-pool <compute-pool-id> --output json | \
+  python3 -c "import sys, json; data = json.load(sys.stdin); \
+  to_delete = [s['name'] for s in data if s.get('status') in ['COMPLETED', 'FAILED']]; \
+  [print(name) for name in to_delete]" | \
+  while read name; do
+    confluent flink statement delete "$name" --force
+  done
+
+# After cleanup, redeploy using deployment script
+bash scripts/deploy-business-events-flink.sh
+```
+
+#### Issue 7: Connector Not Capturing Changes
 
 **Symptoms:**
 - Connector is RUNNING but no messages in raw-business-events
@@ -1184,6 +1457,50 @@ SELECT * FROM `cdc-raw.public.car_entities`;
 **Impact**: SQL written for Apache Flink often won't work in Confluent Cloud without significant changes.
 
 **Recommendation**: Always develop Flink SQL in the Web Console first. CLI deployment is best for automation after development.
+
+### Removing Database Migration Code from Lambda Functions
+
+**Important**: Lambda functions should NOT contain database migration code. Database schema should be managed separately.
+
+**Before (Incorrect):**
+```python
+# In lambda_handler.py
+async def _run_migrations(pool):
+    # Migration code here
+    await conn.execute("CREATE TABLE IF NOT EXISTS...")
+
+async def _initialize_service():
+    pool = await get_connection_pool(_config.database_url)
+    await _run_migrations(pool)  # ❌ Don't do this
+    # ...
+```
+
+**After (Correct):**
+```python
+# In lambda_handler.py
+async def _initialize_service():
+    pool = await get_connection_pool(_config.database_url)
+    # ✅ No migration code - schema managed separately
+    # ...
+```
+
+**Apply Schema Separately:**
+```bash
+# Use dedicated script to apply schema
+export DATABASE_PASSWORD="<password-from-env-aurora>"
+AURORA_ENDPOINT="<aurora-endpoint>"
+docker run --rm -i -e PGPASSWORD="$DATABASE_PASSWORD" postgres:15-alpine \
+  psql -h "$AURORA_ENDPOINT" -U postgres -d car_entities -f - < data/schema.sql
+
+# Or use Python script
+python3 scripts/init-aurora-schema.py
+```
+
+**Benefits:**
+- Clear separation of concerns
+- Schema changes don't require Lambda redeployment
+- Easier to version control schema changes
+- Can apply schema updates independently
 
 ### Verifying Data Flow
 

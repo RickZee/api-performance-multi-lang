@@ -9,6 +9,7 @@ import os
 import json
 import logging
 import sys
+import struct
 from datetime import datetime
 from confluent_kafka import Consumer, KafkaError
 
@@ -28,6 +29,33 @@ KAFKA_TOPIC = os.getenv('KAFKA_TOPIC', 'filtered-loan-payment-submitted-events')
 KAFKA_API_KEY = os.getenv('KAFKA_API_KEY', '')
 KAFKA_API_SECRET = os.getenv('KAFKA_API_SECRET', '')
 CONSUMER_GROUP_ID = os.getenv('CONSUMER_GROUP_ID', 'loan-payment-consumer-group')
+
+def deserialize_json_schema_registry(msg_value):
+    """
+    Deserialize JSON Schema Registry format.
+    Format: [0x00][4-byte schema ID][JSON payload]
+    """
+    if not msg_value:
+        return None
+    
+    try:
+        # Check if message starts with magic byte (0x00 for JSON Schema Registry)
+        if msg_value[0] != 0:
+            # Not Schema Registry format, try plain JSON
+            return json.loads(msg_value.decode('utf-8'))
+        
+        # Skip magic byte (1 byte) and schema ID (4 bytes)
+        # Extract JSON payload starting from byte 5
+        json_payload = msg_value[5:].decode('utf-8')
+        return json.loads(json_payload)
+    except (IndexError, struct.error, UnicodeDecodeError, json.JSONDecodeError) as e:
+        logger.warning(f"Failed to deserialize Schema Registry format, trying plain JSON: {e}")
+        # Fallback to plain JSON
+        try:
+            return json.loads(msg_value.decode('utf-8'))
+        except Exception as e2:
+            logger.error(f"Failed to deserialize as plain JSON: {e2}")
+            raise
 
 def process_event(event_value):
     """Process a loan payment event"""
@@ -144,8 +172,12 @@ def main():
                 continue
             
             try:
-                # Deserialize JSON message
-                event_value = json.loads(msg.value().decode('utf-8'))
+                # Deserialize JSON Schema Registry format message
+                event_value = deserialize_json_schema_registry(msg.value())
+                
+                if event_value is None:
+                    logger.warning("Received None event value, skipping")
+                    continue
                 
                 # Process the event
                 process_event(event_value)

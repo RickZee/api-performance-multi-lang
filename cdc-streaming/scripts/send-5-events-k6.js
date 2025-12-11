@@ -24,11 +24,11 @@ import { randomString, randomIntBetween } from 'https://jslib.k6.io/k6-utils/1.2
 const errorRate = new Rate('errors');
 const eventsSent = new Rate('events_sent');
 
-// Test configuration - send 5 events total
-const TOTAL_EVENTS = 5;
+// Test configuration - send 20 events total (5 of each type)
+const TOTAL_EVENTS = 20; // 5 CarCreated + 5 LoanCreated + 5 LoanPaymentSubmitted + 5 CarServiceDone
 export const options = {
     vus: 1,
-    iterations: TOTAL_EVENTS, // 5 total events
+    iterations: TOTAL_EVENTS, // 20 total events
 };
 
 // Get API configuration from environment
@@ -184,38 +184,45 @@ export function setup() {
     const carIds = [];
     const loanIds = [];
     
-    // Generate IDs for 5 events: 2 cars, 1 loan
-    carIds.push(`CAR-${Date.now()}-1`);
-    carIds.push(`CAR-${Date.now()}-2`);
-    loanIds.push(`LOAN-${Date.now()}-1`);
+    // Generate IDs for 20 events: 5 cars, 5 loans
+    for (let i = 1; i <= 5; i++) {
+        carIds.push(`CAR-${Date.now()}-${i}`);
+        loanIds.push(`LOAN-${Date.now()}-${i}`);
+    }
     
     return { carIds, loanIds };
 }
 
 // Main test function
 export default function (data) {
-    const iteration = __ITER; // Current iteration (0-4)
+    const iteration = __ITER; // Current iteration (0-19)
     let payload;
     let eventType;
     
     // Determine which event type based on iteration
-    // 0: CarCreated, 1: CarCreated, 2: LoanCreated, 3: LoanPaymentSubmitted, 4: CarServiceDone
-    if (iteration === 0 || iteration === 1) {
-        // First 2 iterations: CarCreated
+    // 0-4: CarCreated (5 events)
+    // 5-9: LoanCreated (5 events)
+    // 10-14: LoanPaymentSubmitted (5 events)
+    // 15-19: CarServiceDone (5 events)
+    if (iteration < 5) {
+        // First 5 iterations: CarCreated
         const carIndex = iteration;
         payload = generateCarCreatedEvent(data.carIds[carIndex]);
         eventType = "CarCreated";
-    } else if (iteration === 2) {
-        // Third iteration: LoanCreated
-        payload = generateLoanCreatedEvent(data.carIds[0], data.loanIds[0]);
+    } else if (iteration < 10) {
+        // Next 5 iterations: LoanCreated
+        const loanIndex = iteration - 5;
+        payload = generateLoanCreatedEvent(data.carIds[loanIndex], data.loanIds[loanIndex]);
         eventType = "LoanCreated";
-    } else if (iteration === 3) {
-        // Fourth iteration: LoanPaymentSubmitted
-        payload = generateLoanPaymentEvent(data.loanIds[0]);
+    } else if (iteration < 15) {
+        // Next 5 iterations: LoanPaymentSubmitted
+        const paymentIndex = iteration - 10;
+        payload = generateLoanPaymentEvent(data.loanIds[paymentIndex]);
         eventType = "LoanPaymentSubmitted";
     } else {
-        // Fifth iteration: CarServiceDone
-        payload = generateCarServiceEvent(data.carIds[0]);
+        // Last 5 iterations: CarServiceDone
+        const serviceIndex = iteration - 15;
+        payload = generateCarServiceEvent(data.carIds[serviceIndex]);
         eventType = "CarServiceDone";
     }
     
@@ -245,7 +252,7 @@ export default function (data) {
     eventsSent.add(success);
     
     // Log event type
-    console.log(`Sent ${eventType} event (iteration ${iteration + 1}/5)`);
+    console.log(`Sent ${eventType} event (iteration ${iteration + 1}/20)`);
     
     // Small delay between requests
     sleep(0.5);
@@ -256,18 +263,18 @@ export function handleSummary(data) {
     return {
         'stdout': `
 ========================================
-k6 Test Summary - Send 5 Events Total
+k6 Test Summary - Send 20 Events Total (5 of Each Type)
 ========================================
 Total Iterations: ${data.metrics.iterations.values.count}
-Events Sent Successfully: ${data.metrics.events_sent.values.rate * data.metrics.iterations.values.count}
+Events Sent Successfully: ${Math.round(data.metrics.events_sent.values.rate * data.metrics.iterations.values.count)}
 Error Rate: ${(data.metrics.errors.values.rate * 100).toFixed(2)}%
 Total Duration: ${(data.metrics.iteration_duration.values.max / 1000).toFixed(2)}s
 
 Event Types Sent:
-- CarCreated: 2 events
-- LoanCreated: 1 event
-- LoanPaymentSubmitted: 1 event
-- CarServiceDone: 1 event
+- CarCreated: 5 events
+- LoanCreated: 5 events
+- LoanPaymentSubmitted: 5 events
+- CarServiceDone: 5 events
 
 API Endpoint: ${fullApiUrl}
 ========================================
