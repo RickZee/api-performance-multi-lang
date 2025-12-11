@@ -75,3 +75,8 @@ archive/
 
 # Test results
 scripts/test-results/
+
+# Environment files
+.env.*.local
+.env.aurora
+**/.env.aurora
