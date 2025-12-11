@@ -1,0 +1,32 @@
+{
+  "name": "postgres-cdc-source-business-events",
+  "config": {
+    "connector.class": "PostgresCdcSource",
+    "name": "postgres-cdc-source-business-events",
+    "kafka.api.key": "${KAFKA_API_KEY}",
+    "kafka.api.secret": "${KAFKA_API_SECRET}",
+    "output.data.format": "JSON",
+    "database.hostname": "${DB_HOSTNAME}",
+    "database.port": "${DB_PORT:-5432}",
+    "database.user": "${DB_USERNAME}",
+    "database.password": "${DB_PASSWORD}",
+    "database.dbname": "${DB_NAME}",
+    "database.server.name": "${DB_SERVER_NAME:-aurora-postgres-cdc}",
+    "database.sslmode": "${DB_SSLMODE:-require}",
+    "table.include.list": "${TABLE_INCLUDE_LIST:-public.business_events}",
+    "plugin.name": "pgoutput",
+    "slot.name": "${SLOT_NAME:-business_events_cdc_slot}",
+    "snapshot.mode": "initial",
+    "output.data.key.format": "JSON",
+    "output.data.value.format": "JSON",
+    "tasks.max": "1",
+    "transforms": "unwrap,route",
+    "transforms.unwrap.type": "io.debezium.transforms.ExtractNewRecordState",
+    "transforms.unwrap.drop.tombstones": "false",
+    "transforms.unwrap.add.fields": "op,table,ts_ms",
+    "transforms.unwrap.add.fields.prefix": "__",
+    "transforms.route.type": "io.confluent.connect.cloud.transforms.TopicRegexRouter",
+    "transforms.route.regex": "${TOPIC_PREFIX:-aurora-postgres-cdc}\\.public\\.business_events",
+    "transforms.route.replacement": "raw-business-events"
+  }
+}
