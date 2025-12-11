@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """
-Loan Consumer Example
-Consumes filtered loan events from Kafka topic: filtered-loan-events
+Loan Consumer
+Consumes filtered loan created events from Kafka topic: filtered-loan-created-events
+Connects to Confluent Cloud Kafka with SASL_SSL authentication
 """
 
 import os
@@ -10,9 +11,6 @@ import logging
 import sys
 from datetime import datetime
 from confluent_kafka import Consumer, KafkaError
-from confluent_kafka.schema_registry import SchemaRegistryClient
-from confluent_kafka.schema_registry.avro import AvroDeserializer
-from confluent_kafka.serialization import SerializationContext, MessageField
 
 # Configure logging
 logging.basicConfig(
@@ -27,23 +25,47 @@ logger = logging.getLogger('loan-consumer')
 # Configuration from environment variables
 KAFKA_BOOTSTRAP_SERVERS = os.getenv('KAFKA_BOOTSTRAP_SERVERS', 'kafka:29092')
 KAFKA_TOPIC = os.getenv('KAFKA_TOPIC', 'filtered-loan-created-events')
-SCHEMA_REGISTRY_URL = os.getenv('SCHEMA_REGISTRY_URL', 'http://schema-registry:8081')
+KAFKA_API_KEY = os.getenv('KAFKA_API_KEY', '')
+KAFKA_API_SECRET = os.getenv('KAFKA_API_SECRET', '')
 CONSUMER_GROUP_ID = os.getenv('CONSUMER_GROUP_ID', 'loan-consumer-group')
 
 def process_event(event_value):
     """Process a loan event"""
     try:
-        event_header = event_value.get('eventHeader', {})
-        event_body = event_value.get('eventBody', {})
-        filter_metadata = event_value.get('filterMetadata', {})
+        # Extract flat structure fields
+        event_id = event_value.get('id', 'Unknown')
+        event_name = event_value.get('event_name', 'Unknown')
+        event_type = event_value.get('event_type', 'Unknown')
+        created_date = event_value.get('created_date', 'Unknown')
+        saved_date = event_value.get('saved_date', 'Unknown')
+        cdc_op = event_value.get('__op', 'Unknown')
+        cdc_table = event_value.get('__table', 'Unknown')
         
-        event_name = event_header.get('eventName', 'Unknown')
+        # Parse event_data JSON string to access nested structure
+        event_data_str = event_value.get('event_data', '{}')
+        try:
+            event_data = json.loads(event_data_str) if isinstance(event_data_str, str) else event_data_str
+        except json.JSONDecodeError as e:
+            logger.error(f"Failed to parse event_data JSON: {e}")
+            event_data = {}
+        
+        # Extract nested structure
+        event_header = event_data.get('eventHeader', {})
+        event_body = event_data.get('eventBody', {})
         entities = event_body.get('entities', [])
         
-        logger.info(f"Received loan event: {event_name}")
-        logger.info(f"Filter ID: {filter_metadata.get('filterId', 'N/A')}")
-        logger.info(f"Consumer ID: {filter_metadata.get('consumerId', 'N/A')}")
+        # Print event information
+        logger.info("=" * 80)
+        logger.info(f"Loan Event Received")
+        logger.info(f"  Event ID: {event_id}")
+        logger.info(f"  Event Name: {event_name}")
+        logger.info(f"  Event Type: {event_type}")
+        logger.info(f"  Created Date: {created_date}")
+        logger.info(f"  Saved Date: {saved_date}")
+        logger.info(f"  CDC Operation: {cdc_op}")
+        logger.info(f"  CDC Table: {cdc_table}")
         
+        # Process entities
         for entity in entities:
             entity_type = entity.get('entityType', 'Unknown')
             entity_id = entity.get('entityId', 'Unknown')
@@ -64,7 +86,7 @@ def process_event(event_value):
                     logger.info(f"    Payment Amount: {payment_data.get('amount', 'N/A')}")
                     logger.info(f"    Payment Date: {payment_data.get('paymentDate', 'N/A')}")
         
-        logger.info("-" * 80)
+        logger.info("=" * 80)
         
     except Exception as e:
         logger.error(f"Error processing event: {e}", exc_info=True)
@@ -74,7 +96,6 @@ def main():
     logger.info("Starting Loan Consumer...")
     logger.info(f"Bootstrap Servers: {KAFKA_BOOTSTRAP_SERVERS}")
     logger.info(f"Topic: {KAFKA_TOPIC}")
-    logger.info(f"Schema Registry: {SCHEMA_REGISTRY_URL}")
     logger.info(f"Consumer Group: {CONSUMER_GROUP_ID}")
     
     # Configure Kafka consumer
@@ -87,29 +108,20 @@ def main():
         'max.poll.interval.ms': 300000
     }
     
+    # Add Confluent Cloud authentication if API key/secret are provided
+    if KAFKA_API_KEY and KAFKA_API_SECRET:
+        consumer_config.update({
+            'security.protocol': 'SASL_SSL',
+            'sasl.mechanism': 'PLAIN',
+            'sasl.username': KAFKA_API_KEY,
+            'sasl.password': KAFKA_API_SECRET
+        })
+        logger.info("Using Confluent Cloud SASL_SSL authentication")
+    else:
+        logger.info("Using local Kafka (no authentication)")
+    
     consumer = Consumer(consumer_config)
     consumer.subscribe([KAFKA_TOPIC])
-    
-    # Setup Schema Registry and Avro Deserializer
-    schema_registry_client = SchemaRegistryClient({'url': SCHEMA_REGISTRY_URL})
-    
-    # For simplicity, we'll use JSON deserializer if Avro is not available
-    # In production, use AvroDeserializer with proper schema
-    use_avro = os.getenv('USE_AVRO', 'false').lower() == 'true'
-    
-    if use_avro:
-        # Get the latest schema version
-        try:
-            subject = f"{KAFKA_TOPIC}-value"
-            schema = schema_registry_client.get_latest_version(subject)
-            avro_deserializer = AvroDeserializer(
-                schema_registry_client,
-                schema.schema.schema_str
-            )
-            logger.info("Using Avro deserializer")
-        except Exception as e:
-            logger.warning(f"Could not load Avro schema, using JSON: {e}")
-            use_avro = False
     
     logger.info("Consumer started. Waiting for messages...")
     
@@ -128,15 +140,8 @@ def main():
                 continue
             
             try:
-                # Deserialize message
-                if use_avro:
-                    event_value = avro_deserializer(
-                        msg.value(),
-                        SerializationContext(msg.topic(), MessageField.VALUE)
-                    )
-                else:
-                    # Fallback to JSON
-                    event_value = json.loads(msg.value().decode('utf-8'))
+                # Deserialize JSON message
+                event_value = json.loads(msg.value().decode('utf-8'))
                 
                 # Process the event
                 process_event(event_value)

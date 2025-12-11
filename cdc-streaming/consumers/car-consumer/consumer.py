@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
-Service Consumer
-Consumes filtered service events from Kafka topic: filtered-service-events
+Car Consumer
+Consumes filtered car created events from Kafka topic: filtered-car-created-events
 Connects to Confluent Cloud Kafka with SASL_SSL authentication
 """
 
@@ -20,17 +20,17 @@ logging.basicConfig(
         logging.StreamHandler(sys.stdout)
     ]
 )
-logger = logging.getLogger('service-consumer')
+logger = logging.getLogger('car-consumer')
 
 # Configuration from environment variables
 KAFKA_BOOTSTRAP_SERVERS = os.getenv('KAFKA_BOOTSTRAP_SERVERS', 'kafka:29092')
-KAFKA_TOPIC = os.getenv('KAFKA_TOPIC', 'filtered-service-events')
+KAFKA_TOPIC = os.getenv('KAFKA_TOPIC', 'filtered-car-created-events')
 KAFKA_API_KEY = os.getenv('KAFKA_API_KEY', '')
 KAFKA_API_SECRET = os.getenv('KAFKA_API_SECRET', '')
-CONSUMER_GROUP_ID = os.getenv('CONSUMER_GROUP_ID', 'service-consumer-group')
+CONSUMER_GROUP_ID = os.getenv('CONSUMER_GROUP_ID', 'car-consumer-group')
 
 def process_event(event_value):
-    """Process a service event"""
+    """Process a car event"""
     try:
         # Extract flat structure fields
         event_id = event_value.get('id', 'Unknown')
@@ -56,7 +56,7 @@ def process_event(event_value):
         
         # Print event information
         logger.info("=" * 80)
-        logger.info(f"Service Event Received")
+        logger.info(f"Car Event Received")
         logger.info(f"  Event ID: {event_id}")
         logger.info(f"  Event Name: {event_name}")
         logger.info(f"  Event Type: {event_type}")
@@ -73,17 +73,17 @@ def process_event(event_value):
             
             logger.info(f"  Entity Type: {entity_type}, Entity ID: {entity_id}")
             
-            # Process service-specific attributes
-            if entity_type == 'ServiceRecord':
-                service_data = updated_attrs.get('service', {})
-                if service_data:
-                    logger.info(f"    Service ID: {service_data.get('id', 'N/A')}")
-                    logger.info(f"    Service Date: {service_data.get('serviceDate', 'N/A')}")
-                    logger.info(f"    Amount Paid: {service_data.get('amountPaid', 'N/A')}")
-                    logger.info(f"    Dealer: {service_data.get('dealerName', 'N/A')}")
-                    logger.info(f"    Service Type: {service_data.get('serviceType', 'N/A')}")
-                    logger.info(f"    Description: {service_data.get('description', 'N/A')}")
-                    logger.info(f"    Mileage at Service: {service_data.get('mileageAtService', 'N/A')}")
+            # Process car-specific attributes
+            if entity_type == 'Car':
+                car_data = updated_attrs.get('car', {})
+                if car_data:
+                    logger.info(f"    VIN: {car_data.get('vin', 'N/A')}")
+                    logger.info(f"    Make: {car_data.get('make', 'N/A')}")
+                    logger.info(f"    Model: {car_data.get('model', 'N/A')}")
+                    logger.info(f"    Year: {car_data.get('year', 'N/A')}")
+                    logger.info(f"    Color: {car_data.get('color', 'N/A')}")
+                    logger.info(f"    Mileage: {car_data.get('mileage', 'N/A')}")
+                    logger.info(f"    Status: {car_data.get('status', 'N/A')}")
         
         logger.info("=" * 80)
         
@@ -92,7 +92,7 @@ def process_event(event_value):
 
 def main():
     """Main consumer loop"""
-    logger.info("Starting Service Consumer...")
+    logger.info("Starting Car Consumer...")
     logger.info(f"Bootstrap Servers: {KAFKA_BOOTSTRAP_SERVERS}")
     logger.info(f"Topic: {KAFKA_TOPIC}")
     logger.info(f"Consumer Group: {CONSUMER_GROUP_ID}")
@@ -156,14 +156,3 @@ def main():
 
 if __name__ == '__main__':
     main()
-
-
-
-
-
-
-
-
-
-
-

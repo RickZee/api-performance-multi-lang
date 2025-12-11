@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
-Service Consumer
-Consumes filtered service events from Kafka topic: filtered-service-events
+Loan Payment Consumer
+Consumes filtered loan payment events from Kafka topic: filtered-loan-payment-submitted-events
 Connects to Confluent Cloud Kafka with SASL_SSL authentication
 """
 
@@ -20,17 +20,17 @@ logging.basicConfig(
         logging.StreamHandler(sys.stdout)
     ]
 )
-logger = logging.getLogger('service-consumer')
+logger = logging.getLogger('loan-payment-consumer')
 
 # Configuration from environment variables
 KAFKA_BOOTSTRAP_SERVERS = os.getenv('KAFKA_BOOTSTRAP_SERVERS', 'kafka:29092')
-KAFKA_TOPIC = os.getenv('KAFKA_TOPIC', 'filtered-service-events')
+KAFKA_TOPIC = os.getenv('KAFKA_TOPIC', 'filtered-loan-payment-submitted-events')
 KAFKA_API_KEY = os.getenv('KAFKA_API_KEY', '')
 KAFKA_API_SECRET = os.getenv('KAFKA_API_SECRET', '')
-CONSUMER_GROUP_ID = os.getenv('CONSUMER_GROUP_ID', 'service-consumer-group')
+CONSUMER_GROUP_ID = os.getenv('CONSUMER_GROUP_ID', 'loan-payment-consumer-group')
 
 def process_event(event_value):
-    """Process a service event"""
+    """Process a loan payment event"""
     try:
         # Extract flat structure fields
         event_id = event_value.get('id', 'Unknown')
@@ -56,7 +56,7 @@ def process_event(event_value):
         
         # Print event information
         logger.info("=" * 80)
-        logger.info(f"Service Event Received")
+        logger.info(f"Loan Payment Event Received")
         logger.info(f"  Event ID: {event_id}")
         logger.info(f"  Event Name: {event_name}")
         logger.info(f"  Event Type: {event_type}")
@@ -73,17 +73,14 @@ def process_event(event_value):
             
             logger.info(f"  Entity Type: {entity_type}, Entity ID: {entity_id}")
             
-            # Process service-specific attributes
-            if entity_type == 'ServiceRecord':
-                service_data = updated_attrs.get('service', {})
-                if service_data:
-                    logger.info(f"    Service ID: {service_data.get('id', 'N/A')}")
-                    logger.info(f"    Service Date: {service_data.get('serviceDate', 'N/A')}")
-                    logger.info(f"    Amount Paid: {service_data.get('amountPaid', 'N/A')}")
-                    logger.info(f"    Dealer: {service_data.get('dealerName', 'N/A')}")
-                    logger.info(f"    Service Type: {service_data.get('serviceType', 'N/A')}")
-                    logger.info(f"    Description: {service_data.get('description', 'N/A')}")
-                    logger.info(f"    Mileage at Service: {service_data.get('mileageAtService', 'N/A')}")
+            # Process loan payment-specific attributes
+            if entity_type == 'LoanPayment':
+                payment_data = updated_attrs.get('loanPayment', {})
+                if payment_data:
+                    logger.info(f"    Payment Amount: {payment_data.get('amount', 'N/A')}")
+                    logger.info(f"    Payment Date: {payment_data.get('paymentDate', 'N/A')}")
+                    logger.info(f"    Loan ID: {payment_data.get('loanId', 'N/A')}")
+                    logger.info(f"    Status: {payment_data.get('status', 'N/A')}")
         
         logger.info("=" * 80)
         
@@ -92,7 +89,7 @@ def process_event(event_value):
 
 def main():
     """Main consumer loop"""
-    logger.info("Starting Service Consumer...")
+    logger.info("Starting Loan Payment Consumer...")
     logger.info(f"Bootstrap Servers: {KAFKA_BOOTSTRAP_SERVERS}")
     logger.info(f"Topic: {KAFKA_TOPIC}")
     logger.info(f"Consumer Group: {CONSUMER_GROUP_ID}")
@@ -156,14 +153,3 @@ def main():
 
 if __name__ == '__main__':
     main()
-
-
-
-
-
-
-
-
-
-
-
