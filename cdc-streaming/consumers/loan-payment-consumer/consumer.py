@@ -101,7 +101,15 @@ def main():
         'auto.offset.reset': 'earliest',
         'enable.auto.commit': True,
         'session.timeout.ms': 30000,
-        'max.poll.interval.ms': 300000
+        'max.poll.interval.ms': 300000,
+        # Network keepalive and timeout settings for Confluent Cloud
+        'socket.keepalive.enable': True,  # Enable TCP keepalive to prevent idle connection drops
+        'heartbeat.interval.ms': 10000,  # Should be 1/3 of session.timeout.ms
+        'request.timeout.ms': 40000,  # Should be higher than session.timeout.ms
+        'socket.timeout.ms': 60000,  # Network socket timeout
+        'connections.max.idle.ms': 300000,  # 5 minutes - prevent idle connection drops
+        'reconnect.backoff.ms': 100,  # Initial reconnect backoff
+        'reconnect.backoff.max.ms': 10000  # Max reconnect backoff
     }
     
     # Add Confluent Cloud authentication if API key/secret are provided

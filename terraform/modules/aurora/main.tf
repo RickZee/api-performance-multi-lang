@@ -158,6 +158,10 @@ resource "aws_rds_cluster" "this" {
       Name = "${var.project_name}-aurora-cluster"
     }
   )
+
+  lifecycle {
+    ignore_changes = [master_password]
+  }
 }
 
 # Aurora Cluster Instance (Primary)
