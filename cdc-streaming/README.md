@@ -1,6 +1,8 @@
 # CDC Streaming Architecture
 
-A configurable streaming architecture that enables event-based consumers to subscribe to filtered subsets of events. This implementation uses Confluent Platform (Kafka, Schema Registry, Control Center, Connect), Confluent Postgres Source Connector for CDC, and Flink SQL for stream processing.
+A configurable streaming architecture that enables event-based consumers to subscribe to filtered subsets of events. This implementation uses Confluent Platform (Kafka, Schema Registry, Control Center, Connect), **Confluent Managed PostgreSQL CDC Source Connector** (recommended) or Debezium connectors for CDC, and Flink SQL for stream processing.
+
+> **For troubleshooting and problems/solutions**, see [PROBLEMS_AND_SOLUTIONS.md](../PROBLEMS_AND_SOLUTIONS.md)
 
 ## Overview
 
@@ -14,7 +16,7 @@ This CDC streaming system captures changes from PostgreSQL database tables and s
 
 ## Architecture
 
-The system captures database changes via CDC, streams them through Kafka, and uses Flink SQL to filter and route events to consumer-specific topics. Key components include Confluent Platform (Kafka, Schema Registry, Kafka Connect), Flink for stream processing, and Debezium-based PostgreSQL CDC connector.
+The system captures database changes via CDC, streams them through Kafka, and uses Flink SQL to filter and route events to consumer-specific topics. Key components include Confluent Platform (Kafka, Schema Registry, Kafka Connect), Flink for stream processing, and **Confluent Managed PostgreSQL CDC Source Connector** (recommended) or Debezium-based PostgreSQL CDC connector.
 
 For comprehensive architecture documentation including detailed data flow diagrams, component deep dives, and how consumers interact with the system, see [ARCHITECTURE.md](ARCHITECTURE.md).
 
@@ -92,36 +94,13 @@ Access Control Center at: http://localhost:9021
 
 For complete Confluent Cloud setup instructions, see **[CONFLUENT_CLOUD_SETUP_GUIDE.md](CONFLUENT_CLOUD_SETUP_GUIDE.md)**.
 
-**Quick Start:**
-```bash
-# Login to Confluent Cloud
-confluent login
-
-# Create environment
-confluent environment create prod --stream-governance
-
-# Create Kafka cluster
-confluent kafka cluster create prod-kafka-east \
-  --cloud aws \
-  --region us-east-1 \
-  --type dedicated \
-  --cku 2
-
-# Create Flink compute pool
-confluent flink compute-pool create prod-flink-east \
-  --cloud aws \
-  --region us-east-1 \
-  --max-cfu 4
-```
-
-**What's Included:**
-- Managed Kafka cluster (auto-scaling, multi-zone)
-- Schema Registry (auto-enabled with Stream Governance)
-- Flink compute pools (managed Flink infrastructure)
-- Built-in monitoring and alerting
-- High availability and automatic failover
-
-For detailed setup steps, CI/CD alternatives (Terraform, REST API, GitHub Actions), and advanced topics, see [CONFLUENT_CLOUD_SETUP_GUIDE.md](CONFLUENT_CLOUD_SETUP_GUIDE.md).
+The setup guide includes:
+- Step-by-step account and cluster setup
+- Topic creation and configuration
+- Connector deployment
+- Flink SQL deployment
+- CI/CD alternatives (Terraform, REST API, GitHub Actions)
+- Advanced topics (multi-region, PrivateLink, etc.)
 
 ### 2. Create Kafka Topics
 
@@ -140,20 +119,9 @@ This creates:
 
 #### Option B: Confluent Cloud (Production)
 
-Create topics in Confluent Cloud:
+For topic creation in Confluent Cloud, see [CONFLUENT_CLOUD_SETUP_GUIDE.md](CONFLUENT_CLOUD_SETUP_GUIDE.md) - [Topic Creation](#topic-creation) section.
 
-```bash
-# Set cluster context
-confluent kafka cluster use <cluster-id>
-
-# Create raw-business-events topic (only topic that needs manual creation)
-confluent kafka topic create raw-business-events --partitions 6
-
-# Note: Filtered topics are automatically created by Flink when it writes to them.
-# No manual creation is required for filtered topics.
-```
-
-For detailed topic creation steps, CI/CD alternatives (Terraform, REST API, GitHub Actions), and topic configuration, see [CONFLUENT_CLOUD_SETUP_GUIDE.md](CONFLUENT_CLOUD_SETUP_GUIDE.md).
+**Note**: Filtered topics are automatically created by Flink when it writes to them. Only `raw-business-events` needs manual creation.
 
 ### 3. Set Up Postgres Connector
 
@@ -172,51 +140,22 @@ This will:
 
 #### Option B: Confluent Cloud (Production)
 
-Deploy Postgres Source Connector to Confluent Cloud:
-
-```bash
-# Using Confluent Cloud managed connectors
-confluent connector create postgres-source \
-  --kafka-cluster <cluster-id> \
-  --config-file connectors/postgres-source-connector.json
-```
-
-For detailed connector setup steps, configuration examples, and CI/CD alternatives (Terraform, REST API, GitHub Actions), see [CONFLUENT_CLOUD_SETUP_GUIDE.md](CONFLUENT_CLOUD_SETUP_GUIDE.md).
+For connector deployment in Confluent Cloud, see:
+- [CONFLUENT_CONNECTOR_GUIDE.md](CONFLUENT_CONNECTOR_GUIDE.md) - Confluent managed connectors guide
+- [CONFLUENT_CLOUD_SETUP_GUIDE.md](CONFLUENT_CLOUD_SETUP_GUIDE.md) - [Connector Setup](#connector-setup) section
 
 ### 4. Deploy Flink SQL Jobs
 
 #### Option A: Confluent Cloud Flink (Recommended)
 
-Deploy Flink SQL statements to Confluent Cloud compute pools. This option provides:
+For Flink SQL deployment in Confluent Cloud, see [CONFLUENT_CLOUD_SETUP_GUIDE.md](CONFLUENT_CLOUD_SETUP_GUIDE.md) - [Flink Compute Pool Setup](#flink-compute-pool-setup) and [Deploy Flink SQL Statements](#deploy-flink-sql-statements) sections.
 
-- **Managed Infrastructure**: No need to manage JobManager or TaskManager instances
-- **Auto-Scaling**: Automatically adjusts compute resources based on workload demands
-- **High Availability**: Automatic failover and data replication
-- **Built-in Integration**: Seamless integration with Schema Registry, RBAC, and private networking
-- **SQL-Based Deployment**: Deploy jobs as SQL statements without JAR files
-- **Built-in Monitoring**: Real-time metrics and execution logs
-
-Deploy Flink SQL statements:
-
-```bash
-# Create compute pool
-confluent flink compute-pool create prod-flink-east \
-  --cloud aws \
-  --region us-east-1 \
-  --max-cfu 4
-
-# Deploy SQL statement
-confluent flink statement create \
-  --compute-pool cp-east-123 \
-  --statement-name event-routing-job \
-  --statement-file flink-jobs/routing-generated.sql
-
-# Monitor statement
-confluent flink statement describe ss-456789 \
-  --compute-pool cp-east-123
-```
-
-For detailed Flink SQL deployment steps, SQL configuration, and CI/CD alternatives (Terraform, REST API, GitHub Actions, Jenkins, Kubernetes), see [CONFLUENT_CLOUD_SETUP_GUIDE.md](CONFLUENT_CLOUD_SETUP_GUIDE.md).
+Confluent Cloud Flink provides:
+- Managed infrastructure with auto-scaling
+- High availability and automatic failover
+- Built-in integration with Schema Registry
+- SQL-based deployment without JAR files
+- Real-time metrics and monitoring
 
 #### Option B: Self-Managed Flink (Local Development Only)
 
@@ -866,7 +805,7 @@ curl -X POST http://localhost:9081/api/v1/events \
 
 ### Verify Event Flow
 
-For comprehensive pipeline validation including detailed steps for verifying events in Kafka, validating Flink jobs, troubleshooting common issues, and end-to-end testing procedures, see [PIPELINE_VALIDATION.md](PIPELINE_VALIDATION.md).
+For comprehensive pipeline validation including detailed steps for verifying events in Kafka, validating Flink jobs, troubleshooting common issues, and end-to-end testing procedures, see [PIPELINE_VALIDATION.md](PIPELINE_VALIDATION.md). For troubleshooting, see [PROBLEMS_AND_SOLUTIONS.md](../../PROBLEMS_AND_SOLUTIONS.md) and [TROUBLESHOOTING_GUIDE.md](TROUBLESHOOTING_GUIDE.md).
 
 Quick verification:
 1. **Check Raw Events**: Verify events appear in `raw-business-events` topic

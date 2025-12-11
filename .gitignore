@@ -70,3 +70,8 @@ __pycache__/
 *.so
 .Python
 
+# Locally stored archived files
+archive/
+
+# Test results
+scripts/test-results/

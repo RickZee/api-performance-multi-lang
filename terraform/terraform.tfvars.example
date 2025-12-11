@@ -25,12 +25,47 @@ log_level    = "info"
 # Database creation (optional)
 # enable_database = false
 
+# Aurora PostgreSQL (recommended for Confluent Cloud integration)
+# enable_aurora = true
+# aurora_instance_class = "db.t3.medium"  # Minimal provisioned instance
+
+# Public Internet Access for Confluent Cloud (Option 1)
+# =====================================================
+# When to use: For testing or if RDS is publicly accessible
+# Requirements: RDS instance must have "Publicly accessible" enabled
+# Security: Use confluent_cloud_cidrs to restrict access to Confluent Cloud IPs only
+# Connector: Use Postgres CDC Source V2 (Debezium) in Confluent Cloud
+#
+# aurora_publicly_accessible = true
+#
+# Option A: Restricted access (RECOMMENDED)
+# Restrict security group to Confluent Cloud IP ranges only
+# Get IP ranges using: terraform/scripts/get-confluent-cloud-ips.sh
+# Or check: https://docs.confluent.io/cloud/current/networking/ip-ranges.html
+# confluent_cloud_cidrs = [
+#   "13.57.0.0/16",  # Example - replace with actual Confluent Cloud egress IPs
+#   "52.0.0.0/16"    # Example - replace with actual Confluent Cloud egress IPs
+# ]
+#
+# Option B: Unrestricted access (NOT RECOMMENDED for production)
+# Allows access from any IP address - use with caution
+# confluent_cloud_cidrs = []  # Empty means use aurora_allowed_cidr_blocks
+# aurora_allowed_cidr_blocks = ["0.0.0.0/0"]  # Allows all IPs
+#
+# Note: For production, prefer AWS PrivateLink (Option 2) over public access
+# See: terraform/PUBLIC_ACCESS_SETUP.md for complete setup guide
+
 # Lambda configuration
 # lambda_memory_size = 512
 # lambda_timeout     = 30
 
 # S3 bucket name (optional, will be auto-generated if not provided)
 # s3_bucket_name = ""
+
+# Terraform State Backend (S3)
+# enable_terraform_state_backend = true  # Create S3 bucket and DynamoDB table for state
+# terraform_state_bucket_name = ""       # Auto-generated if empty
+# terraform_state_dynamodb_table_name = ""  # Auto-generated if empty
 
 # Tags
 # tags = {

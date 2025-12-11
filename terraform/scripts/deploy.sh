@@ -74,7 +74,16 @@ fi
 
 # Initialize Terraform
 print_step "Initializing Terraform..."
-terraform init
+
+# Check if backend is configured
+if [ -f "terraform.tfbackend" ]; then
+    print_info "Using S3 backend configuration..."
+    terraform init -backend-config=terraform.tfbackend
+else
+    print_info "Using local state (backend not configured yet)..."
+    print_warn "After first apply, run ./scripts/setup-backend.sh to migrate to S3"
+    terraform init -backend=false
+fi
 
 # Format Terraform files
 print_step "Formatting Terraform files..."

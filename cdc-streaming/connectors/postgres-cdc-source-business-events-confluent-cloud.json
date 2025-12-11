@@ -1,0 +1,29 @@
+{
+  "name": "postgres-cdc-source-business-events",
+  "config": {
+    "connector.class": "PostgresCdcSource",
+    "name": "postgres-cdc-source-business-events",
+    "kafka.auth.mode": "SASL_SSL",
+    "kafka.api.key": "${KAFKA_API_KEY}",
+    "kafka.api.secret": "${KAFKA_API_SECRET}",
+    "output.data.format": "JSON",
+    "database.hostname": "${DB_HOSTNAME}",
+    "database.port": "${DB_PORT:-5432}",
+    "database.user": "${DB_USERNAME}",
+    "database.password": "${DB_PASSWORD}",
+    "database.dbname": "${DB_NAME}",
+    "database.server.name": "${DB_SERVER_NAME:-aurora-postgres-cdc}",
+    "table.include.list": "${TABLE_INCLUDE_LIST:-public.business_events}",
+    "plugin.name": "pgoutput",
+    "slot.name": "${SLOT_NAME:-business_events_cdc_slot}",
+    "snapshot.mode": "initial",
+    "output.data.key.format": "JSON",
+    "output.data.value.format": "JSON",
+    "topic.prefix": "${TOPIC_PREFIX:-aurora-cdc}",
+    "tasks.max": "1",
+    "transforms": "route",
+    "transforms.route.type": "org.apache.kafka.connect.transforms.RegexRouter",
+    "transforms.route.regex": "${TOPIC_PREFIX:-aurora-cdc}.public.business_events",
+    "transforms.route.replacement": "raw-business-events"
+  }
+}

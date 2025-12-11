@@ -82,6 +82,12 @@ export const API_CONFIG = {
         method: 'ProcessEvent',
         isLambda: true,
     },
+    'producer-api-python-rest-lambda': {
+        protocol: 'http',
+        apiUrl: __ENV.API_URL || __ENV.LAMBDA_API_URL || __ENV.LAMBDA_PYTHON_REST_API_URL,
+        path: '/api/v1/events',
+        isLambda: true,
+    },
 };
 
 // Test phases configuration

@@ -11,7 +11,8 @@
       "producer-api-go-rest-lambda": 9084,
       "producer-api-go-grpc-lambda": 9085,
       "producer-api-java-rest-lambda": 9086,
-      "producer-api-java-grpc-lambda": 9087
+      "producer-api-java-grpc-lambda": 9087,
+      "producer-api-python-rest-lambda": 9088
     },
     "memory_mb": 512,
     "timeout_seconds": 30,
