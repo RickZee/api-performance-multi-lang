@@ -54,6 +54,7 @@ class ConfigManager:
         "producer-api-go-grpc",
         "producer-api-go-rest-lambda",
         "producer-api-go-grpc-lambda",
+        "producer-api-python-rest-lambda",
     ]
     
     @staticmethod
@@ -143,6 +144,16 @@ class ConfigManager:
                 service_name="com.example.grpc.EventService",
                 method_name="ProcessEvent",
                 health_check_port=9085,
+                is_lambda=True,
+            ),
+            "producer-api-python-rest-lambda": APIConfig(
+                name="producer-api-python-rest-lambda",
+                test_file="lambda-rest-api-test.js",
+                port=9088,
+                protocol="http",
+                profile="lambda",  # Not used for Lambda, but kept for consistency
+                docker_host="localhost",  # Lambda APIs run on localhost via SAM Local
+                health_check_port=9088,
                 is_lambda=True,
             ),
         }

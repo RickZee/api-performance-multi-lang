@@ -20,6 +20,64 @@ This setup works alongside the existing SAM templates, providing an alternative 
 - Go 1.21+ (for building Lambda functions)
 - AWS account with appropriate permissions
 
+## Terraform State Backend (S3)
+
+This configuration supports storing Terraform state in S3 with DynamoDB locking for team collaboration and state safety.
+
+### Initial Setup (First Time)
+
+1. **Deploy with local state first** to create the S3 bucket and DynamoDB table:
+   ```bash
+   # Ensure enable_terraform_state_backend = true in terraform.tfvars (default)
+   terraform init -backend=false
+   terraform apply
+   ```
+
+2. **Migrate to S3 backend** after the first apply:
+   ```bash
+   ./scripts/setup-backend.sh
+   ```
+   
+   This script will:
+   - Get the S3 bucket and DynamoDB table names from Terraform outputs
+   - Create `terraform.tfbackend` configuration file
+   - Migrate your local state to S3
+
+3. **Future operations** will automatically use the S3 backend.
+
+### Using Existing Backend
+
+If you're working with an existing Terraform setup that already has a backend configured:
+
+```bash
+# Copy the example backend config
+cp terraform.tfbackend.example terraform.tfbackend
+
+# Edit terraform.tfbackend with your bucket and table names
+# Then initialize
+terraform init -backend-config=terraform.tfbackend
+```
+
+### Backend Configuration
+
+The backend uses:
+- **S3 Bucket**: Stores Terraform state files (versioned and encrypted)
+- **DynamoDB Table**: Provides state locking to prevent concurrent modifications
+- **Auto-created**: Both resources are created automatically when `enable_terraform_state_backend = true` (default)
+
+To disable backend creation:
+```hcl
+enable_terraform_state_backend = false
+```
+
+### Backend Variables
+
+| Variable | Description | Default |
+|----------|-------------|---------|
+| `enable_terraform_state_backend` | Create S3 bucket and DynamoDB table for state | `true` |
+| `terraform_state_bucket_name` | Custom S3 bucket name (auto-generated if empty) | `""` |
+| `terraform_state_dynamodb_table_name` | Custom DynamoDB table name (auto-generated if empty) | `""` |
+
 ## Quick Start
 
 ### 1. Configure Variables
@@ -182,6 +240,8 @@ This creates a security group for Lambda functions with egress rules for Postgre
 
 ## Database Creation
 
+### Option 1: RDS PostgreSQL (Legacy)
+
 To create an RDS PostgreSQL database:
 
 ```hcl
@@ -194,6 +254,34 @@ database_password = "your-secure-password"
 ```
 
 **Note**: Database creation requires VPC configuration.
+
+### Option 2: Aurora PostgreSQL (Recommended)
+
+To create Aurora PostgreSQL cluster with new VPC:
+
+```hcl
+enable_aurora = true
+database_name = "car_entities"
+database_user = "postgres"
+database_password = "your-secure-password"
+
+# Aurora configuration
+aurora_instance_class = "db.t3.medium"  # Minimal provisioned instance
+aurora_publicly_accessible = true        # Required for Confluent Cloud
+```
+
+This will automatically:
+- Create a new VPC with public/private subnets
+- Deploy Aurora PostgreSQL cluster with logical replication enabled
+- Configure security groups for API and Confluent Cloud access
+
+**Quick Deploy:**
+```bash
+cd terraform
+./scripts/deploy-aurora.sh
+```
+
+See `cdc-streaming/AURORA_SETUP.md` for complete setup guide.
 
 ## Updating Lambda Functions
 

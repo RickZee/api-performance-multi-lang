@@ -428,15 +428,43 @@ This section covers setting up CDC (Change Data Capture) from PostgreSQL to Conf
 
 ### Option A: Confluent Cloud Managed Connectors
 
-Use Confluent Cloud's managed PostgreSQL CDC connector:
+Use Confluent Cloud's managed PostgreSQL CDC connector (`postgres-cdc-source` type):
+
+**Recommended: Use the deployment script:**
+
+```bash
+# Set required environment variables
+export KAFKA_API_KEY="<your-kafka-api-key>"
+export KAFKA_API_SECRET="<your-kafka-api-secret>"
+export DB_HOSTNAME="<postgres-hostname>"
+export DB_USERNAME="postgres"
+export DB_PASSWORD="<password>"
+export DB_NAME="car_entities"
+export SCHEMA_REGISTRY_API_KEY="<your-sr-api-key>"
+export SCHEMA_REGISTRY_API_SECRET="<your-sr-api-secret>"
+export SCHEMA_REGISTRY_URL="https://psrc-xxxxx.us-east-1.aws.confluent.cloud"
+export TABLE_INCLUDE_LIST="public.car_entities"  # Optional, defaults to car_entities
+
+# Deploy connector
+cd cdc-streaming/scripts
+./deploy-confluent-postgres-cdc-connector.sh
+```
+
+**Or manually via CLI:**
 
 ```bash
 # Create managed connector via CLI
 confluent connector create postgres-cdc-source \
   --cluster lkc-xxxxx \
   --type postgres-cdc-source \
-  --config-file connectors/managed-postgres-connector.json
+  --config-file connectors/postgres-cdc-source-confluent-cloud.json
 ```
+
+**Available connector configurations:**
+- `connectors/postgres-cdc-source-confluent-cloud.json` - For `car_entities` table
+- `connectors/postgres-cdc-source-simple-events-confluent-cloud.json` - For `simple_events` table
+
+**Note:** Confluent's `postgres-cdc-source` connector is the recommended managed connector for PostgreSQL CDC. It provides better integration with Confluent Cloud features and is fully managed by Confluent.
 
 ### Option B: Self-Hosted Kafka Connect (Local to Cloud Bridge)
 

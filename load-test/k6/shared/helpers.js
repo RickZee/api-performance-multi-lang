@@ -423,3 +423,24 @@ export function generateGrpcEventPayload() {
     return payload;
 }
 
+/**
+ * Generate simple event payload for REST API /api/v1/events/events-simple endpoint
+ * Simple events have a minimal structure: uuid, eventName, createdDate, savedDate, eventType
+ */
+export function generateSimpleEventPayload() {
+    const eventTypes = ['CarCreated', 'LoanCreated', 'LoanPaymentSubmitted', 'ServiceDone'];
+    const eventType = eventTypes[randomIntBetween(0, eventTypes.length - 1)];
+    const timestamp = generateTimestamp();
+    const uuid = generateUUID();
+    
+    const payload = {
+        uuid: uuid,
+        eventName: eventType,
+        createdDate: timestamp,
+        savedDate: timestamp,
+        eventType: eventType
+    };
+    
+    return JSON.stringify(payload);
+}
+

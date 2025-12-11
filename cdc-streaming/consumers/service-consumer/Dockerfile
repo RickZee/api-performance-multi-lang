@@ -20,3 +20,8 @@ CMD ["python", "consumer.py"]
 
 
 
+
+
+
+
+

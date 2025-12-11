@@ -1,0 +1,72 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: producer-api-java-rest
+  namespace: default
+  labels:
+    app: producer-api-java-rest
+    component: api
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: producer-api-java-rest
+  template:
+    metadata:
+      labels:
+        app: producer-api-java-rest
+        component: api
+    spec:
+      containers:
+      - name: producer-api-java-rest
+        image: producer-api-java-rest:latest
+        # In production, use: <your-ecr-repo>/producer-api-java-rest:latest
+        imagePullPolicy: IfNotPresent
+        ports:
+        - containerPort: 8081
+          name: http
+          protocol: TCP
+        env:
+        - name: AURORA_R2DBC_URL
+          valueFrom:
+            secretKeyRef:
+              name: aurora-credentials
+              key: r2dbc-url
+        - name: AURORA_USERNAME
+          valueFrom:
+            secretKeyRef:
+              name: aurora-credentials
+              key: username
+        - name: AURORA_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: aurora-credentials
+              key: password
+        - name: SPRING_APPLICATION_NAME
+          value: "producer-api"
+        - name: JAVA_OPTS
+          value: "-Xmx1536m -Xms768m -XX:MaxMetaspaceSize=256m"
+        resources:
+          requests:
+            memory: "1Gi"
+            cpu: "500m"
+          limits:
+            memory: "2Gi"
+            cpu: "1000m"
+        livenessProbe:
+          httpGet:
+            path: /actuator/health
+            port: 8081
+          initialDelaySeconds: 60
+          periodSeconds: 10
+          timeoutSeconds: 5
+          failureThreshold: 3
+        readinessProbe:
+          httpGet:
+            path: /actuator/health
+            port: 8081
+          initialDelaySeconds: 30
+          periodSeconds: 10
+          timeoutSeconds: 5
+          failureThreshold: 3
+      restartPolicy: Always

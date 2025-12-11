@@ -1,0 +1,21 @@
+# Terraform Backend Configuration
+# Copy this file to terraform.tfbackend and fill in the values after running the first terraform apply
+#
+# Steps:
+# 1. Run `terraform apply` with local state (backend disabled)
+# 2. Get output: `terraform output terraform_state_bucket_name`
+# 3. Copy this file: `cp terraform.tfbackend.example terraform.tfbackend`
+# 4. Fill in the values below
+# 5. Run `terraform init -backend-config=terraform.tfbackend` to migrate state to S3
+#
+# Note: Using S3 native state locking (use_lockfile) - no DynamoDB required!
+# This feature is available in Terraform 1.10+ and is the recommended approach.
+
+bucket       = "flink-poc-terraform-state"
+key          = "terraform.tfstate"
+region       = "us-east-1"
+encrypt      = true
+use_lockfile = true
+
+# Optional: Add profile if not using default
+# profile = "default"

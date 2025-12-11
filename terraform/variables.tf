@@ -70,10 +70,81 @@ variable "enable_database" {
   default     = false
 }
 
+variable "enable_aurora" {
+  description = "Whether to create Aurora PostgreSQL infrastructure"
+  type        = bool
+  default     = true
+}
+
 variable "enable_vpc" {
-  description = "Whether to enable VPC configuration"
+  description = "Whether to enable VPC configuration (for existing VPC)"
   type        = bool
   default     = false
+}
+
+variable "aurora_instance_class" {
+  description = "Aurora instance class"
+  type        = string
+  default     = "db.t3.medium"
+}
+
+variable "aurora_publicly_accessible" {
+  description = "Make Aurora publicly accessible for Confluent Cloud"
+  type        = bool
+  default     = true
+}
+
+variable "enable_ipv6" {
+  description = "Enable IPv6 on VPC and subnets. With IPv6, NAT Gateway is not needed for outbound internet access."
+  type        = bool
+  default     = true
+}
+
+variable "enable_nat_gateway" {
+  description = "Enable NAT Gateway for private subnets (IPv4). Not needed if enable_ipv6 is true."
+  type        = bool
+  default     = false
+}
+
+variable "aurora_allowed_cidr_blocks" {
+  description = "CIDR blocks allowed to access Aurora (default: 0.0.0.0/0 for public access)"
+  type        = list(string)
+  default     = ["0.0.0.0/0"]
+}
+
+variable "confluent_cloud_cidrs" {
+  description = <<-EOT
+    CIDR blocks for Confluent Cloud egress IP ranges (optional, for security group).
+    
+    When aurora_publicly_accessible = true and this variable is provided:
+    - Security group will restrict access to only these Confluent Cloud IP ranges (recommended)
+    - Provides better security than allowing all IPs (0.0.0.0/0)
+    
+    When aurora_publicly_accessible = true and this variable is empty:
+    - Security group will use aurora_allowed_cidr_blocks (defaults to 0.0.0.0/0)
+    - Aurora will be accessible from all IPs - not recommended for production
+    
+    To find current Confluent Cloud egress IP ranges:
+    1. Check documentation: https://docs.confluent.io/cloud/current/networking/ip-ranges.html
+    2. Use Confluent CLI: confluent network egress-ip list
+    3. Use helper script: terraform/scripts/get-confluent-cloud-ips.sh
+    4. Contact Confluent support for region-specific IP ranges
+    
+    Example:
+      confluent_cloud_cidrs = ["13.57.0.0/16", "52.0.0.0/16"]
+    
+    Note: IP ranges may change over time. Update this configuration periodically.
+    For production, consider using AWS PrivateLink instead of public access.
+  EOT
+  type        = list(string)
+  default     = []
+  
+  validation {
+    condition = alltrue([
+      for cidr in var.confluent_cloud_cidrs : can(regex("^([0-9]{1,3}\\.){3}[0-9]{1,3}/[0-9]{1,2}$", cidr))
+    ])
+    error_message = "All confluent_cloud_cidrs must be valid CIDR blocks (e.g., 13.57.0.0/16)."
+  }
 }
 
 variable "lambda_memory_size" {
@@ -88,6 +159,18 @@ variable "lambda_timeout" {
   default     = 30
 }
 
+variable "enable_lambda_functions" {
+  description = "Enable Go Lambda functions (gRPC and REST). Set to false if only using Java API in Docker."
+  type        = bool
+  default     = false
+}
+
+variable "enable_python_lambda" {
+  description = "Enable Python Lambda function"
+  type        = bool
+  default     = false
+}
+
 variable "s3_bucket_name" {
   description = "S3 bucket name for Lambda deployments (will be created if not exists)"
   type        = string
@@ -98,5 +181,65 @@ variable "tags" {
   description = "Tags to apply to all resources"
   type        = map(string)
   default     = {}
+}
+
+variable "terraform_state_bucket_name" {
+  description = "S3 bucket name for Terraform state"
+  type        = string
+  default     = "flink-poc-terraform-state"
+}
+
+variable "terraform_state_dynamodb_table_name" {
+  description = "DynamoDB table name for Terraform state locking (DEPRECATED - using S3 native locking instead)"
+  type        = string
+  default     = ""
+}
+
+variable "enable_terraform_state_backend" {
+  description = "Whether to create S3 bucket for Terraform state backend (uses S3 native locking, no DynamoDB required)"
+  type        = bool
+  default     = true
+}
+
+variable "enable_eks" {
+  description = "Whether to create EKS cluster for deploying the Java API"
+  type        = bool
+  default     = false
+}
+
+variable "kubernetes_version" {
+  description = "Kubernetes version for EKS cluster"
+  type        = string
+  default     = "1.28"
+}
+
+variable "eks_node_group_desired_size" {
+  description = "Desired number of nodes in EKS node group"
+  type        = number
+  default     = 2
+}
+
+variable "eks_node_group_max_size" {
+  description = "Maximum number of nodes in EKS node group"
+  type        = number
+  default     = 4
+}
+
+variable "eks_node_group_min_size" {
+  description = "Minimum number of nodes in EKS node group"
+  type        = number
+  default     = 1
+}
+
+variable "eks_node_group_instance_types" {
+  description = "Instance types for EKS node group"
+  type        = list(string)
+  default     = ["t3.medium"]
+}
+
+variable "eks_cluster_endpoint_public_access_cidrs" {
+  description = "CIDR blocks allowed to access EKS cluster API endpoint"
+  type        = list(string)
+  default     = ["0.0.0.0/0"] # Can be restricted later
 }
 

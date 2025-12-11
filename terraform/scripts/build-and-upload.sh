@@ -105,5 +105,25 @@ else
     exit 1
 fi
 
+# Build Python REST Lambda function
+print_info "Building Python REST Lambda function..."
+cd "$PROJECT_ROOT/producer-api-python-rest-lambda"
+if [ -f "scripts/build-lambda.sh" ]; then
+    bash scripts/build-lambda.sh
+    if [ -f "lambda-deployment.zip" ]; then
+        print_info "Uploading Python REST Lambda to S3..."
+        aws s3 cp lambda-deployment.zip "s3://${BUCKET_NAME}/python-rest/lambda-deployment.zip"
+        print_info "Python REST Lambda uploaded successfully"
+        # Clean up local zip file
+        rm -f lambda-deployment.zip
+    else
+        print_error "Python REST Lambda deployment package not found"
+        exit 1
+    fi
+else
+    print_error "Python REST Lambda build script not found"
+    exit 1
+fi
+
 print_info "All Lambda functions built and uploaded successfully!"
 

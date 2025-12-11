@@ -1,0 +1,165 @@
+-- Flink SQL Statements for Business Events Filtering and Routing (Confluent Cloud)
+-- Processes 4 types of filtered business events:
+-- 1. Car Created (CarCreated)
+-- 2. Loan Created (LoanCreated)
+-- 3. Loan Payment Submitted (LoanPaymentSubmitted)
+-- 4. Service Events (CarServiceDone)
+--
+-- Source: business_events table from Aurora PostgreSQL
+-- Target: Filtered Kafka topics for each event type
+--
+-- DEPLOYMENT NOTE: Deploy statements in order:
+-- 1. Source table (raw-business-events)
+-- 2. Sink tables (filtered-*-events)
+-- 3. INSERT statements (one per filter)
+
+-- ============================================================================
+-- Step 1: Create Source Table
+-- ============================================================================
+-- Source Table: Raw Business Events from Kafka (Debezium CDC format)
+-- Note: Table name must match topic name exactly in Confluent Cloud
+-- This table reads from the Debezium CDC output for business_events table
+-- The event_data column contains the full JSON event structure
+CREATE TABLE `raw-business-events` (
+    `id` STRING,
+    `event_name` STRING,
+    `event_type` STRING,
+    `created_date` STRING,
+    `saved_date` STRING,
+    `event_data` STRING,
+    `__op` STRING,
+    `__table` STRING,
+    `__ts_ms` BIGINT
+) WITH (
+    'connector' = 'confluent',
+    'value.format' = 'json-registry',
+    'scan.startup.mode' = 'earliest-offset'
+);
+
+-- ============================================================================
+-- Step 2: Create Sink Tables
+-- ============================================================================
+
+-- Sink Table: Car Created Events Filter
+CREATE TABLE `filtered-car-created-events` (
+    `id` STRING,
+    `event_name` STRING,
+    `event_type` STRING,
+    `created_date` STRING,
+    `saved_date` STRING,
+    `event_data` STRING,
+    `__op` STRING,
+    `__table` STRING
+) WITH (
+    'connector' = 'confluent',
+    'value.format' = 'json-registry'
+);
+
+-- Sink Table: Loan Created Events Filter
+CREATE TABLE `filtered-loan-created-events` (
+    `id` STRING,
+    `event_name` STRING,
+    `event_type` STRING,
+    `created_date` STRING,
+    `saved_date` STRING,
+    `event_data` STRING,
+    `__op` STRING,
+    `__table` STRING
+) WITH (
+    'connector' = 'confluent',
+    'value.format' = 'json-registry'
+);
+
+-- Sink Table: Loan Payment Submitted Events Filter
+CREATE TABLE `filtered-loan-payment-submitted-events` (
+    `id` STRING,
+    `event_name` STRING,
+    `event_type` STRING,
+    `created_date` STRING,
+    `saved_date` STRING,
+    `event_data` STRING,
+    `__op` STRING,
+    `__table` STRING
+) WITH (
+    'connector' = 'confluent',
+    'value.format' = 'json-registry'
+);
+
+-- Sink Table: Service Events Filter
+CREATE TABLE `filtered-service-events` (
+    `id` STRING,
+    `event_name` STRING,
+    `event_type` STRING,
+    `created_date` STRING,
+    `saved_date` STRING,
+    `event_data` STRING,
+    `__op` STRING,
+    `__table` STRING
+) WITH (
+    'connector' = 'confluent',
+    'value.format' = 'json-registry'
+);
+
+-- ============================================================================
+-- Step 3: Deploy INSERT Statements (one per filter)
+-- ============================================================================
+
+-- INSERT Statement: Car Created Events Filter
+-- Filters CarCreated events by eventType
+INSERT INTO `filtered-car-created-events`
+SELECT 
+    `id`,
+    `event_name`,
+    `event_type`,
+    `created_date`,
+    `saved_date`,
+    `event_data`,
+    `__op`,
+    `__table`
+FROM `raw-business-events`
+WHERE `event_type` = 'CarCreated' AND `__op` = 'c';
+
+-- INSERT Statement: Loan Created Events Filter
+-- Filters LoanCreated events by eventType
+INSERT INTO `filtered-loan-created-events`
+SELECT 
+    `id`,
+    `event_name`,
+    `event_type`,
+    `created_date`,
+    `saved_date`,
+    `event_data`,
+    `__op`,
+    `__table`
+FROM `raw-business-events`
+WHERE `event_type` = 'LoanCreated' AND `__op` = 'c';
+
+-- INSERT Statement: Loan Payment Submitted Events Filter
+-- Filters LoanPaymentSubmitted events by eventType
+INSERT INTO `filtered-loan-payment-submitted-events`
+SELECT 
+    `id`,
+    `event_name`,
+    `event_type`,
+    `created_date`,
+    `saved_date`,
+    `event_data`,
+    `__op`,
+    `__table`
+FROM `raw-business-events`
+WHERE `event_type` = 'LoanPaymentSubmitted' AND `__op` = 'c';
+
+-- INSERT Statement: Service Events Filter
+-- Filters CarServiceDone events by eventName
+INSERT INTO `filtered-service-events`
+SELECT 
+    `id`,
+    `event_name`,
+    `event_type`,
+    `created_date`,
+    `saved_date`,
+    `event_data`,
+    `__op`,
+    `__table`
+FROM `raw-business-events`
+WHERE `event_name` = 'CarServiceDone' AND `__op` = 'c';

@@ -128,9 +128,9 @@ resource "aws_apigatewayv2_api" "this" {
 resource "aws_apigatewayv2_integration" "lambda" {
   api_id = aws_apigatewayv2_api.this.id
 
-  integration_type   = "AWS_PROXY"
-  integration_uri    = aws_lambda_function.this.invoke_arn
-  integration_method = "POST"
+  integration_type       = "AWS_PROXY"
+  integration_uri        = aws_lambda_function.this.invoke_arn
+  integration_method     = "POST"
   payload_format_version = "2.0"
 }
 

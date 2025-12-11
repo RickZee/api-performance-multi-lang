@@ -509,6 +509,8 @@ See `load-test/EXPANDED_TESTING_STRATEGY.md` for detailed implementation status 
 
 ### Troubleshooting
 
+For comprehensive troubleshooting, see [PROBLEMS_AND_SOLUTIONS.md](PROBLEMS_AND_SOLUTIONS.md) which consolidates all problems and solutions from the project.
+
 **Common Issues:**
 
 1. **Container Build Failures**
