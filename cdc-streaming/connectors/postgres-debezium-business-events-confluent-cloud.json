@@ -1,0 +1,50 @@
+{
+  "name": "postgres-debezium-business-events-confluent-cloud",
+  "config": {
+    "connector.class": "io.debezium.connector.postgresql.PostgresConnector",
+    "tasks.max": "1",
+    
+    "database.hostname": "${DB_HOSTNAME}",
+    "database.port": "${DB_PORT:-5432}",
+    "database.user": "${DB_USERNAME}",
+    "database.password": "${DB_PASSWORD}",
+    "database.dbname": "${DB_NAME}",
+    "database.server.name": "${DB_SERVER_NAME:-aurora-postgres-cdc}",
+    
+    "topic.prefix": "${TOPIC_PREFIX:-aurora-cdc}",
+    "table.include.list": "${TABLE_INCLUDE_LIST:-public.business_events}",
+    
+    "plugin.name": "pgoutput",
+    "slot.name": "${SLOT_NAME:-business_events_debezium_slot}",
+    "publication.name": "${PUBLICATION_NAME:-business_events_debezium_publication}",
+    "publication.autocreate.mode": "filtered",
+    
+    "key.converter": "org.apache.kafka.connect.json.JsonConverter",
+    "key.converter.schemas.enable": "false",
+    
+    "value.converter": "org.apache.kafka.connect.json.JsonConverter",
+    "value.converter.schemas.enable": "false",
+    
+    "producer.bootstrap.servers": "${KAFKA_BOOTSTRAP_SERVERS}",
+    "producer.security.protocol": "SASL_SSL",
+    "producer.sasl.mechanism": "PLAIN",
+    "producer.sasl.jaas.config": "org.apache.kafka.common.security.plain.PlainLoginModule required username=\"${KAFKA_API_KEY}\" password=\"${KAFKA_API_SECRET}\";",
+    
+    "transforms": "unwrap,route",
+    "transforms.unwrap.type": "io.debezium.transforms.ExtractNewRecordState",
+    "transforms.unwrap.drop.tombstones": "false",
+    "transforms.unwrap.add.fields": "op,table,ts_ms",
+    "transforms.unwrap.add.fields.prefix": "__",
+    "transforms.route.type": "org.apache.kafka.connect.transforms.RegexRouter",
+    "transforms.route.regex": "${TOPIC_PREFIX:-aurora-cdc}.public.business_events",
+    "transforms.route.replacement": "raw-business-events",
+    
+    "snapshot.mode": "initial",
+    "tombstones.on.delete": "true",
+    "include.schema.changes": "false",
+    
+    "errors.tolerance": "all",
+    "errors.log.enable": "true",
+    "errors.log.include.messages": "true"
+  }
+}
