@@ -29,107 +29,6 @@ _service: EventProcessingService | None = None
 _config = None
 
 
-async def _run_migrations(pool):
-    """Run database migrations if needed."""
-    try:
-        # First drop old tables if they exist with old structure
-        drop_sql = """
-        DROP TABLE IF EXISTS business_events CASCADE;
-        DROP TABLE IF EXISTS car_entities CASCADE;
-        DROP TABLE IF EXISTS loan_entities CASCADE;
-        DROP TABLE IF EXISTS loan_payment_entities CASCADE;
-        DROP TABLE IF EXISTS service_record_entities CASCADE;
-        DROP TABLE IF EXISTS simple_events CASCADE;
-        """
-        
-        # Use inline schema (data/schema.sql content)
-        migration_sql = """
-        -- Business Events Table
-        CREATE TABLE business_events (
-            id VARCHAR(255) PRIMARY KEY,
-            event_name VARCHAR(255) NOT NULL,
-            event_type VARCHAR(255),
-            created_date TIMESTAMP WITH TIME ZONE,
-            saved_date TIMESTAMP WITH TIME ZONE,
-            event_data JSONB NOT NULL
-        );
-        CREATE INDEX IF NOT EXISTS idx_business_events_event_type ON business_events(event_type);
-        CREATE INDEX IF NOT EXISTS idx_business_events_created_date ON business_events(created_date);
-        
-        -- Car Entities Table
-        CREATE TABLE car_entities (
-            entity_id VARCHAR(255) PRIMARY KEY,
-            entity_type VARCHAR(255) NOT NULL,
-            created_at TIMESTAMP WITH TIME ZONE,
-            updated_at TIMESTAMP WITH TIME ZONE,
-            entity_data JSONB NOT NULL
-        );
-        CREATE INDEX IF NOT EXISTS idx_car_entities_entity_type ON car_entities(entity_type);
-        CREATE INDEX IF NOT EXISTS idx_car_entities_created_at ON car_entities(created_at);
-        CREATE INDEX IF NOT EXISTS idx_car_entities_updated_at ON car_entities(updated_at);
-        
-        -- Loan Entities Table
-        CREATE TABLE loan_entities (
-            entity_id VARCHAR(255) PRIMARY KEY,
-            entity_type VARCHAR(255) NOT NULL,
-            created_at TIMESTAMP WITH TIME ZONE,
-            updated_at TIMESTAMP WITH TIME ZONE,
-            entity_data JSONB NOT NULL
-        );
-        CREATE INDEX IF NOT EXISTS idx_loan_entities_entity_type ON loan_entities(entity_type);
-        CREATE INDEX IF NOT EXISTS idx_loan_entities_created_at ON loan_entities(created_at);
-        CREATE INDEX IF NOT EXISTS idx_loan_entities_updated_at ON loan_entities(updated_at);
-        
-        -- Loan Payment Entities Table
-        CREATE TABLE loan_payment_entities (
-            entity_id VARCHAR(255) PRIMARY KEY,
-            entity_type VARCHAR(255) NOT NULL,
-            created_at TIMESTAMP WITH TIME ZONE,
-            updated_at TIMESTAMP WITH TIME ZONE,
-            entity_data JSONB NOT NULL
-        );
-        CREATE INDEX IF NOT EXISTS idx_loan_payment_entities_entity_type ON loan_payment_entities(entity_type);
-        CREATE INDEX IF NOT EXISTS idx_loan_payment_entities_created_at ON loan_payment_entities(created_at);
-        CREATE INDEX IF NOT EXISTS idx_loan_payment_entities_updated_at ON loan_payment_entities(updated_at);
-        
-        -- Service Record Entities Table
-        CREATE TABLE service_record_entities (
-            entity_id VARCHAR(255) PRIMARY KEY,
-            entity_type VARCHAR(255) NOT NULL,
-            created_at TIMESTAMP WITH TIME ZONE,
-            updated_at TIMESTAMP WITH TIME ZONE,
-            entity_data JSONB NOT NULL
-        );
-        CREATE INDEX IF NOT EXISTS idx_service_record_entities_entity_type ON service_record_entities(entity_type);
-        CREATE INDEX IF NOT EXISTS idx_service_record_entities_created_at ON service_record_entities(created_at);
-        CREATE INDEX IF NOT EXISTS idx_service_record_entities_updated_at ON service_record_entities(updated_at);
-        """
-        
-        async with pool.acquire() as conn:
-            # First drop old tables if they exist
-            drop_statements = [s.strip() for s in drop_sql.split(';') if s.strip()]
-            for stmt in drop_statements:
-                if stmt and not stmt.startswith('--'):
-                    try:
-                        await conn.execute(stmt)
-                    except Exception as e:
-                        logger.warning(f"Drop statement warning (may be harmless): {e}")
-            
-            # Then create new tables
-            statements = [s.strip() for s in migration_sql.split(';') if s.strip()]
-            for stmt in statements:
-                if stmt and not stmt.startswith('--'):
-                    try:
-                        await conn.execute(stmt)
-                    except Exception as e:
-                        # Ignore "already exists" errors
-                        if "already exists" not in str(e).lower() and "does not exist" not in str(e).lower():
-                            logger.warning(f"Migration statement warning: {e}")
-        logger.info(f"{API_NAME} Migrations completed")
-    except Exception as e:
-        logger.error(f"{API_NAME} Migration error: {e}", exc_info=True)
-
-
 async def _initialize_service():
     """Initialize service with connection pool (singleton pattern)."""
     global _service, _config
@@ -147,9 +46,6 @@ async def _initialize_service():
         
         # Get connection pool
         pool = await get_connection_pool(_config.database_url)
-        
-        # Run migrations
-        await _run_migrations(pool)
         
         # Initialize repositories and service
         business_event_repo = BusinessEventRepository(pool)

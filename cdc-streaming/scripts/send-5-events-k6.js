@@ -1,13 +1,13 @@
 /**
- * k6 Script to Send 5 Events of Each Type to Python Lambda API
+ * k6 Script to Send 5 Events Total to Python Lambda API
  * 
- * Sends 5 events of each type:
- * 1. CarCreated (5 events)
- * 2. LoanCreated (5 events)
- * 3. LoanPaymentSubmitted (5 events)
- * 4. CarServiceDone (5 events)
+ * Sends 5 events total:
+ * 1. CarCreated (2 events)
+ * 2. LoanCreated (1 event)
+ * 3. LoanPaymentSubmitted (1 event)
+ * 4. CarServiceDone (1 event)
  * 
- * Total: 20 events
+ * Total: 5 events
  * 
  * Flow: k6 → Python Lambda API → Aurora PostgreSQL → CDC → Confluent Cloud → Flink → Filtered Topics → Consumers
  * 
@@ -24,11 +24,11 @@ import { randomString, randomIntBetween } from 'https://jslib.k6.io/k6-utils/1.2
 const errorRate = new Rate('errors');
 const eventsSent = new Rate('events_sent');
 
-// Test configuration - send 5 of each event type
-const EVENTS_PER_TYPE = 5;
+// Test configuration - send 5 events total
+const TOTAL_EVENTS = 5;
 export const options = {
     vus: 1,
-    iterations: EVENTS_PER_TYPE * 4, // 5 Car + 5 Loan + 5 Payment + 5 Service = 20 iterations
+    iterations: TOTAL_EVENTS, // 5 total events
 };
 
 // Get API configuration from environment
@@ -184,43 +184,38 @@ export function setup() {
     const carIds = [];
     const loanIds = [];
     
-    for (let i = 0; i < EVENTS_PER_TYPE; i++) {
-        carIds.push(`CAR-${Date.now()}-${i + 1}`);
-        loanIds.push(`LOAN-${Date.now()}-${i + 1}`);
-    }
+    // Generate IDs for 5 events: 2 cars, 1 loan
+    carIds.push(`CAR-${Date.now()}-1`);
+    carIds.push(`CAR-${Date.now()}-2`);
+    loanIds.push(`LOAN-${Date.now()}-1`);
     
     return { carIds, loanIds };
 }
 
 // Main test function
 export default function (data) {
-    const iteration = __ITER; // Current iteration (0-19)
+    const iteration = __ITER; // Current iteration (0-4)
     let payload;
     let eventType;
     
     // Determine which event type based on iteration
-    if (iteration < EVENTS_PER_TYPE) {
-        // First 5 iterations: CarCreated
+    // 0: CarCreated, 1: CarCreated, 2: LoanCreated, 3: LoanPaymentSubmitted, 4: CarServiceDone
+    if (iteration === 0 || iteration === 1) {
+        // First 2 iterations: CarCreated
         const carIndex = iteration;
         payload = generateCarCreatedEvent(data.carIds[carIndex]);
         eventType = "CarCreated";
-    } else if (iteration < EVENTS_PER_TYPE * 2) {
-        // Next 5 iterations: LoanCreated
-        const loanIndex = iteration - EVENTS_PER_TYPE;
-        const carIndex = loanIndex;
-        payload = generateLoanCreatedEvent(data.carIds[carIndex], data.loanIds[loanIndex]);
+    } else if (iteration === 2) {
+        // Third iteration: LoanCreated
+        payload = generateLoanCreatedEvent(data.carIds[0], data.loanIds[0]);
         eventType = "LoanCreated";
-    } else if (iteration < EVENTS_PER_TYPE * 3) {
-        // Next 5 iterations: LoanPaymentSubmitted
-        const paymentIndex = iteration - (EVENTS_PER_TYPE * 2);
-        const loanIndex = paymentIndex;
-        payload = generateLoanPaymentEvent(data.loanIds[loanIndex]);
+    } else if (iteration === 3) {
+        // Fourth iteration: LoanPaymentSubmitted
+        payload = generateLoanPaymentEvent(data.loanIds[0]);
         eventType = "LoanPaymentSubmitted";
     } else {
-        // Last 5 iterations: CarServiceDone
-        const serviceIndex = iteration - (EVENTS_PER_TYPE * 3);
-        const carIndex = serviceIndex;
-        payload = generateCarServiceEvent(data.carIds[carIndex]);
+        // Fifth iteration: CarServiceDone
+        payload = generateCarServiceEvent(data.carIds[0]);
         eventType = "CarServiceDone";
     }
     
@@ -250,7 +245,7 @@ export default function (data) {
     eventsSent.add(success);
     
     // Log event type
-    console.log(`Sent ${eventType} event (iteration ${iteration + 1}/20)`);
+    console.log(`Sent ${eventType} event (iteration ${iteration + 1}/5)`);
     
     // Small delay between requests
     sleep(0.5);
@@ -261,7 +256,7 @@ export function handleSummary(data) {
     return {
         'stdout': `
 ========================================
-k6 Test Summary - Send 5 Events Each Type
+k6 Test Summary - Send 5 Events Total
 ========================================
 Total Iterations: ${data.metrics.iterations.values.count}
 Events Sent Successfully: ${data.metrics.events_sent.values.rate * data.metrics.iterations.values.count}
@@ -269,10 +264,10 @@ Error Rate: ${(data.metrics.errors.values.rate * 100).toFixed(2)}%
 Total Duration: ${(data.metrics.iteration_duration.values.max / 1000).toFixed(2)}s
 
 Event Types Sent:
-- CarCreated: 5 events
-- LoanCreated: 5 events
-- LoanPaymentSubmitted: 5 events
-- CarServiceDone: 5 events
+- CarCreated: 2 events
+- LoanCreated: 1 event
+- LoanPaymentSubmitted: 1 event
+- CarServiceDone: 1 event
 
 API Endpoint: ${fullApiUrl}
 ========================================
