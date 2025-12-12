@@ -229,9 +229,8 @@ confluent kafka topic create raw-business-events \
   --partitions 6 \
   --config retention.ms=604800000
 
-# Note: Filtered topics (filtered-loan-events, filtered-service-events, etc.) 
-# are automatically created by Flink when it writes to them for the first time.
-# No manual creation is required for filtered topics.
+# Note: Filtered topics are automatically created by Flink when it writes to them.
+# Only raw-business-events needs manual creation before deploying the CDC connector.
 ```
 
 ### Step 2: Verify Topics
@@ -414,6 +413,24 @@ export FLINK_REST_ENDPOINT="https://flink.us-east-1.aws.confluent.cloud"
 
 # For other regions, use pattern: https://flink.<region>.<cloud>.confluent.cloud
 ```
+
+## Flink Overview
+
+**Confluent Cloud for Apache Flink** is a fully managed, cloud-native Flink service. Flink jobs are deployed as **SQL statements** (not JAR files) and automatically scale based on workload.
+
+**How Flink Works in This Pipeline**:
+- **Consumes from Kafka**: Reads events from `raw-business-events` topic
+- **Applies Filtering**: Filters using relational columns (`event_type`, `__op`) via SQL WHERE clauses
+- **Writes to Kafka**: Writes filtered events to consumer-specific topics:
+  - `filtered-loan-created-events`
+  - `filtered-loan-payment-submitted-events`
+  - `filtered-service-events`
+  - `filtered-car-created-events`
+- **Auto-Topic Creation**: Filtered topics are automatically created by Flink when it first writes to them
+- **Preserves Structure**: Maintains relational structure + `event_data` JSONB field for consumers
+- **Fault Tolerance**: Automatic checkpoints ensure exactly-once semantics
+
+**Flink SQL File**: Use `business-events-routing-confluent-cloud.sql` with PostgresCdcSourceV2 connector. See [Flink SQL Configuration](#flink-sql-configuration) section for complete SQL examples and deployment details.
 
 ## Connector Setup
 
@@ -746,6 +763,110 @@ SELECT
 FROM cdc_source
 WHERE __op IN ('c', 'u');
 ```
+
+### Complete Flink SQL Example
+
+**Flink SQL File**: `business-events-routing-confluent-cloud.sql` - **Recommended**
+   - **Use With**: PostgresCdcSourceV2 connector (includes ExtractNewRecordState transform)
+   - **Source Table**: Expects `__op`, `__table`, `__ts_ms` fields from connector
+   - **Filtering**: Can filter by `__op` field (e.g., `WHERE event_type = 'LoanCreated' AND __op = 'c'`)
+   - **Compatible Connector**: `postgres-cdc-source-v2-debezium-business-events-confluent-cloud.json`
+
+**Note**: The `business-events-routing-confluent-cloud-no-op.sql` file exists for compatibility with connectors that do not include ExtractNewRecordState transform, but it is not recommended. Always use the recommended PostgresCdcSourceV2 connector with `business-events-routing-confluent-cloud.sql`.
+
+**Complete Example** (from `flink-jobs/business-events-routing-confluent-cloud.sql`):
+
+```sql
+-- ============================================================================
+-- Step 1: Create Source Table
+-- ============================================================================
+CREATE TABLE `raw-business-events` (
+    `id` STRING,
+    `event_name` STRING,
+    `event_type` STRING,
+    `created_date` STRING,
+    `saved_date` STRING,
+    `event_data` STRING,
+    `__op` STRING,
+    `__table` STRING,
+    `__ts_ms` BIGINT
+) WITH (
+    'connector' = 'confluent',
+    'value.format' = 'json-registry',
+    'scan.startup.mode' = 'earliest-offset'
+);
+
+-- ============================================================================
+-- Step 2: Create Sink Table
+-- ============================================================================
+CREATE TABLE `filtered-loan-created-events` (
+    `key` BYTES,
+    `id` STRING,
+    `event_name` STRING,
+    `event_type` STRING,
+    `created_date` STRING,
+    `saved_date` STRING,
+    `event_data` STRING,
+    `__op` STRING,
+    `__table` STRING
+) WITH (
+    'connector' = 'confluent',
+    'value.format' = 'json-registry'
+);
+
+-- ============================================================================
+-- Step 3: INSERT Statement - Filter and Route
+-- ============================================================================
+INSERT INTO `filtered-loan-created-events`
+SELECT 
+    CAST(`id` AS BYTES) AS `key`,
+    `id`,
+    `event_name`,
+    `event_type`,
+    `created_date`,
+    `saved_date`,
+    `event_data`,
+    `__op`,
+    `__table`
+FROM `raw-business-events`
+WHERE `event_type` = 'LoanCreated' AND `__op` = 'c';
+
+-- Additional filters for other event types:
+INSERT INTO `filtered-loan-payment-submitted-events`
+SELECT CAST(`id` AS BYTES) AS `key`, `id`, `event_name`, `event_type`, `created_date`, `saved_date`, `event_data`, `__op`, `__table`
+FROM `raw-business-events`
+WHERE `event_type` = 'LoanPaymentSubmitted' AND `__op` = 'c';
+
+INSERT INTO `filtered-car-created-events`
+SELECT CAST(`id` AS BYTES) AS `key`, `id`, `event_name`, `event_type`, `created_date`, `saved_date`, `event_data`, `__op`, `__table`
+FROM `raw-business-events`
+WHERE `event_type` = 'CarCreated' AND `__op` = 'c';
+
+INSERT INTO `filtered-service-events`
+SELECT CAST(`id` AS BYTES) AS `key`, `id`, `event_name`, `event_type`, `created_date`, `saved_date`, `event_data`, `__op`, `__table`
+FROM `raw-business-events`
+WHERE `event_type` = 'CarServiceDone' AND `__op` = 'c';
+```
+
+**Key Differences Between SQL Variants**:
+
+| Aspect | `business-events-routing-confluent-cloud.sql` | `business-events-routing-confluent-cloud-no-op.sql` |
+|--------|----------------------------------------------|---------------------------------------------------|
+| **Source Table Fields** | Includes `__op`, `__table`, `__ts_ms` | Does NOT include CDC metadata fields |
+| **CDC Metadata Source** | From connector (ExtractNewRecordState) | Added in Flink SELECT (workaround) |
+| **Filtering by Operation** | Can filter by `__op` (e.g., `WHERE __op = 'c'`) | Cannot filter by `__op` (assumes all inserts) |
+| **Performance** | More efficient (metadata from connector) | Less efficient (metadata added in Flink) |
+| **Recommended** | Yes (use with PostgresCdcSourceV2) | No (workaround only, not recommended) |
+
+**Filter Types Supported**:
+
+- **Event Type Filtering**: Filter by `event_type` column (e.g., `'LoanCreated'`, `'CarCreated'`, `'CarServiceDone'`)
+- **Operation Type Filtering**: Filter by `__op` to capture only creates (`'c'`), updates (`'u'`), or deletes (`'d'`)
+- **Multi-Condition Filtering**: Combine conditions with AND/OR logic (e.g., `event_type = 'LoanCreated' AND __op = 'c'`)
+- **Value-Based Filtering**: Can filter on relational column values (dates, IDs, etc.)
+- **JSON Data Filtering**: For nested filtering, parse `event_data` JSON string using JSON functions (advanced)
+
+**Note**: The current implementation filters on relational columns for efficiency. To filter on nested data within `event_data`, you would need to parse the JSON string using Flink's JSON functions.
 
 ## Deploy Flink SQL Statements
 
@@ -1429,7 +1550,7 @@ confluent flink statement list --compute-pool <compute-pool-id> --output json | 
 bash scripts/deploy-business-events-flink.sh
 ```
 
-#### Issue 7: Connector Not Capturing Changes
+#### Issue 12: Connector Not Capturing Changes
 
 **Symptoms:**
 - Connector is RUNNING but no messages in raw-business-events
@@ -1455,7 +1576,7 @@ psql -h <postgres-host> -U <user> -d <database> \
 # Check table.include.list in connector config
 ```
 
-#### Issue 5: High Consumer Lag
+#### Issue 11: High Consumer Lag
 
 **Symptoms:**
 - Consumers falling behind
@@ -1537,7 +1658,7 @@ SELECT * FROM `cdc-raw.public.car_entities`;
 
 ### Confluent Cloud Flink vs Apache Flink
 
-**Critical Differences**:
+**Critical Differences** (see also [Flink SQL Configuration](#flink-sql-configuration) section):
 
 | Feature | Apache Flink | Confluent Cloud |
 |---------|--------------|-----------------|
@@ -1661,7 +1782,7 @@ SELECT * FROM pg_replication_slots;
 ### Common Gotchas
 
 1. **Reserved Keywords in Flink**: `model`, `timestamp`, `date`, `time` - use backticks or rename columns
-2. **Topic Must Exist First**: Only `raw-business-events` topic must exist before deploying connectors. Filtered topics are automatically created by Flink.
+2. **Topic Creation**: Only `raw-business-events` topic must exist before deploying connectors. Filtered topics are automatically created by Flink when it writes to them.
 3. **Credentials in Multiple Places**: Kafka Connect, Flink SQL, Consumer configs all need auth
 4. **CLI Token Expiration**: `confluent login` tokens expire; re-authenticate if commands fail
 5. **Multiple Statements**: Confluent Cloud Flink CLI doesn't handle multiple CREATE/INSERT well - use Web Console
