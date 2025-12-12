@@ -19,8 +19,8 @@ Change Data Capture (CDC) streaming architecture that enables real-time event pr
 
 This architecture uses specific example structures for validation and testing:
 
-- **Car Entity**: [`data/entities/car/car-large.json`](../../data/entities/car/car-large.json) - Large car entity with all required fields
-- **Loan Created Event**: [`data/schemas/event/samples/loan-created-event.json`](../../data/schemas/event/samples/loan-created-event.json) - Complete loan created event structure
+- **Car Entity**: [`data/entities/car/car-large.json`](../data/entities/car/car-large.json) - Large car entity with all required fields
+- **Loan Created Event**: [`data/schemas/event/samples/loan-created-event.json`](../data/schemas/event/samples/loan-created-event.json) - Complete loan created event structure
 
 These examples are used throughout the system for:
 

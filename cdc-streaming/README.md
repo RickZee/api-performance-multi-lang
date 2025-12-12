@@ -260,9 +260,9 @@ WHERE (updated_attributes->'loan'->>'loanAmount')::numeric > 100000;
 Data model schemas are defined in the `data/` folder:
 - Event schema: [`data/schemas/event/event.json`](../data/schemas/event/event.json)
 - Event header schema: [`data/schemas/event/event-header.json`](../data/schemas/event/event-header.json)
-- Entity schemas: [`data/schemas/entity/`](../data/schemas/entity/)
-- Sample event data: [`data/schemas/event/samples/`](../data/schemas/event/samples/)
-- Sample entity data: [`data/entities/`](../data/entities/)
+- Entity schemas: [`data/schemas/entity/car.json`](../data/schemas/entity/car.json), [`data/schemas/entity/loan.json`](../data/schemas/entity/loan.json), and others
+- Sample event data: [`data/schemas/event/samples/loan-created-event.json`](../data/schemas/event/samples/loan-created-event.json) and others
+- Sample entity data: [`data/entities/car/car-large.json`](../data/entities/car/car-large.json) and others
 
 For complete schema definitions and examples, see the [data folder README](../data/README.md).
 

@@ -1850,15 +1850,13 @@ After completing basic setup:
 1. **Configure Monitoring**: Set up alerts in Confluent Cloud Console
 2. **Set Up Multi-Region** (Optional): See [Multi-Region Infrastructure Setup](#multi-region-infrastructure-setup) below
 3. **Implement CI/CD** (Optional): See [Advanced CI/CD Integration](#advanced-cicd-integration) below
-4. **Performance Tuning**: See [PERFORMANCE_TUNING.md](PERFORMANCE_TUNING.md)
-5. **Disaster Recovery**: See [DISASTER_RECOVERY.md](DISASTER_RECOVERY.md)
+4. **Disaster Recovery**: See [DISASTER_RECOVERY.md](DISASTER_RECOVERY.md)
 
 ## Related Documentation
 
 - [README.md](README.md): Main documentation with Docker and Confluent Cloud options
-- [CODE_GENERATION.md](CODE_GENERATION.md): Filter configuration and SQL generation
 - [ARCHITECTURE.md](ARCHITECTURE.md): System architecture details
-- [PERFORMANCE_TUNING.md](PERFORMANCE_TUNING.md): Performance optimization
+- [BACKEND_IMPLEMENTATION.md](BACKEND_IMPLEMENTATION.md): Back-end infrastructure including Lambda, Aurora, and RDS Proxy
 - [DISASTER_RECOVERY.md](DISASTER_RECOVERY.md): Disaster recovery procedures
 
 ## Summary
