@@ -76,30 +76,81 @@ export const options = {
 
 // Get API configuration from environment
 // Support both regular REST API (HOST/PORT) and Lambda API (API_URL/LAMBDA_API_URL)
+// Default to Lambda API if no configuration provided
 let apiUrl;
 if (__ENV.API_URL || __ENV.LAMBDA_API_URL || __ENV.LAMBDA_PYTHON_REST_API_URL) {
     // Lambda API - use full URL
     const baseUrl = __ENV.API_URL || __ENV.LAMBDA_API_URL || __ENV.LAMBDA_PYTHON_REST_API_URL;
     const apiPath = __ENV.API_PATH || '/api/v1/events';
     apiUrl = baseUrl.includes('/api/v1/events') ? baseUrl : `${baseUrl.replace(/\/$/, '')}${apiPath}`;
-} else {
-    // Regular REST API - use HOST and PORT
+} else if (__ENV.HOST || __ENV.PORT) {
+    // Regular REST API - use HOST and PORT if explicitly provided
     const apiHost = __ENV.HOST || 'localhost';
     const apiPort = __ENV.PORT || 8081;
     apiUrl = `http://${apiHost}:${apiPort}/api/v1/events`;
+} else {
+    // Default to Lambda API
+    const defaultLambdaUrl = 'https://k5z0vg8boa.execute-api.us-east-1.amazonaws.com';
+    const apiPath = __ENV.API_PATH || '/api/v1/events';
+    apiUrl = `${defaultLambdaUrl}${apiPath}`;
 }
 
 // Authentication configuration
 const AUTH_ENABLED = __ENV.AUTH_ENABLED === 'true' || __ENV.AUTH_ENABLED === '1';
 const JWT_TOKEN = __ENV.JWT_TOKEN || '';
 
-// Generate UUID
-function generateUUID() {
-    return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function(c) {
-        const r = Math.random() * 16 | 0;
-        const v = c === 'x' ? r : (r & 0x3 | 0x8);
-        return v.toString(16);
-    });
+// Generate unique UUID using VU ID, iteration, timestamp, and random component
+// This ensures uniqueness across all VUs and iterations
+function generateUUID(vuId = null, iteration = null, eventIndex = null) {
+    // Use VU ID and iteration if provided to ensure uniqueness
+    const timestamp = Date.now();
+    const random = Math.random().toString(36).substring(2, 15);
+    // Use a counter-based approach instead of performance.now() (not available in k6)
+    const counter = (timestamp % 1000000).toString().padStart(6, '0');
+    
+    // Create a unique seed from VU ID, iteration, and event index
+    // This ensures each VU generates unique UUIDs for each event
+    let seed = '';
+    if (vuId !== null && iteration !== null) {
+        // Combine VU ID, iteration, event index, timestamp, counter, and random for maximum uniqueness
+        seed = `${vuId}-${iteration}-${eventIndex !== null ? eventIndex : '0'}-${timestamp}-${counter}-${random}`;
+    } else {
+        // Fallback for schema check (no VU context)
+        seed = `${timestamp}-${counter}-${random}`;
+    }
+    
+    // Generate UUID v4 format with deterministic components for uniqueness
+    // Use a simple hash-like function to convert seed to hex
+    let hex = '';
+    for (let i = 0; i < seed.length && hex.length < 32; i++) {
+        const charCode = seed.charCodeAt(i);
+        hex += charCode.toString(16).padStart(2, '0');
+    }
+    
+    // Pad or truncate to exactly 32 hex characters
+    if (hex.length < 32) {
+        hex = hex.padEnd(32, '0');
+    } else {
+        hex = hex.substring(0, 32);
+    }
+    
+    // Format as UUID v4: xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx
+    // Version 4: Set version bits (bits 12-15 of time_hi_and_version to 0100)
+    const timeHigh = hex.substring(12, 16);
+    const versionedTimeHigh = '4' + timeHigh.substring(1);
+    
+    // Variant: Set variant bits (bits 6-7 of clock_seq_hi_and_reserved to 10)
+    const clockSeq = hex.substring(16, 20);
+    const clockSeqFirst = parseInt(clockSeq[0], 16);
+    const variantClockSeq = ((clockSeqFirst & 0x3) | 0x8).toString(16) + clockSeq.substring(1);
+    
+    return [
+        hex.substring(0, 8),
+        hex.substring(8, 12),
+        versionedTimeHigh,
+        variantClockSeq,
+        hex.substring(20, 32)
+    ].join('-');
 }
 
 // Generate ISO 8601 timestamp
@@ -108,10 +159,10 @@ function generateTimestamp() {
 }
 
 // Generate event payloads based on samples
-function generateCarCreatedEvent(carId = null) {
+function generateCarCreatedEvent(carId = null, vuId = null, iteration = null, eventIndex = null) {
     const timestamp = generateTimestamp();
     const id = carId || `CAR-${new Date().toISOString().split('T')[0].replace(/-/g, '')}-${randomIntBetween(1, 9999)}`;
-    const uuid = generateUUID();
+    const uuid = generateUUID(vuId, iteration, eventIndex);
     
     return JSON.stringify({
         eventHeader: {
@@ -143,10 +194,10 @@ function generateCarCreatedEvent(carId = null) {
     });
 }
 
-function generateLoanCreatedEvent(carId, loanId = null) {
+function generateLoanCreatedEvent(carId, loanId = null, vuId = null, iteration = null, eventIndex = null) {
     const timestamp = generateTimestamp();
     const id = loanId || `LOAN-${new Date().toISOString().split('T')[0].replace(/-/g, '')}-${randomIntBetween(1, 9999)}`;
-    const uuid = generateUUID();
+    const uuid = generateUUID(vuId, iteration, eventIndex);
     const loanAmount = randomIntBetween(10000, 100000);
     const interestRate = (2.5 + Math.random() * 5).toFixed(2); // 2.5% - 7.5%
     const termMonths = [24, 36, 48, 60, 72][randomIntBetween(0, 4)];
@@ -182,10 +233,10 @@ function generateLoanCreatedEvent(carId, loanId = null) {
     });
 }
 
-function generateLoanPaymentEvent(loanId, amount = null) {
+function generateLoanPaymentEvent(loanId, amount = null, vuId = null, iteration = null, eventIndex = null) {
     const timestamp = generateTimestamp();
     const paymentId = `PAYMENT-${new Date().toISOString().split('T')[0].replace(/-/g, '')}-${randomIntBetween(1, 9999)}`;
-    const uuid = generateUUID();
+    const uuid = generateUUID(vuId, iteration, eventIndex);
     const paymentAmount = amount || (500 + Math.random() * 1500).toFixed(2); // $500-$2000
     
     return JSON.stringify({
@@ -211,10 +262,10 @@ function generateLoanPaymentEvent(loanId, amount = null) {
     });
 }
 
-function generateCarServiceEvent(carId, serviceId = null) {
+function generateCarServiceEvent(carId, serviceId = null, vuId = null, iteration = null, eventIndex = null) {
     const timestamp = generateTimestamp();
     const id = serviceId || `SERVICE-${new Date().toISOString().split('T')[0].replace(/-/g, '')}-${randomIntBetween(1, 9999)}`;
-    const uuid = generateUUID();
+    const uuid = generateUUID(vuId, iteration, eventIndex);
     const amountPaid = (100 + Math.random() * 1000).toFixed(2); // $100-$1100
     const mileageAtService = randomIntBetween(1000, 100000);
     const dealers = [
@@ -320,13 +371,17 @@ export function setup() {
     const responseBody = testResponse.body || '';
     const responseText = responseBody.toString().toLowerCase();
     
-    // Check for database schema errors
-    if (testResponse.status >= 500 || 
-        responseText.includes('relation') && responseText.includes('does not exist') ||
-        responseText.includes('business_events') && responseText.includes('not exist') ||
-        responseText.includes('table') && responseText.includes('not exist') ||
-        responseText.includes('relation "business_events" does not exist')) {
-        
+    // Check for database schema errors - be very explicit about error patterns
+    const hasSchemaError = (
+        (responseText.includes('relation') && responseText.includes('does not exist')) ||
+        (responseText.includes('business_events') && responseText.includes('not exist')) ||
+        (responseText.includes('relation') && responseText.includes('business_events') && responseText.includes('does not exist')) ||
+        responseText.includes('relation "business_events" does not exist') ||
+        responseText.includes("relation 'business_events' does not exist")
+    );
+    
+    // If we get a 500 error AND it's a schema error, abort
+    if (testResponse.status >= 500 && hasSchemaError) {
         console.error('='.repeat(70));
         console.error('[SCHEMA CHECK FAILED] Database schema is missing!');
         console.error('='.repeat(70));
@@ -346,13 +401,20 @@ export function setup() {
         throw new Error('Database schema check failed: business_events table does not exist. Please initialize the schema before running tests.');
     }
     
-    // If we get a 200/201/400 (validation error), schema exists
+    // If we get a 500 error but it's not a schema error, still warn but don't abort
+    if (testResponse.status >= 500 && !hasSchemaError) {
+        console.warn(`⚠ Warning: API returned ${testResponse.status} but error doesn't appear to be schema-related`);
+        console.warn(`Response: ${responseBody}`);
+    }
+    
+    // If we get a 200/201, schema exists and test event was created
     if (testResponse.status === 200 || testResponse.status === 201) {
         console.log('✓ Database schema check passed (test event created successfully)');
     } else if (testResponse.status === 400) {
         // 400 might be validation error, but schema exists
         console.log('✓ Database schema check passed (API responded, schema exists)');
-    } else {
+    } else if (testResponse.status < 500) {
+        // Any 2xx or 4xx (except 500+) means API is working, schema likely exists
         console.log(`✓ Database schema check passed (API responded with status ${testResponse.status})`);
     }
     console.log('');
@@ -409,24 +471,25 @@ export default function (data) {
     }
     
     // Generate the appropriate event based on event type
+    // Pass VU ID, iteration, and event index to ensure unique UUIDs
     if (eventTypeIndex === 0) {
         // Car Created
-        payload = generateCarCreatedEvent(data.carIds[eventIndexInType]);
+        payload = generateCarCreatedEvent(data.carIds[eventIndexInType], vuId, iteration, eventIndexInType);
         eventType = "CarCreated";
     } else if (eventTypeIndex === 1) {
         // Loan Created
         const carIndex = eventIndexInType; // Link to corresponding car
-        payload = generateLoanCreatedEvent(data.carIds[carIndex], data.loanIds[eventIndexInType]);
+        payload = generateLoanCreatedEvent(data.carIds[carIndex], data.loanIds[eventIndexInType], vuId, iteration, eventIndexInType);
         eventType = "LoanCreated";
     } else if (eventTypeIndex === 2) {
         // Loan Payment Submitted
         const loanIndex = eventIndexInType; // Link to corresponding loan
-        payload = generateLoanPaymentEvent(data.loanIds[loanIndex], data.monthlyPayments[eventIndexInType]);
+        payload = generateLoanPaymentEvent(data.loanIds[loanIndex], data.monthlyPayments[eventIndexInType], vuId, iteration, eventIndexInType);
         eventType = "LoanPaymentSubmitted";
     } else {
         // Car Service Done
         const carIndex = eventIndexInType; // Link to corresponding car
-        payload = generateCarServiceEvent(data.carIds[carIndex], data.serviceIds[eventIndexInType]);
+        payload = generateCarServiceEvent(data.carIds[carIndex], data.serviceIds[eventIndexInType], vuId, iteration, eventIndexInType);
         eventType = "CarServiceDone";
     }
     
@@ -491,6 +554,42 @@ export default function (data) {
         },
     });
     
+    // Check for schema errors in response and abort immediately
+    const responseBody = res.body || '';
+    const responseText = responseBody.toString().toLowerCase();
+    const isSchemaError = (
+        res.status >= 500 && (
+            (responseText.includes('relation') && responseText.includes('does not exist')) ||
+            (responseText.includes('business_events') && responseText.includes('not exist')) ||
+            (responseText.includes('relation') && responseText.includes('business_events') && responseText.includes('does not exist')) ||
+            responseText.includes('relation "business_events" does not exist') ||
+            responseText.includes("relation 'business_events' does not exist")
+        )
+    );
+    
+    // Abort immediately if schema error detected (prevents wasting resources)
+    if (isSchemaError) {
+        console.error('='.repeat(70));
+        console.error(`[VU ${vuId} ABORTED] Database schema error detected!`);
+        console.error('='.repeat(70));
+        console.error(`Event Type: ${eventType}`);
+        console.error(`Event Index: ${eventIndexInType}`);
+        console.error(`Response Status: ${res.status}`);
+        console.error(`Response Body: ${responseBody.substring(0, 500)}`);
+        console.error('');
+        console.error('ERROR: The business_events table does not exist in the database.');
+        console.error('');
+        console.error('SOLUTION: Initialize the database schema before running tests:');
+        console.error('  cd /Users/rickzakharov/dev/github/api-performance-multi-lang');
+        console.error('  python3 scripts/init-aurora-schema.py');
+        console.error('');
+        console.error('Or run: terraform apply (if using Terraform-managed infrastructure)');
+        console.error('='.repeat(70));
+        
+        // Abort this VU's execution
+        throw new Error('Database schema is missing. Test aborted. Please initialize the schema before running tests.');
+    }
+    
     // Log errors immediately for visibility
     if (!success || res.status !== 200) {
         const errorMsg = res.status >= 400 ? `HTTP ${res.status}: ${res.body?.substring(0, 200) || 'No response body'}` : 'Request failed checks';
@@ -535,22 +634,23 @@ export function teardown(data) {
 }
 
 export function handleSummary(data) {
-    const totalRequests = data.metrics.http_reqs.values.count;
-    const totalErrors = data.metrics.errors.values.count;
+    // Safely access metrics with fallbacks
+    const totalRequests = data.metrics?.http_reqs?.values?.count || 0;
+    const totalErrors = data.metrics?.errors?.values?.count || 0;
     const errorRate = totalRequests > 0 ? ((totalErrors / totalRequests) * 100).toFixed(2) : 0;
     
-    const carSent = data.metrics.car_events_sent ? data.metrics.car_events_sent.values.count : 0;
-    const loanSent = data.metrics.loan_events_sent ? data.metrics.loan_events_sent.values.count : 0;
-    const paymentSent = data.metrics.payment_events_sent ? data.metrics.payment_events_sent.values.count : 0;
-    const serviceSent = data.metrics.service_events_sent ? data.metrics.service_events_sent.values.count : 0;
+    const carSent = data.metrics?.car_events_sent?.values?.count || 0;
+    const loanSent = data.metrics?.loan_events_sent?.values?.count || 0;
+    const paymentSent = data.metrics?.payment_events_sent?.values?.count || 0;
+    const serviceSent = data.metrics?.service_events_sent?.values?.count || 0;
     
     // Overall HTTP metrics
-    const rate = data.metrics.http_req_duration?.values?.rate || 0;
-    const avg = data.metrics.http_req_duration?.values?.avg || 0;
-    const min = data.metrics.http_req_duration?.values?.min || 0;
-    const max = data.metrics.http_req_duration?.values?.max || 0;
-    const p95 = data.metrics.http_req_duration?.values?.['p(95)'] || 0;
-    const p99 = data.metrics.http_req_duration?.values?.['p(99)'] || 0;
+    const rate = data.metrics?.http_req_duration?.values?.rate || 0;
+    const avg = data.metrics?.http_req_duration?.values?.avg || 0;
+    const min = data.metrics?.http_req_duration?.values?.min || 0;
+    const max = data.metrics?.http_req_duration?.values?.max || 0;
+    const p95 = data.metrics?.http_req_duration?.values?.['p(95)'] || 0;
+    const p99 = data.metrics?.http_req_duration?.values?.['p(99)'] || 0;
     
     // Custom timing metrics
     const reqDurationAvg = data.metrics.request_duration?.values?.avg || avg;

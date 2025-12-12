@@ -33,3 +33,8 @@ output "role_arn" {
   value       = aws_iam_role.lambda_execution.arn
 }
 
+output "role_name" {
+  description = "Lambda execution role name"
+  value       = aws_iam_role.lambda_execution.name
+}
+
