@@ -10,14 +10,14 @@
  * Flow: k6 → REST API → PostgreSQL → CDC → Confluent Cloud
  * 
  * Usage:
- *   # Send 5 events of each type (default, 4 types = 20 total)
+ *   # Send 5 events of each type (default, 4 types = 20 total, 1 VU per type = 4 VUs total)
  *   k6 run --env HOST=producer-api-java-rest --env PORT=8081 send-batch-events.js
  * 
- *   # Send 1000 events of each type (4 types = 4000 total)
- *   k6 run --env HOST=producer-api-java-rest --env PORT=8081 --env EVENTS_PER_TYPE=1000 send-batch-events.js
+ *   # Send 1000 events of each type with 10 VUs per type (4 types = 4000 total, 40 VUs total)
+ *   k6 run --env HOST=producer-api-java-rest --env PORT=8081 --env EVENTS_PER_TYPE=1000 --env VUS_PER_EVENT_TYPE=10 send-batch-events.js
  * 
- *   # Lambda API with 1000 events per type (4 types = 4000 total)
- *   k6 run --env API_URL=https://xxxxx.execute-api.us-east-1.amazonaws.com --env EVENTS_PER_TYPE=1000 send-batch-events.js
+ *   # Lambda API with 1000 events per type, 20 VUs per type (4 types = 4000 total, 80 VUs total)
+ *   k6 run --env API_URL=https://xxxxx.execute-api.us-east-1.amazonaws.com --env EVENTS_PER_TYPE=1000 --env VUS_PER_EVENT_TYPE=20 send-batch-events.js
  */
 
 import http from 'k6/http';
@@ -39,11 +39,19 @@ const serviceEventsSent = new Rate('service_events_sent');
 // Always sends all 4 event types: Car, Loan, Payment, Service
 const EVENTS_PER_TYPE = parseInt(__ENV.EVENTS_PER_TYPE || '5', 10);
 const NUM_EVENT_TYPES = 4; // Always 4: Car, Loan, Payment, Service
-const TOTAL_EVENTS = EVENTS_PER_TYPE * NUM_EVENT_TYPES;
+
+// Parallelism configuration - configurable VUs per event type
+// Default: 1 VU per event type (sequential)
+// Set VUS_PER_EVENT_TYPE to enable parallelism (e.g., --env VUS_PER_EVENT_TYPE=10)
+// Total VUs = VUS_PER_EVENT_TYPE * NUM_EVENT_TYPES
+// Each VU handles EVENTS_PER_TYPE / VUS_PER_EVENT_TYPE events of its assigned type
+const VUS_PER_EVENT_TYPE = parseInt(__ENV.VUS_PER_EVENT_TYPE || '1', 10);
+const TOTAL_VUS = VUS_PER_EVENT_TYPE * NUM_EVENT_TYPES;
+const EVENTS_PER_VU = Math.ceil(EVENTS_PER_TYPE / VUS_PER_EVENT_TYPE);
 
 export const options = {
-    vus: 1,
-    iterations: TOTAL_EVENTS,
+    vus: TOTAL_VUS,
+    iterations: EVENTS_PER_VU, // Each VU runs this many iterations
     thresholds: {
         // Abort if error rate exceeds 50% (half of requests failing)
         'http_req_failed': ['rate<0.5'],
@@ -263,34 +271,50 @@ export function setup() {
 }
 
 export default function (data) {
-    const iteration = __ITER; // Current iteration (0 to TOTAL_EVENTS-1)
+    const vuId = __VU; // Virtual User ID (1 to TOTAL_VUS)
+    const iteration = __ITER; // Current iteration for this VU (0 to EVENTS_PER_VU-1)
     let payload;
     let eventType;
     let success;
+    let eventIndexInType; // Event index within the event type (0 to EVENTS_PER_TYPE-1)
     
-    // Determine which event type based on iteration
-    if (iteration < EVENTS_PER_TYPE) {
-        // First batch: Car Created
-        const carIndex = iteration;
-        payload = generateCarCreatedEvent(data.carIds[carIndex]);
+    // Determine which event type this VU handles
+    // VU assignment: VU 1-VUS_PER_EVENT_TYPE handle Car, 
+    //                VU VUS_PER_EVENT_TYPE+1 to 2*VUS_PER_EVENT_TYPE handle Loan, etc.
+    const eventTypeIndex = Math.floor((vuId - 1) / VUS_PER_EVENT_TYPE); // 0=Car, 1=Loan, 2=Payment, 3=Service
+    const vuIndexInType = ((vuId - 1) % VUS_PER_EVENT_TYPE); // Position within event type (0 to VUS_PER_EVENT_TYPE-1)
+    
+    // Calculate which event index this VU should handle in this iteration
+    // Events are split evenly across VUs: 
+    //   VU 0 handles events 0, VUS_PER_EVENT_TYPE, 2*VUS_PER_EVENT_TYPE, etc.
+    //   VU 1 handles events 1, VUS_PER_EVENT_TYPE+1, 2*VUS_PER_EVENT_TYPE+1, etc.
+    //   This ensures even distribution and parallel processing
+    eventIndexInType = vuIndexInType + (iteration * VUS_PER_EVENT_TYPE);
+    
+    // Ensure we don't exceed the number of events per type
+    if (eventIndexInType >= EVENTS_PER_TYPE) {
+        return; // This VU has finished its assigned events for this type
+    }
+    
+    // Generate the appropriate event based on event type
+    if (eventTypeIndex === 0) {
+        // Car Created
+        payload = generateCarCreatedEvent(data.carIds[eventIndexInType]);
         eventType = "CarCreated";
-    } else if (iteration < EVENTS_PER_TYPE * 2) {
-        // Second batch: Loan Created
-        const loanIndex = iteration - EVENTS_PER_TYPE;
-        const carIndex = loanIndex; // Link to corresponding car
-        payload = generateLoanCreatedEvent(data.carIds[carIndex], data.loanIds[loanIndex]);
+    } else if (eventTypeIndex === 1) {
+        // Loan Created
+        const carIndex = eventIndexInType; // Link to corresponding car
+        payload = generateLoanCreatedEvent(data.carIds[carIndex], data.loanIds[eventIndexInType]);
         eventType = "LoanCreated";
-    } else if (iteration < EVENTS_PER_TYPE * 3) {
-        // Third batch: Loan Payment Submitted
-        const paymentIndex = iteration - (EVENTS_PER_TYPE * 2);
-        const loanIndex = paymentIndex; // Link to corresponding loan
-        payload = generateLoanPaymentEvent(data.loanIds[loanIndex], data.monthlyPayments[paymentIndex]);
+    } else if (eventTypeIndex === 2) {
+        // Loan Payment Submitted
+        const loanIndex = eventIndexInType; // Link to corresponding loan
+        payload = generateLoanPaymentEvent(data.loanIds[loanIndex], data.monthlyPayments[eventIndexInType]);
         eventType = "LoanPaymentSubmitted";
     } else {
-        // Fourth batch: Car Service Done
-        const serviceIndex = iteration - (EVENTS_PER_TYPE * 3);
-        const carIndex = serviceIndex; // Link to corresponding car
-        payload = generateCarServiceEvent(data.carIds[carIndex], data.serviceIds[serviceIndex]);
+        // Car Service Done
+        const carIndex = eventIndexInType; // Link to corresponding car
+        payload = generateCarServiceEvent(data.carIds[carIndex], data.serviceIds[eventIndexInType]);
         eventType = "CarServiceDone";
     }
     
@@ -327,7 +351,7 @@ export default function (data) {
     // Log errors immediately for visibility
     if (!success || res.status !== 200) {
         const errorMsg = res.status >= 400 ? `HTTP ${res.status}: ${res.body?.substring(0, 200) || 'No response body'}` : 'Request failed checks';
-        console.error(`[ERROR] ${eventType} event failed (iteration ${iteration + 1}/${options.iterations}): ${errorMsg}`);
+        console.error(`[ERROR] [VU ${vuId}] ${eventType} event failed (event ${eventIndexInType + 1}/${EVENTS_PER_TYPE}, iteration ${iteration + 1}/${options.iterations}): ${errorMsg}`);
         
         // Log first few errors in detail, then summarize
         if (iteration < 5) {
@@ -350,9 +374,9 @@ export default function (data) {
     }
     
     // Log progress periodically (every 10% or every 100 events, whichever is smaller)
-    const logInterval = Math.max(1, Math.min(Math.floor(TOTAL_EVENTS / 10), 100));
+    const logInterval = Math.max(1, Math.min(Math.floor(EVENTS_PER_VU / 10), 100));
     if (iteration % logInterval === 0 || iteration === options.iterations - 1) {
-        console.log(`Sent ${eventType} event (iteration ${iteration + 1}/${options.iterations})`);
+        console.log(`[VU ${vuId}] Sent ${eventType} event (${eventIndexInType + 1}/${EVENTS_PER_TYPE} for this type, iteration ${iteration + 1}/${options.iterations})`);
     }
     
     // Small delay between events
@@ -379,21 +403,23 @@ export function handleSummary(data) {
     const eventsSummary = `${EVENTS_PER_TYPE} Car Created + ${EVENTS_PER_TYPE} Loan Created + ${EVENTS_PER_TYPE} Loan Payment Submitted + ${EVENTS_PER_TYPE} Car Service Done`;
     
     const eventsByType = `  Car Created: ${carSent}/${EVENTS_PER_TYPE}
-  Loan Created: ${loanSent}/${EVENTS_PER_TYPE}
-  Loan Payment Submitted: ${paymentSent}/${EVENTS_PER_TYPE}
-  Car Service Done: ${serviceSent}/${EVENTS_PER_TYPE}`;
+    Loan Created: ${loanSent}/${EVENTS_PER_TYPE}
+    Loan Payment Submitted: ${paymentSent}/${EVENTS_PER_TYPE}
+    Car Service Done: ${serviceSent}/${EVENTS_PER_TYPE}`;
     
     return {
         'stdout': `
-========================================
-k6 Batch Events Test Summary
-========================================
+    ========================================
+    k6 Batch Events Test Summary
+    ========================================
 
-API Endpoint: ${apiUrl}
-Events Sent: ${eventsSummary}
-Total Events: ${TOTAL_EVENTS}
-Event Types: ${NUM_EVENT_TYPES}
-========================================
+    API Endpoint: ${apiUrl}
+    Events Sent: ${eventsSummary}
+    Total Events: ${EVENTS_PER_TYPE * NUM_EVENT_TYPES}
+    Event Types: ${NUM_EVENT_TYPES}
+    Parallelism: ${VUS_PER_EVENT_TYPE} VUs per event type (${TOTAL_VUS} total VUs)
+    Events per VU: ${EVENTS_PER_VU} per event type
+    ========================================
 
 HTTP Requests:
   Total: ${totalRequests}

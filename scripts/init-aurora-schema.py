@@ -56,14 +56,22 @@ async def main():
     print("=" * 40)
     print()
     
-    # Get connection details
-    aurora_endpoint = await get_terraform_output("aurora_endpoint")
-    db_name = await get_terraform_output("database_name") or "car_entities"
-    db_user = await get_terraform_output("database_user") or "postgres"
-    db_password = await get_password_from_tfvars()
+    # Get connection details - prioritize environment variables (from Terraform provisioner)
+    aurora_endpoint = os.getenv("AURORA_ENDPOINT", "")
+    aurora_port = os.getenv("AURORA_PORT", "5432")
+    db_name = os.getenv("DATABASE_NAME", "")
+    db_user = os.getenv("DATABASE_USER", "")
+    db_password = os.getenv("DATABASE_PASSWORD", "")
     
+    # Fall back to Terraform outputs if env vars not set (for manual execution)
+    if not aurora_endpoint:
+        aurora_endpoint = await get_terraform_output("aurora_endpoint")
+    if not db_name:
+        db_name = await get_terraform_output("database_name") or "car_entities"
+    if not db_user:
+        db_user = await get_terraform_output("database_user") or "postgres"
     if not db_password:
-        db_password = os.getenv("DATABASE_PASSWORD", "")
+        db_password = await get_password_from_tfvars()
     
     if not aurora_endpoint:
         print("✗ Aurora endpoint not found")
@@ -94,7 +102,7 @@ async def main():
     try:
         conn = await asyncpg.connect(
             host=aurora_endpoint,
-            port=5432,
+            port=int(aurora_port),
             user=db_user,
             password=db_password,
             database=db_name

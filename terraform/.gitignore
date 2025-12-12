@@ -32,3 +32,7 @@ terraform.rc
 # Ignore lock files (optional - some teams prefer to commit these)
 # .terraform.lock.hcl
 
+# Generated archive files (Lambda deployment packages)
+*.zip
+**/*.zip
+

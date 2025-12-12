@@ -202,9 +202,9 @@ variable "backup_retention_period" {
 }
 
 variable "cloudwatch_logs_retention_days" {
-  description = "CloudWatch Logs retention period in days (cost-optimized default: 2)"
+  description = "CloudWatch Logs retention period in days (cost-optimized default: 3)"
   type        = number
-  default     = 2
+  default     = 3
   validation {
     condition     = contains([1, 3, 5, 7, 14, 30, 60, 90, 120, 150, 180, 365, 400, 545, 731, 1827, 3653], var.cloudwatch_logs_retention_days)
     error_message = "CloudWatch Logs retention must be one of the valid values: 1, 3, 5, 7, 14, 30, 60, 90, 120, 150, 180, 365, 400, 545, 731, 1827, 3653"
