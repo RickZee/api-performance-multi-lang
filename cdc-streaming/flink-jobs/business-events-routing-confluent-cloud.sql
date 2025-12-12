@@ -42,6 +42,7 @@ CREATE TABLE `raw-business-events` (
 
 -- Sink Table: Car Created Events Filter
 CREATE TABLE `filtered-car-created-events` (
+    `key` BYTES,
     `id` STRING,
     `event_name` STRING,
     `event_type` STRING,
@@ -57,6 +58,7 @@ CREATE TABLE `filtered-car-created-events` (
 
 -- Sink Table: Loan Created Events Filter
 CREATE TABLE `filtered-loan-created-events` (
+    `key` BYTES,
     `id` STRING,
     `event_name` STRING,
     `event_type` STRING,
@@ -72,6 +74,7 @@ CREATE TABLE `filtered-loan-created-events` (
 
 -- Sink Table: Loan Payment Submitted Events Filter
 CREATE TABLE `filtered-loan-payment-submitted-events` (
+    `key` BYTES,
     `id` STRING,
     `event_name` STRING,
     `event_type` STRING,
@@ -87,6 +90,7 @@ CREATE TABLE `filtered-loan-payment-submitted-events` (
 
 -- Sink Table: Service Events Filter
 CREATE TABLE `filtered-service-events` (
+    `key` BYTES,
     `id` STRING,
     `event_name` STRING,
     `event_type` STRING,
@@ -108,6 +112,7 @@ CREATE TABLE `filtered-service-events` (
 -- Filters CarCreated events by eventType
 INSERT INTO `filtered-car-created-events`
 SELECT 
+    CAST(`id` AS BYTES) AS `key`,
     `id`,
     `event_name`,
     `event_type`,
@@ -123,6 +128,7 @@ WHERE `event_type` = 'CarCreated' AND `__op` = 'c';
 -- Filters LoanCreated events by eventType
 INSERT INTO `filtered-loan-created-events`
 SELECT 
+    CAST(`id` AS BYTES) AS `key`,
     `id`,
     `event_name`,
     `event_type`,
@@ -138,6 +144,7 @@ WHERE `event_type` = 'LoanCreated' AND `__op` = 'c';
 -- Filters LoanPaymentSubmitted events by eventType
 INSERT INTO `filtered-loan-payment-submitted-events`
 SELECT 
+    CAST(`id` AS BYTES) AS `key`,
     `id`,
     `event_name`,
     `event_type`,
@@ -153,6 +160,7 @@ WHERE `event_type` = 'LoanPaymentSubmitted' AND `__op` = 'c';
 -- Filters CarServiceDone events by eventName
 INSERT INTO `filtered-service-events`
 SELECT 
+    CAST(`id` AS BYTES) AS `key`,
     `id`,
     `event_name`,
     `event_type`,

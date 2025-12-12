@@ -153,6 +153,7 @@ def main():
     else:
         logger.info("Using local Kafka (no authentication)")
     
+    logger.info(f"Client ID: {consumer_config.get('client.id', 'NOT SET')}")
     consumer = Consumer(consumer_config)
     consumer.subscribe([KAFKA_TOPIC])
     
