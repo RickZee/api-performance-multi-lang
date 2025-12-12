@@ -55,31 +55,6 @@ See the main [README.md](../README.md) for detailed Lambda deployment instructio
 - Performance considerations
 - Monitoring and troubleshooting
 
-## Project Structure
-
-```
-producer-api-python-rest-lambda/
-├── lambda_handler.py      # Lambda handler entry point
-├── config.py             # Configuration management
-├── constants.py           # API constants
-├── models/                # Data models (Pydantic)
-│   ├── event.py
-│   └── entity.py
-├── repository/            # Database repository layer
-│   ├── connection_pool.py
-│   └── car_entity_repo.py
-├── service/               # Event processing service
-│   └── event_processing.py
-├── migrations/            # Database migrations
-│   └── 001_initial_schema.sql
-├── scripts/               # Build and deployment scripts
-│   ├── build-lambda.sh
-│   └── deploy-lambda.sh
-├── sam-template.yaml      # SAM deployment template
-├── requirements.txt       # Python dependencies
-└── README.md             # This file
-```
-
 ## Differences from Containerized Version
 
 - Uses Lambda-specific connection pooling (singleton pattern)

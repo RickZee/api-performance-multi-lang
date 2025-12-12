@@ -244,6 +244,10 @@ event_data: {
 
 **In Kafka (raw-business-events topic)**:
 
+The event structure in Kafka depends on the connector configuration:
+
+**With ExtractNewRecordState Transform** (Recommended connectors):
+
 ```json
 {
   "id": "event-123",
@@ -257,6 +261,21 @@ event_data: {
   "__ts_ms": 1705312205000
 }
 ```
+
+**Without ExtractNewRecordState Transform** (Non-recommended connector):
+
+```json
+{
+  "id": "event-123",
+  "event_name": "LoanCreated",
+  "event_type": "LoanCreated",
+  "created_date": "2024-01-15T10:30:00Z",
+  "saved_date": "2024-01-15T10:30:05Z",
+  "event_data": "{\"eventHeader\":{...},\"eventBody\":{...}}"
+}
+```
+
+**Note**: When using the non-recommended connector, the `-no-op.sql` Flink SQL file adds `__op` and `__table` fields when writing to filtered topics, but the raw topic will not have these fields.
 
 **Trade-offs**:
 
@@ -330,17 +349,51 @@ SELECT pg_create_logical_replication_slot('business_events_cdc_slot', 'pgoutput'
 
 **Connector Options**:
 
-The system supports two connector implementations:
+The system supports four connector implementations with different capabilities:
 
-1. **Confluent Managed PostgresCdcSource Connector** (Recommended for Confluent Cloud)
-   - Fully managed connector service
-   - Automatic scaling and monitoring
-   - Configuration: `connectors/postgres-cdc-source-business-events-confluent-cloud.json`
+#### Recommended Connectors (Include ExtractNewRecordState Transform)
 
-2. **Debezium PostgreSQL Connector** (Self-managed or Confluent Cloud)
-   - Open-source Debezium connector
-   - More configuration flexibility
-   - Configuration: `connectors/postgres-debezium-business-events-confluent-cloud.json`
+1. **PostgresCdcSourceV2 (Debezium)** ⭐ **Most Recommended**
+   - **Connector Class**: `PostgresCdcSourceV2`
+   - **Configuration**: `connectors/postgres-cdc-source-v2-debezium-business-events-confluent-cloud.json`
+   - **Features**:
+     - Fully managed connector service with V2 architecture
+     - Full CDC metadata support (`__op`, `__table`, `__ts_ms`, `__deleted`)
+     - Proper ExtractNewRecordState transform support
+     - Best for production deployments
+   - **Flink SQL**: Use `business-events-routing-confluent-cloud.sql`
+
+2. **Debezium PostgreSQL Connector** ⭐ **Currently Used in Setup Scripts**
+   - **Connector Class**: `io.debezium.connector.postgresql.PostgresConnector`
+   - **Configuration**: `connectors/postgres-debezium-business-events-confluent-cloud.json`
+   - **Features**:
+     - Open-source Debezium connector
+     - Full ExtractNewRecordState transform support
+     - More configuration flexibility
+     - Used by `setup-business-events-pipeline.sh` script
+   - **Flink SQL**: Use `business-events-routing-confluent-cloud.sql`
+
+3. **Confluent Managed PostgresCdcSource (Fixed)** ✅ **Recommended**
+   - **Connector Class**: `PostgresCdcSource`
+   - **Configuration**: `connectors/postgres-cdc-source-business-events-confluent-cloud-fixed.json`
+   - **Features**:
+     - Fully managed connector service
+     - Includes ExtractNewRecordState transform (fixed version)
+     - Automatic scaling and monitoring
+     - Adds CDC metadata: `__op`, `__table`, `__ts_ms`
+   - **Flink SQL**: Use `business-events-routing-confluent-cloud.sql`
+
+#### Non-Recommended Connector (Missing ExtractNewRecordState)
+
+4. **Confluent Managed PostgresCdcSource (Basic)** ⚠️ **NOT RECOMMENDED**
+   - **Connector Class**: `PostgresCdcSource`
+   - **Configuration**: `connectors/postgres-cdc-source-business-events-confluent-cloud.json`
+   - **Limitations**:
+     - Missing ExtractNewRecordState transform
+     - Does not add `__op`, `__table`, `__ts_ms` fields
+     - Requires workaround in Flink SQL
+   - **Flink SQL**: Use `business-events-routing-confluent-cloud-no-op.sql` (adds metadata in Flink)
+   - **Note**: This configuration is deprecated. Use the `-fixed.json` version instead.
 
 **How It Works**:
 
@@ -348,7 +401,7 @@ The system supports two connector implementations:
 - Reads WAL changes via logical replication
 - Captures flat column values (`id`, `event_name`, `event_type`, `created_date`, `saved_date`)
 - Captures `event_data` JSONB column as JSON string
-- Applies **ExtractNewRecordState** transform to unwrap Debezium envelope:
+- **Recommended connectors** apply **ExtractNewRecordState** transform to unwrap Debezium envelope:
   - Extracts actual record data (not before/after structure)
   - Adds CDC metadata: `__op` (operation: 'c'=create, 'u'=update, 'd'=delete), `__table`, `__ts_ms`
 - Applies **RegexRouter** transform to route to `raw-business-events` topic
@@ -357,7 +410,9 @@ The system supports two connector implementations:
 
 **Event Structure Output**:
 
-The connector outputs events with the following flat structure:
+The connector output structure depends on whether ExtractNewRecordState transform is configured:
+
+**With ExtractNewRecordState Transform** (Recommended connectors):
 
 ```json
 {
@@ -373,18 +428,63 @@ The connector outputs events with the following flat structure:
 }
 ```
 
+**Without ExtractNewRecordState Transform** (Non-recommended connector):
+
+```json
+{
+  "id": "event-uuid-123",
+  "event_name": "LoanCreated",
+  "event_type": "LoanCreated",
+  "created_date": "2024-01-15T10:30:00Z",
+  "saved_date": "2024-01-15T10:30:05Z",
+  "event_data": "{\"eventHeader\":{...},\"eventBody\":{...}}"
+}
+```
+
+**Note**: When using the non-recommended connector, the `-no-op.sql` Flink SQL file adds `__op` and `__table` fields in the SELECT statement, but this is less efficient than having the connector add them.
+
 **Key Configuration**:
 
 - **Format**: JSON (using `JsonConverter` with `schemas.enable=false`)
-- **Transform**: `ExtractNewRecordState` to unwrap Debezium envelope
-- **Transform**: `RegexRouter` to route to `raw-business-events` topic
+- **Transform**: `ExtractNewRecordState` to unwrap Debezium envelope (required for recommended connectors)
+- **Transform**: `RegexRouter` or `TopicRegexRouter` to route to `raw-business-events` topic
 - **Table**: `public.business_events`
 - **Replication Slot**: Created automatically by connector
 
 **Configuration Files**:
 
-- `connectors/postgres-cdc-source-business-events-confluent-cloud.json` - Confluent managed connector
-- `connectors/postgres-debezium-business-events-confluent-cloud.json` - Debezium connector
+- `connectors/postgres-cdc-source-v2-debezium-business-events-confluent-cloud.json` - ⭐ Most recommended (V2 Debezium)
+- `connectors/postgres-debezium-business-events-confluent-cloud.json` - ⭐ Currently used in setup scripts
+- `connectors/postgres-cdc-source-business-events-confluent-cloud-fixed.json` - ✅ Recommended (Fixed PostgresCdcSource)
+- `connectors/postgres-cdc-source-business-events-confluent-cloud.json` - ⚠️ NOT RECOMMENDED (Missing transform)
+
+**Connector-Flink SQL Compatibility Matrix**:
+
+| Connector Configuration | ExtractNewRecordState | CDC Metadata Fields | Flink SQL File | Recommendation |
+|------------------------|----------------------|---------------------|---------------|----------------|
+| `postgres-cdc-source-v2-debezium-*.json` | ✅ Yes | `__op`, `__table`, `__ts_ms`, `__deleted` | `business-events-routing-confluent-cloud.sql` | ⭐ Most Recommended |
+| `postgres-debezium-*.json` | ✅ Yes | `__op`, `__table`, `__ts_ms` | `business-events-routing-confluent-cloud.sql` | ⭐ Currently Used |
+| `postgres-cdc-source-*-fixed.json` | ✅ Yes | `__op`, `__table`, `__ts_ms` | `business-events-routing-confluent-cloud.sql` | ✅ Recommended |
+| `postgres-cdc-source-*.json` (basic) | ❌ No | None (added in Flink) | `business-events-routing-confluent-cloud-no-op.sql` | ⚠️ NOT RECOMMENDED |
+
+**Migration Path**:
+
+If you're currently using the non-recommended connector (`postgres-cdc-source-business-events-confluent-cloud.json`):
+
+1. **Option 1 (Recommended)**: Migrate to `postgres-cdc-source-v2-debezium-business-events-confluent-cloud.json`
+   - Update connector configuration
+   - Switch Flink SQL to `business-events-routing-confluent-cloud.sql`
+   - Restart connector
+
+2. **Option 2**: Migrate to `postgres-cdc-source-business-events-confluent-cloud-fixed.json`
+   - Update connector configuration
+   - Switch Flink SQL to `business-events-routing-confluent-cloud.sql`
+   - Restart connector
+
+3. **Option 3**: Continue using Debezium connector (`postgres-debezium-business-events-confluent-cloud.json`)
+   - Already includes ExtractNewRecordState
+   - Already uses `business-events-routing-confluent-cloud.sql`
+   - No changes needed
 
 ### 3. Kafka Broker
 
@@ -475,11 +575,11 @@ confluent flink compute-pool create prod-flink-east \
   --region us-east-1 \
   --max-cfu 4
 
-# Deploy SQL statement
+# Deploy SQL statement (Recommended)
 confluent flink statement create \
   --compute-pool cp-east-123 \
   --statement-name event-routing-job \
-  --statement-file flink-jobs/routing-generated.sql
+  --statement-file flink-jobs/business-events-routing-confluent-cloud.sql
 ```
 
 ### 6. Flink SQL Jobs
@@ -504,7 +604,30 @@ In **Confluent Cloud**, Flink jobs are deployed as **SQL statements** rather tha
 - **Routing**: Routes matching events to different Kafka topics based on filter conditions
 - **Fault Tolerance**: Automatic checkpoints ensure exactly-once semantics (managed by Confluent Cloud)
 
-**Example Flink SQL Statement** (from `flink-jobs/business-events-routing-confluent-cloud.sql`):
+**Flink SQL File Variants**:
+
+The system provides two Flink SQL files to support different connector configurations:
+
+1. **`business-events-routing-confluent-cloud.sql`** ⭐ **Recommended**
+   - **Use With**: Connectors that include ExtractNewRecordState transform
+   - **Source Table**: Expects `__op`, `__table`, `__ts_ms` fields from connector
+   - **Filtering**: Can filter by `__op` field (e.g., `WHERE event_type = 'LoanCreated' AND __op = 'c'`)
+   - **Compatible Connectors**:
+     - `postgres-cdc-source-v2-debezium-business-events-confluent-cloud.json`
+     - `postgres-debezium-business-events-confluent-cloud.json`
+     - `postgres-cdc-source-business-events-confluent-cloud-fixed.json`
+
+2. **`business-events-routing-confluent-cloud-no-op.sql`** ⚠️ **Workaround for Non-Recommended Connector**
+   - **Use With**: Connectors that do NOT include ExtractNewRecordState transform
+   - **Source Table**: Does NOT expect `__op`, `__table`, `__ts_ms` fields
+   - **Filtering**: Cannot filter by `__op` (assumes all events are inserts)
+   - **Workaround**: Adds `__op` and `__table` fields in SELECT statement (less efficient)
+   - **Compatible Connectors**:
+     - `postgres-cdc-source-business-events-confluent-cloud.json` (non-recommended)
+
+**Recommendation**: Always use `business-events-routing-confluent-cloud.sql` with a recommended connector that includes ExtractNewRecordState transform. The `-no-op.sql` variant is a workaround and should only be used if you cannot migrate to a recommended connector.
+
+**Example Flink SQL Statement** (from `flink-jobs/business-events-routing-confluent-cloud.sql` - Recommended):
 
 ```sql
 -- ============================================================================
@@ -580,6 +703,76 @@ SELECT * FROM `raw-business-events`
 WHERE `event_name` = 'CarServiceDone' AND `__op` = 'c';
 ```
 
+**Example Flink SQL Statement** (from `flink-jobs/business-events-routing-confluent-cloud-no-op.sql` - Workaround):
+
+This variant is used when the connector does NOT provide `__op`, `__table`, `__ts_ms` fields. The SQL adds these fields in the SELECT statement:
+
+```sql
+-- ============================================================================
+-- Step 1: Create Source Table (No CDC Metadata Fields)
+-- ============================================================================
+-- Source Table: Raw Business Events from Kafka (PostgresCdcSource output)
+-- Note: PostgresCdcSource outputs flat structure without __op, __table, __ts_ms
+CREATE TABLE `raw-business-events` (
+    `id` STRING,
+    `event_name` STRING,
+    `event_type` STRING,
+    `created_date` STRING,
+    `saved_date` STRING,
+    `event_data` STRING
+) WITH (
+    'connector' = 'confluent',
+    'value.format' = 'json-registry',
+    'scan.startup.mode' = 'earliest-offset'
+);
+
+-- ============================================================================
+-- Step 2: Create Sink Table (With CDC Metadata Fields)
+-- ============================================================================
+-- Sink Table: Filtered Loan Created Events
+CREATE TABLE `filtered-loan-created-events` (
+    `id` STRING,
+    `event_name` STRING,
+    `event_type` STRING,
+    `created_date` STRING,
+    `saved_date` STRING,
+    `event_data` STRING,
+    `__op` STRING,
+    `__table` STRING
+) WITH (
+    'connector' = 'confluent',
+    'value.format' = 'json-registry'
+);
+
+-- ============================================================================
+-- Step 3: INSERT Statement - Filter and Route (Adds Metadata in Flink)
+-- ============================================================================
+-- Filter LoanCreated events and route to filtered topic
+-- Note: Adds __op and __table fields in SELECT (workaround)
+INSERT INTO `filtered-loan-created-events`
+SELECT 
+    `id`,
+    `event_name`,
+    `event_type`,
+    `created_date`,
+    `saved_date`,
+    `event_data`,
+    'c' AS `__op`,                    -- Add __op = 'c' in Flink (assumes all are inserts)
+    'business_events' AS `__table`    -- Add __table in Flink
+FROM `raw-business-events`
+WHERE `event_type` = 'LoanCreated';   -- No __op filter (assumes all are inserts)
+```
+
+**Key Differences Between SQL Variants**:
+
+| Aspect | `business-events-routing-confluent-cloud.sql` | `business-events-routing-confluent-cloud-no-op.sql` |
+|--------|----------------------------------------------|---------------------------------------------------|
+| **Source Table Fields** | Includes `__op`, `__table`, `__ts_ms` | Does NOT include CDC metadata fields |
+| **CDC Metadata Source** | From connector (ExtractNewRecordState) | Added in Flink SELECT (workaround) |
+| **Filtering by Operation** | Can filter by `__op` (e.g., `WHERE __op = 'c'`) | Cannot filter by `__op` (assumes all inserts) |
+| **Performance** | More efficient (metadata from connector) | Less efficient (metadata added in Flink) |
+| **Recommended** | ✅ Yes (with recommended connectors) | ⚠️ No (workaround only) |
+
 **Key Differences from Nested Structure**:
 
 - **Flat Structure**: Uses flat columns (`id`, `event_name`, `event_type`, etc.) instead of nested `eventHeader`/`eventBody`
@@ -591,17 +784,17 @@ WHERE `event_name` = 'CarServiceDone' AND `__op` = 'c';
 **Deployment** (Confluent Cloud):
 
 ```bash
-# Deploy SQL statement to compute pool
+# Deploy SQL statement to compute pool (Recommended)
 confluent flink statement create \
   --compute-pool cp-east-123 \
   --statement-name event-routing-job \
-  --statement-file flink-jobs/routing-generated.sql
+  --statement-file flink-jobs/business-events-routing-confluent-cloud.sql
 
 # Update existing statement
 confluent flink statement update \
   --compute-pool cp-east-123 \
   --statement-id ss-456789 \
-  --statement-file flink-jobs/routing-generated.sql
+  --statement-file flink-jobs/business-events-routing-confluent-cloud.sql
 
 # List statements
 confluent flink statement list --compute-pool cp-east-123
@@ -609,6 +802,8 @@ confluent flink statement list --compute-pool cp-east-123
 # Get statement status
 confluent flink statement describe ss-456789 --compute-pool cp-east-123
 ```
+
+**Note**: The deployment example above uses `business-events-routing-confluent-cloud.sql` which is the recommended SQL file for connectors with ExtractNewRecordState transform. If you must use the non-recommended connector, replace with `business-events-routing-confluent-cloud-no-op.sql`.
 
 **Topic Creation**: Filtered topics (`filtered-loan-created-events`, `filtered-service-events`, etc.) are automatically created by Flink when it writes to them for the first time. No manual topic creation is required for filtered topics. Only the `raw-business-events` topic needs to be created manually before deploying the CDC connector.
 
@@ -677,6 +872,7 @@ Consumers **do NOT connect to Flink**. Instead, they connect directly to **Kafka
 All consumers support connecting to both local Kafka (for development) and Confluent Cloud (for production). Configuration is done via environment variables:
 
 **Local Kafka (Development)**:
+
 ```yaml
 environment:
   KAFKA_BOOTSTRAP_SERVERS: kafka:29092
@@ -685,6 +881,7 @@ environment:
 ```
 
 **Confluent Cloud (Production)**:
+
 ```yaml
 environment:
   KAFKA_BOOTSTRAP_SERVERS: pkc-xxxxx.us-east-1.aws.confluent.cloud:9092
@@ -853,8 +1050,9 @@ docker-compose up -d
 ```
 
 Each consumer prints events to stdout with detailed information including:
+
 - Flat structure fields (id, event_name, event_type, created_date, saved_date)
-- CDC metadata (__op, __table)
+- CDC metadata (`__op`, `__table`)
 - Parsed nested structure from event_data (eventHeader, eventBody, entities)
 - Entity-specific attributes based on entity type
 

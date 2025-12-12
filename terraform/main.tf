@@ -212,29 +212,7 @@ module "aurora" {
   confluent_cloud_cidrs = local.confluent_cloud_cidrs
   allowed_cidr_blocks   = var.aurora_allowed_cidr_blocks
   enable_ipv6           = var.enable_ipv6
-  additional_security_group_ids = var.enable_eks && var.enable_aurora ? [module.eks[0].node_group_security_group_id] : []
-
-  tags = local.common_tags
-}
-
-# EKS Cluster Module for Java API
-module "eks" {
-  count  = var.enable_eks && var.enable_aurora ? 1 : 0
-  source = "./modules/eks"
-
-  project_name      = var.project_name
-  vpc_id            = module.vpc[0].vpc_id
-  vpc_cidr          = module.vpc[0].vpc_cidr
-  subnet_ids        = module.vpc[0].private_subnet_ids # EKS nodes in private subnets
-  aurora_security_group_id = module.aurora[0].security_group_id
-
-  kubernetes_version                      = var.kubernetes_version
-  node_group_desired_size                 = var.eks_node_group_desired_size
-  node_group_max_size                     = var.eks_node_group_max_size
-  node_group_min_size                     = var.eks_node_group_min_size
-  node_group_instance_types               = var.eks_node_group_instance_types
-  cluster_endpoint_public_access_cidrs    = var.eks_cluster_endpoint_public_access_cidrs
-  enable_ipv6                             = var.enable_ipv6
+  additional_security_group_ids = []
 
   tags = local.common_tags
 }
@@ -271,86 +249,6 @@ locals {
       Project = "Flink POC"
     }
   )
-}
-
-# gRPC Lambda module (optional - disabled by default)
-module "grpc_lambda" {
-  count  = var.enable_lambda_functions ? 1 : 0
-  source = "./modules/lambda"
-
-  function_name     = "${var.project_name}-go-grpc-lambda"
-  s3_bucket         = aws_s3_bucket.lambda_deployments.id
-  s3_key            = "grpc/lambda-deployment.zip"
-  handler           = "bootstrap"
-  runtime           = "provided.al2023"
-  architectures     = ["x86_64"]
-  memory_size       = var.lambda_memory_size
-  timeout           = var.lambda_timeout
-  log_level         = var.log_level
-  database_url      = local.database_url
-  aurora_endpoint   = local.aurora_endpoint
-  database_name     = var.database_name
-  database_user     = var.database_user
-  database_password = var.database_password
-
-  vpc_config = local.has_vpc_config ? {
-    security_group_ids = [aws_security_group.lambda[0].id]
-    subnet_ids         = var.subnet_ids
-    } : (var.enable_aurora ? {
-      security_group_ids = [module.aurora[0].security_group_id]
-      subnet_ids         = module.vpc[0].private_subnet_ids
-  } : null)
-
-  api_name        = "${var.project_name}-go-grpc-http-api"
-  api_description = "HTTP API for Producer API Go gRPC Lambda with gRPC-Web support"
-  cors_config = {
-    allow_origins = ["*"]
-    allow_methods = ["POST", "OPTIONS"]
-    allow_headers = ["Content-Type", "x-grpc-web", "Authorization"]
-    max_age       = 300
-  }
-
-  tags = local.common_tags
-}
-
-# REST Lambda module (optional - disabled by default)
-module "rest_lambda" {
-  count  = var.enable_lambda_functions ? 1 : 0
-  source = "./modules/lambda"
-
-  function_name     = "${var.project_name}-go-rest-lambda"
-  s3_bucket         = aws_s3_bucket.lambda_deployments.id
-  s3_key            = "rest/lambda-deployment.zip"
-  handler           = "bootstrap"
-  runtime           = "provided.al2023"
-  architectures     = ["x86_64"]
-  memory_size       = var.lambda_memory_size
-  timeout           = var.lambda_timeout
-  log_level         = var.log_level
-  database_url      = local.database_url
-  aurora_endpoint   = local.aurora_endpoint
-  database_name     = var.database_name
-  database_user     = var.database_user
-  database_password = var.database_password
-
-  vpc_config = local.has_vpc_config ? {
-    security_group_ids = [aws_security_group.lambda[0].id]
-    subnet_ids         = var.subnet_ids
-    } : (var.enable_aurora ? {
-      security_group_ids = [module.aurora[0].security_group_id]
-      subnet_ids         = module.vpc[0].private_subnet_ids
-  } : null)
-
-  api_name        = "${var.project_name}-go-rest-http-api"
-  api_description = "HTTP API for Producer API Go REST Lambda"
-  cors_config = {
-    allow_origins = ["*"]
-    allow_methods = ["GET", "POST", "OPTIONS"]
-    allow_headers = ["Content-Type", "Authorization"]
-    max_age       = 300
-  }
-
-  tags = local.common_tags
 }
 
 # Python REST Lambda module (optional - disabled by default)

@@ -1,12 +1,12 @@
 # Terraform Setup for Serverless APIs
 
-This directory contains Terraform configuration to deploy the Go gRPC and Go REST Lambda functions with API Gateway HTTP API, using S3 for Lambda code deployment.
+This directory contains Terraform configuration to deploy the Python REST Lambda function with API Gateway HTTP API, using S3 for Lambda code deployment.
 
 ## Overview
 
 The Terraform setup includes:
-- **Lambda Functions**: Go gRPC and Go REST Lambda functions
-- **API Gateway**: HTTP API with CORS configuration for both functions
+- **Lambda Functions**: Python REST Lambda function
+- **API Gateway**: HTTP API with CORS configuration
 - **S3 Bucket**: Versioned S3 bucket for Lambda deployment packages
 - **VPC Support**: Optional VPC configuration with security groups
 - **Database Support**: Optional RDS PostgreSQL database
@@ -17,7 +17,7 @@ This setup works alongside the existing SAM templates, providing an alternative 
 
 - Terraform >= 1.0
 - AWS CLI configured with appropriate credentials
-- Go 1.21+ (for building Lambda functions)
+- Python 3.11+ (for building Lambda functions)
 - AWS account with appropriate permissions
 
 ## Terraform State Backend (S3)
@@ -147,8 +147,7 @@ terraform output
 ```
 
 The outputs include:
-- `grpc_api_url`: API Gateway endpoint for gRPC Lambda
-- `rest_api_url`: API Gateway endpoint for REST Lambda
+- `python_rest_api_url`: API Gateway endpoint for Python REST Lambda
 - `s3_bucket_name`: S3 bucket name for Lambda deployments
 - Other resource identifiers
 
@@ -281,7 +280,7 @@ cd terraform
 ./scripts/deploy-aurora.sh
 ```
 
-See `cdc-streaming/AURORA_SETUP.md` for complete setup guide.
+For additional Aurora setup details, see [cdc-streaming/CONFLUENT_CLOUD_SETUP_GUIDE.md](../cdc-streaming/CONFLUENT_CLOUD_SETUP_GUIDE.md).
 
 ## Updating Lambda Functions
 
@@ -294,8 +293,7 @@ To update Lambda function code:
 
 2. Update Lambda function code in Terraform:
    ```bash
-   terraform apply -target=module.grpc_lambda.aws_lambda_function.this
-   terraform apply -target=module.rest_lambda.aws_lambda_function.this
+   terraform apply -target=module.python_rest_lambda.aws_lambda_function.this
    ```
 
 Or simply run:
@@ -382,4 +380,3 @@ If Lambda functions can't connect to the database:
 - S3 lifecycle policies clean up old versions after 30 days
 - Database can be stopped when not in use (manual process)
 - Consider using Aurora Serverless for variable workloads
-

@@ -56,22 +56,6 @@ See the main [README.md](../README.md) for detailed Lambda deployment instructio
 - Performance considerations
 - Monitoring and troubleshooting
 
-## Project Structure
-
-```
-producer-api-go-grpc-lambda/
-├── cmd/
-│   └── lambda/          # Lambda handler
-├── internal/            # Internal packages (models, services, etc.)
-│   └── lambda/
-│       └── grpcweb/     # gRPC-Web protocol handler
-├── migrations/          # Database migrations
-├── proto/               # Protocol buffer definitions
-├── scripts/             # Build and deployment scripts
-├── sam-template.yaml    # SAM deployment template
-└── go.mod              # Go module definition
-```
-
 ## Differences from Containerized Version
 
 - Uses Lambda-specific connection pooling (singleton pattern)
@@ -86,4 +70,3 @@ The Lambda implementation uses gRPC-Web to enable gRPC calls from browsers:
 - Content-Type: `application/grpc-web+proto` (binary) or `application/grpc-web-text` (base64)
 - Path format: `/com.example.grpc.EventService/ProcessEvent`
 - Supports both binary and text (base64) encoding
-

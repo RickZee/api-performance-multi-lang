@@ -54,23 +54,9 @@ See the main [README.md](../README.md) for detailed Lambda deployment instructio
 - Performance considerations
 - Monitoring and troubleshooting
 
-## Project Structure
-
-```
-producer-api-go-rest-lambda/
-├── cmd/
-│   └── lambda/          # Lambda handler
-├── internal/            # Internal packages (models, services, etc.)
-├── migrations/          # Database migrations
-├── scripts/             # Build and deployment scripts
-├── sam-template.yaml    # SAM deployment template
-└── go.mod              # Go module definition
-```
-
 ## Differences from Containerized Version
 
 - Uses Lambda-specific connection pooling (singleton pattern)
 - Handles API Gateway HTTP API v2 events
 - Optimized for cold starts and container reuse
 - No HTTP server (handles events directly)
-
