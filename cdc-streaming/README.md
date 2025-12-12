@@ -12,13 +12,13 @@ This CDC streaming system captures changes from PostgreSQL database tables and s
 - **Security and Observability**: Schema Registry for schema enforcement, monitoring via Control Center
 - **Cost Efficiency**: Stateful processing with Flink and efficient filtering/routing
 
-## Architecture
+## Screenshots
 
 The system captures database changes via CDC, streams them through Kafka, and uses Flink SQL to filter and route events to consumer-specific topics. Key components include Confluent Platform (Kafka, Schema Registry, Kafka Connect), Flink for stream processing, and **Confluent Managed PostgreSQL CDC Source Connector** (for Confluent Cloud) or Debezium-based PostgreSQL CDC connector (for local development).
 
 For comprehensive architecture documentation including detailed data flow diagrams, component deep dives, and how consumers interact with the system, see [ARCHITECTURE.md](ARCHITECTURE.md).
 
-### Architecture Screenshots
+### Screenshots
 
 The following screenshots illustrate key components and views of the CDC streaming system:
 
@@ -42,26 +42,6 @@ The following screenshots illustrate key components and views of the CDC streami
 
 *Figure 5: Example consumer application logs showing event processing*
 
-## Example Data Structures
-
-This system uses specific example structures for car entities and loan created events:
-
-- **Car Entity Example**: [`data/entities/car/car-large.json`](../data/entities/car/car-large.json)
-  - Large car entity structure with all required fields
-  - Used as reference for car entity validation and test data generation
-  
-- **Loan Created Event Example**: [`data/schemas/event/samples/loan-created-event.json`](../data/schemas/event/samples/loan-created-event.json)
-  - Complete loan created event structure
-  - Used as reference for loan event filtering and validation
-
-These examples are used by:
-- Test data generation scripts (`scripts/generate-test-data-from-examples.sh`)
-- Entity validation scripts (`scripts/validate-entity-structure.py`)
-- Filter configuration in Flink SQL jobs - specifically targets `LoanCreated` events
-- Schema documentation and examples
-
-For generating test data based on these examples, see the [Testing - Generate Test Events](#testing) section below.
-
 ## Prerequisites
 
 ### For Docker Compose (Local Development)
@@ -72,7 +52,7 @@ For generating test data based on these examples, see the [Testing - Generate Te
 - curl (for API calls)
 - Access to existing producer APIs for generating test events
 
-### For Confluent Cloud (Production)
+### For Confluent Cloud
 
 - Confluent Cloud account (sign up at https://confluent.cloud)
 - Confluent CLI installed (`brew install confluentinc/tap/cli`)
@@ -108,11 +88,11 @@ This will start:
 - Flink TaskManager
 - Example consumers (loan-consumer, loan-payment-consumer, service-consumer, car-consumer)
 
-**Note:** For production, use Confluent Cloud Flink instead of local Flink. Local Flink is for development/testing only.
+**Note:** For Confluent Cloud, use Confluent Cloud Flink instead of local Flink. Local Flink is for development/testing only.
 
 **Monitoring:** Use Confluent Cloud Console at https://confluent.cloud for monitoring Kafka, Schema Registry, connectors, and Flink statements.
 
-#### Option B: Confluent Cloud (Production)
+#### Option B: Confluent Cloud
 
 For complete Confluent Cloud setup instructions, see **[CONFLUENT_CLOUD_SETUP_GUIDE.md](CONFLUENT_CLOUD_SETUP_GUIDE.md)**.
 
@@ -179,7 +159,7 @@ EOF
 
 Test the end-to-end pipeline by checking connector status, Flink statements, and topic message counts using the Confluent Cloud CLI.
 
-#### Option B: Confluent Cloud (Production)
+#### Option B: Confluent Cloud
 
 Verify the pipeline in Confluent Cloud:
 
@@ -240,9 +220,9 @@ Edit `connectors/postgres-source-connector.json` to modify connector configurati
 }
 ```
 
-## Data Model Comparison
+## Data Model
 
-This system supports two different data model approaches for representing entity attributes: **deeply nested** and **flat**. Understanding the differences is important for filtering, processing, and schema design decisions.
+This system uses a **deeply nested data model** for representing entity attributes with hierarchical JSON structures.
 
 ### Deeply Nested Data Model
 
@@ -298,83 +278,21 @@ For complete schema definitions and examples, see the [data folder README](../da
 - Requires JSON parsing functions for nested field access
 - More complex query syntax for filtering
 
-### Flat Data Model
-
-The **flat data model** uses a key-value map structure where all values are strings and nested paths are represented using dot notation in keys.
-
-**Example Structure:**
-
-The flat data model uses dot notation in keys to represent nested paths. For the underlying entity structure, see [`data/schemas/entity/loan.json`](../data/schemas/entity/loan.json). The flat representation would convert nested attributes to dot-notation keys (e.g., `loan.loanAmount`, `loan.balance`).
-
-**Database Schema (DDL):**
-```sql
-CREATE TABLE loan_entities (
-    id VARCHAR(255) PRIMARY KEY,
-    entity_type VARCHAR(255) NOT NULL,
-    created_at TIMESTAMP WITH TIME ZONE,
-    updated_at TIMESTAMP WITH TIME ZONE,
-    updated_attributes JSONB NOT NULL
-);
-
--- Index for JSONB queries
-CREATE INDEX idx_loan_entities_updated_attributes_gin 
-    ON loan_entities USING GIN (updated_attributes);
-
--- Example query accessing flat structure
-SELECT 
-    id,
-    updated_attributes->>'loan.loanAmount' as loan_amount,
-    updated_attributes->>'borrower.name' as borrower_name
-FROM loan_entities
-WHERE (updated_attributes->>'loan.loanAmount')::numeric > 100000;
-```
-
-**Schema Definitions:**
-
-For flat data model structures, refer to the entity schemas in the `data/` folder. The schemas define the structure that can be flattened using dot notation for keys. See [`data/schemas/entity/`](../data/schemas/entity/) for complete entity schema definitions.
-
-**Characteristics:**
-- Compatible with Flink SQL `MAP<STRING, STRING>` type
-- Simple filtering syntax: `updatedAttributes['loan.loanAmount']`
-- Direct key-value access without JSON parsing
-- All values are strings (type information lost)
-- Requires flattening transformation at API or CDC level
-
-**Limitations:**
-- Loss of type information (everything becomes strings)
-- Requires type casting for numeric comparisons
-- Breaking change to API contract if implemented at API level
-- Less intuitive for API consumers
-
 ### Current Implementation
 
-The current implementation uses a **hybrid approach**:
+The current implementation uses deeply nested JSON structures:
 
 1. **Producer APIs**: Accept deeply nested JSON structures
 2. **PostgreSQL Storage**: Stores as JSONB (preserves nested structure)
 3. **CDC Capture**: Debezium captures the JSONB as-is
-4. **Flink SQL Processing**: Uses `MAP<STRING, STRING>` for `updatedAttributes`, which requires:
-   - Flattening nested structures before filtering, OR
-   - Using JSON parsing functions for nested field access
+4. **Flink SQL Processing**: Uses JSON parsing functions for nested field access
 
 **Schema Definition:**
 - `schemas/raw-event.avsc`: Defines `updatedAttributes` as `MAP<STRING, STRING>`
 - `schemas/filtered-event.avsc`: Same structure with added `filterMetadata`
 
-### Trade-offs
-
-| Aspect | Deeply Nested | Flat |
-|--------|---------------|------|
-| **Type Safety** | Preserves types | All strings |
-| **Filtering Simplicity** | Requires JSON parsing | Direct key access |
-| **API Compatibility** | Natural structure | Breaking change |
-| **Performance** | JSON parsing overhead | Direct access |
-| **Flexibility** | Supports any structure | Limited to key-value |
-| **Schema Evolution** | Flexible | Key naming conventions |
-
 ### Recommendations
 
-- **For New Implementations**: Consider flattening at the API level if filtering performance is critical and you can coordinate API versioning
 - **For Existing Systems**: Use JSON parsing functions in Flink SQL to access nested fields, preserving API compatibility
 - **For Type Safety**: Consider Avro schema-first design with explicit nested record types
 
@@ -434,7 +352,7 @@ docker logs -f cdc-loan-consumer
 docker logs -f cdc-service-consumer
 ```
 
-#### Option B: Confluent Cloud (Production)
+#### Option B: Confluent Cloud
 
 Monitor consumer groups and lag:
 
@@ -514,33 +432,12 @@ confluent flink compute-pool describe <compute-pool-id>
 - `checkpoint-duration`: Checkpoint duration
 - `cfu-usage`: Current CFU utilization
 
-### Confluent Cloud Console
-
-**Note:** Use Confluent Cloud Console for all monitoring. Local Control Center has been removed.
-
-Access Confluent Cloud Console at: https://confluent.cloud
-
-**Dashboard Features:**
-- **Overview**: System health, throughput, and key metrics
-- **Topics**: Topic-level metrics, partitions, and configuration
-- **Consumers**: Consumer group lag, offsets, and throughput
-- **Connectors**: Connector status, metrics, and logs
-- **Flink**: Statement status, metrics, and compute pool utilization
-- **Schema Registry**: Schema versions, compatibility, and evolution
-- **Alerts**: Configure alerts for lag, throughput, errors
-
-**Built-in Monitoring:**
-- Real-time metrics dashboards
-- Historical metrics and trends
-- Custom alert rules
-- Performance insights and recommendations
-- Cost optimization suggestions
 
 ## Testing
 
 ### Generate Test Events
 
-#### Using Example-Based Test Data Generation
+#### Using Test Data Generation
 
 Generate test data based on the example structures (`car-large.json` and `loan-created-event.json`):
 
@@ -597,184 +494,3 @@ k6 run --env LAMBDA_PYTHON_REST_API_URL=https://xxxxx.execute-api.us-east-1.amaz
   --env VUS_PER_EVENT_TYPE=10 \
   ../../load-test/k6/send-batch-events.js
 ```
-
-**How Parallelism Works:**
-
-- **Total VUs**: `VUS_PER_EVENT_TYPE × 4` (one VU group per event type)
-- **Events per VU**: `EVENTS_PER_TYPE ÷ VUS_PER_EVENT_TYPE` (events split evenly across VUs)
-- **Event Distribution**: Each VU group handles one event type, with events distributed evenly within the group
-- **Example**: With `EVENTS_PER_TYPE=100` and `VUS_PER_EVENT_TYPE=5`:
-  - Total VUs: 20 (5 per event type × 4 types)
-  - Each VU sends: 20 events (100 ÷ 5)
-  - Total events: 400 (100 per type × 4 types)
-
-**Configuration Options:**
-
-- `EVENTS_PER_TYPE`: Number of events per type (default: 5)
-- `VUS_PER_EVENT_TYPE`: Number of VUs per event type for parallelism (default: 1)
-  - Set to 1 for sequential execution (4 total VUs)
-  - Set to 5-10 for moderate parallelism (20-40 total VUs)
-  - Set to 20+ for high parallelism (80+ total VUs)
-- `HOST`: API hostname (for regular REST APIs, default: localhost)
-- `PORT`: API port (for regular REST APIs, default: 8081)
-- `API_URL`: Full API URL (for Lambda APIs, takes precedence over HOST/PORT)
-- `LAMBDA_API_URL`: Alternative Lambda API URL variable
-- `LAMBDA_PYTHON_REST_API_URL`: Python Lambda API URL variable
-
-**Performance Considerations:**
-
-- **Sequential (VUS_PER_EVENT_TYPE=1)**: Lower throughput, easier to debug
-- **Moderate Parallelism (VUS_PER_EVENT_TYPE=5-10)**: Good balance of throughput and resource usage
-- **High Parallelism (VUS_PER_EVENT_TYPE=20+)**: Maximum throughput, requires sufficient API capacity
-
-**The script will:**
-1. Generate events of all 4 types (Car, Loan, Payment, Service)
-2. Distribute events across VUs based on `VUS_PER_EVENT_TYPE`
-3. Send events to the REST API (regular or Lambda) in parallel
-4. Events are stored in PostgreSQL
-5. CDC connector captures changes and streams to Kafka
-6. Flink filters and routes events to consumer topics
-
-#### Using the k6 Test Data Generation Script (Alternative)
-
-Use the provided script to generate test data using k6 with configurable load:
-
-```bash
-cd cdc-streaming/scripts
-
-# Basic usage (10 virtual users for 30 seconds)
-./generate-test-data.sh
-
-# Custom configuration
-VUS=20 DURATION=60s PAYLOAD_SIZE=4k ./generate-test-data.sh
-
-# With request rate limit
-VUS=50 DURATION=120s RATE=10 PAYLOAD_SIZE=8k ./generate-test-data.sh
-```
-
-Configuration options:
-- `VUS`: Number of virtual users (default: 10)
-- `DURATION`: Test duration (default: 30s)
-- `RATE`: Request rate per second (optional)
-- `PAYLOAD_SIZE`: Payload size - 400b, 4k, 8k, 32k, 64k (default: 4k)
-- `API_HOST`: API hostname (default: producer-api-java-rest)
-- `API_PORT`: API port (default: 8081)
-
-#### Manual Event Generation
-
-You can also manually generate test events using curl:
-
-```bash
-# Example: Using Java REST API
-curl -X POST http://localhost:9081/api/v1/events \
-  -H "Content-Type: application/json" \
-  -d '{
-    "eventHeader": {
-      "eventName": "LoanCreated",
-      "eventType": "LoanCreated"
-    },
-    "eventBody": {
-      "entities": [{
-        "entityType": "Loan",
-        "entityId": "loan-123",
-        "updatedAttributes": {
-          "loanAmount": 50000,
-          "balance": 50000,
-          "status": "active"
-        }
-      }]
-    }
-  }'
-```
-
-### Verify Event Flow
-
-Quick verification:
-1. **Check Raw Events**: Verify events appear in `raw-business-events` topic
-2. **Check Filtered Events**: Verify filtered events appear in consumer-specific topics
-3. **Check Consumer Logs**: Verify consumers receive and process events
-
-## Shared Scripts
-
-The `scripts/shared/` subdirectory contains shared scripts for managing Confluent Cloud connectors and Flink statements.
-
-### `scripts/shared/deploy-connector.sh`
-
-Deploy Confluent Cloud CDC connectors with consistent error handling and validation.
-
-**Usage:**
-```bash
-./scripts/shared/deploy-connector.sh <config-file> [options]
-```
-
-**Parameters:**
-- `config-file`: Path to connector configuration JSON file (relative to `connectors/` directory or absolute path)
-- `--env-id ENV_ID`: Confluent environment ID (optional)
-- `--cluster-id CLUSTER_ID`: Kafka cluster ID (optional)
-- `--force`: Force deletion of existing connector without confirmation
-
-**Example:**
-```bash
-./scripts/shared/deploy-connector.sh \
-  postgres-cdc-source-business-events-confluent-cloud.json
-```
-
-**Required Environment Variables:**
-- `KAFKA_API_KEY`: Confluent Cloud API key
-- `KAFKA_API_SECRET`: Confluent Cloud API secret
-- `DB_HOSTNAME`: Database hostname
-- `DB_USERNAME`: Database username
-- `DB_PASSWORD`: Database password
-- `DB_NAME`: Database name
-
-**Migration from Individual Scripts:**
-
-The following individual scripts can now use the shared script:
-- `deploy-business-events-connector.sh` → `deploy-connector.sh postgres-cdc-source-business-events-confluent-cloud.json`
-- `deploy-connector-with-unwrap.sh` → `deploy-connector.sh postgres-cdc-source-business-events-confluent-cloud-fixed.json`
-
-### `scripts/shared/flink-manager.sh`
-
-Manage Flink SQL statements with a unified interface.
-
-**Usage:**
-```bash
-./scripts/shared/flink-manager.sh <action> [options]
-```
-
-**Actions:**
-- `cleanup`: Remove COMPLETED and FAILED statements (no confirmation)
-- `delete-failed`: Delete FAILED and COMPLETED statements (with confirmation)
-- `list`: List all statements
-- `status <name>`: Get status of a specific statement
-- `delete <name>`: Delete a specific statement
-
-**Example:**
-```bash
-# List all statements
-./scripts/shared/flink-manager.sh list
-
-# Cleanup completed/failed statements
-./scripts/shared/flink-manager.sh cleanup
-
-# Delete with confirmation
-./scripts/shared/flink-manager.sh delete-failed
-
-# Get status of a statement
-./scripts/shared/flink-manager.sh status my-statement
-
-# Delete specific statement
-./scripts/shared/flink-manager.sh delete my-statement
-```
-
-**Environment Variables:**
-- `FLINK_COMPUTE_POOL_ID`: Flink compute pool ID (default: `lfcp-2xqo0m`)
-- `KAFKA_CLUSTER_ID`: Kafka cluster ID (default: `lkc-rno3vp`)
-
-**Migration from Individual Scripts:**
-
-The following individual scripts can now use the shared script:
-- `cleanup-flink-statements.sh` → `flink-manager.sh cleanup`
-- `delete-failed-completed-flink-statements.sh` → `flink-manager.sh delete-failed`
-
-For detailed usage information, see the [Shared Scripts Documentation](../scripts/README.md#shared-scripts).
