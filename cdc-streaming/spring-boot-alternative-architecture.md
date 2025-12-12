@@ -2,7 +2,7 @@
 
 ## Current Architecture Analysis
 
-The existing CDC streaming system ([ARCHITECTURE.md](cdc-streaming/ARCHITECTURE.md)) uses:
+The existing CDC streaming system ([ARCHITECTURE.md](ARCHITECTURE.md)) uses:
 
 ```mermaid
 flowchart LR
