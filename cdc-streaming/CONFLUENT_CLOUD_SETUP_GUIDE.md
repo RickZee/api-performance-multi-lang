@@ -365,8 +365,8 @@ confluent flink compute-pool use <compute-pool-id>
 
 **CFU Sizing Guidelines:**
 - **5 CFU**: Development/testing, low-throughput workloads
-- **10 CFU**: Production, moderate workloads (up to 100K events/sec)
-- **20 CFU**: Production, high workloads (100K-500K events/sec)
+- **10 CFU**: Confluent Cloud, moderate workloads (up to 100K events/sec)
+- **20 CFU**: Confluent Cloud, high workloads (100K-500K events/sec)
 - **30-50 CFU**: Enterprise, very high-throughput (500K+ events/sec)
 
 ### Step 2: Create Service Account for Flink
@@ -1642,7 +1642,7 @@ SELECT * FROM pg_replication_slots;
 **What's Proven to Work**:
 1. PostgreSQL (Docker) → Debezium → Kafka Connect → Confluent Cloud Topics
 2. JSON format for CDC data (simpler than Avro for initial capture)
-3. ExtractNewRecordState transform to flatten Debezium envelope
+3. ExtractNewRecordState transform to extract Debezium envelope
 4. Direct consumption from topics to verify data flow
 
 **What Requires More Setup**:

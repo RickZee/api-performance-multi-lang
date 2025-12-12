@@ -44,13 +44,13 @@ These examples are used throughout the system for:
 └──────────────────────────────┬──────────────────────────────────────────┘
                                │
                                │ CDC Capture (Logical Replication)
-                               │ Captures flat columns + event_data JSONB
+                               │ Captures relational columns + event_data JSONB
                                ▼
 ┌─────────────────────────────────────────────────────────────────────────┐
 │                 Kafka Connect (Source Connector)                        │
 │  ┌──────────────────────────────────────────────────────────────────┐   │
 │  │ Confluent Managed PostgresCdcSource OR Debezium Connector        │   │
-│  │ - Extracts flat columns (id, event_name, event_type, etc.)       │   │
+│  │ - Extracts relational columns (id, event_name, event_type, etc.) │   │
 │  │ - Includes event_data as JSON string                             │   │
 │  │ - Adds CDC metadata (__op, __table, __ts_ms)                     │   │
 │  │ - Uses ExtractNewRecordState transform                           │   │
@@ -58,7 +58,7 @@ These examples are used throughout the system for:
 └──────────────────────────────┬──────────────────────────────────────────┘
                                │
                                │ JSON Serialized Events
-                               │ (Flat structure with event_data JSONB)
+                               │ (Relational structure with event_data JSONB)
                                ▼
 ┌─────────────────────────────────────────────────────────────────────────┐
 │                        Schema Registry                                  │
@@ -83,7 +83,7 @@ These examples are used throughout the system for:
 │  Flink SQL Jobs:                                                       │
 │  - Filter by event_type, __op (operation type)                         │
 │  - Route to consumer-specific topics                                   │
-│  - Preserves flat structure + event_data                               │
+│  - Preserves relational structure + event_data                         │
 └──────────────────────────────┬─────────────────────────────────────────┘
                                │
                                │ Filtered & Routed Events (JSON)
@@ -109,17 +109,17 @@ These examples are used throughout the system for:
 │  │ - Topic:         │  │Consumer          │  │ - Topic:         │       │
 │  │   filtered-loan- │  │ - Topic:         │  │   filtered-      │       │
 │  │   created-events │  │   filtered-loan- │  │   service-events │       │
-│  │ - Parses flat    │  │   payment-       │  │ - Parses flat    │       │
+│  │ - Parses relational │   payment-       │  │ - Parses relational      │
 │  │   structure +    │  │   submitted-     │  │   structure +    │       │
 │  │   event_data     │  │   events         │  │   event_data     │       │
-│  │   JSON string    │  │ - Parses flat    │  │   JSON string    │       │
+│  │   JSON string    │  │ - Parses relational │   JSON string    │       │
 │  └──────────────────┘  │   structure +    │  └──────────────────┘       │
 │  ┌──────────────────┐  │   event_data     │  ┌──────────────────┐       │
 │  │ Car Consumer     │  │   JSON string    │  │ All consumers    │       │
 │  │ - Topic:         │  └──────────────────┘  │ connect to       │       │
 │  │   filtered-car-  │                        │ Confluent Cloud  │       │
 │  │   created-events │                        │  with SASL_SSL   │       │
-│  │ - Parses flat    │                        │ authentication   │       │
+│  │ - Parses relational                       │ authentication   │       │
 │  │   structure +    │                        └──────────────────┘       │
 │  │   event_data     │                                                   │
 │  │   JSON string    │                                                   │
@@ -127,45 +127,18 @@ These examples are used throughout the system for:
 └─────────────────────────────────────────────────────────────────────────┘
 ```
 
-### How Consumers Get Filtered Events
-
-**Complete Flow**:
-
-1. **PostgreSQL** → `business_events` table stores events with:
-   - Flat columns: `id`, `event_name`, `event_type`, `created_date`, `saved_date`
-   - JSONB column: `event_data` (contains full nested event structure)
-2. **CDC Connector** → Captures changes and publishes to `raw-business-events` Kafka topic:
-   - Extracts flat column values
-   - Includes `event_data` as JSON string
-   - Adds CDC metadata: `__op` (operation: 'c'=create, 'u'=update, 'd'=delete), `__table`, `__ts_ms`
-   - Format: JSON (not Avro)
-3. **Flink SQL Job** →
-   - Consumes from `raw-business-events` (acts as Kafka consumer)
-   - Filters events using flat columns (`event_type`, `__op`)
-   - **Writes to filtered Kafka topics** (acts as Kafka producer):
-     - `filtered-loan-created-events`
-     - `filtered-loan-payment-submitted-events`
-     - `filtered-service-events`
-     - `filtered-car-created-events`
-   - Preserves flat structure + `event_data` JSONB field
-4. **Consumer Applications** →
-   - Connect to Kafka brokers
-   - Subscribe to filtered topics using Kafka consumer groups
-   - Parse flat structure for filtering metadata
-   - Extract and parse `event_data` JSONB field to access nested event structure
-   - Process events independently of Flink
 
 ## Data Model Architecture
 
-### Hybrid Data Model: Flat Columns + JSONB
+### Hybrid Data Model: Relational Columns + JSONB
 
-The architecture uses a **hybrid data model** that combines the benefits of both flat relational structures and nested JSON:
+The architecture uses a **hybrid data model** that combines the benefits of both relational structures and nested JSON:
 
 **Database Layer (PostgreSQL)**:
 
 ```sql
 CREATE TABLE business_events (
-    -- Flat columns for efficient filtering and querying
+    -- Relational columns for efficient filtering and querying
     id VARCHAR(255) PRIMARY KEY,
     event_name VARCHAR(255) NOT NULL,
     event_type VARCHAR(255),
@@ -179,34 +152,34 @@ CREATE TABLE business_events (
 
 **Benefits of This Approach**:
 
-1. **Efficient Filtering**: Flat columns (`event_type`, `event_name`) enable fast filtering in Flink SQL without JSON parsing
+1. **Efficient Filtering**: Relational columns (`event_type`, `event_name`) enable fast filtering in Flink SQL without JSON parsing
 2. **Full Data Preservation**: JSONB `event_data` column preserves complete nested event structure
-3. **Index Support**: PostgreSQL can index flat columns for fast queries
-4. **Flexibility**: Consumers can access both flat metadata and nested entity data
+3. **Index Support**: PostgreSQL can index relational columns for fast queries
+4. **Flexibility**: Consumers can access both relational metadata and nested entity data
 5. **CDC Compatibility**: CDC connectors can efficiently capture both column values and JSONB content
 
 **Data Flow Through the System**:
 
 1. **Producer APIs** → Insert events with:
-   - Flat columns extracted from `eventHeader`
+   - Relational columns extracted from `eventHeader`
    - Full event JSON stored in `event_data` JSONB column
 
 2. **CDC Connector** → Captures:
-   - Flat column values as separate fields
+   - Relational column values as separate fields
    - `event_data` JSONB as JSON string
    - Adds CDC metadata (`__op`, `__table`, `__ts_ms`)
 
 3. **Kafka Topics** → Store events as JSON with:
-   - Flat structure: `id`, `event_name`, `event_type`, `created_date`, `saved_date`
+   - Relational structure: `id`, `event_name`, `event_type`, `created_date`, `saved_date`
    - `event_data`: JSON string containing full nested structure
    - CDC metadata: `__op`, `__table`, `__ts_ms`
 
 4. **Flink SQL** → Filters using:
-   - Flat columns (`event_type`, `__op`) for efficient filtering
+   - Relational columns (`event_type`, `__op`) for efficient filtering
    - Preserves `event_data` JSON string for consumers
 
 5. **Consumers** → Process events by:
-   - Using flat columns for routing/metadata
+   - Using relational columns for routing/metadata
    - Parsing `event_data` JSON string to access nested structure
 
 **Example Event Structure**:
@@ -263,33 +236,6 @@ The event structure in Kafka depends on the connector configuration:
 }
 ```
 
-**Without ExtractNewRecordState Transform** (Non-recommended connector):
-
-```json
-{
-  "id": "event-123",
-  "event_name": "LoanCreated",
-  "event_type": "LoanCreated",
-  "created_date": "2024-01-15T10:30:00Z",
-  "saved_date": "2024-01-15T10:30:05Z",
-  "event_data": "{\"eventHeader\":{...},\"eventBody\":{...}}"
-}
-```
-
-**Note**: When using the non-recommended connector, the `-no-op.sql` Flink SQL file adds `__op` and `__table` fields when writing to filtered topics, but the raw topic will not have these fields.
-
-**Trade-offs**:
-
-| Aspect | Flat Columns | JSONB Column |
-|--------|--------------|--------------|
-| **Filtering Performance** | Fast (indexed columns) | Requires JSON parsing |
-| **Data Completeness** | Limited to extracted fields | Full nested structure |
-| **Schema Evolution** | Requires DDL changes | Flexible (JSON) |
-| **Query Complexity** | Simple SQL | JSON path queries |
-| **Storage** | Normalized | Denormalized |
-
-**Recommendation**: This hybrid approach provides the best of both worlds - efficient filtering for stream processing and complete data preservation for consumers.
-
 ## Component Deep Dive
 
 ### 1. PostgreSQL Database (Source)
@@ -298,38 +244,15 @@ The event structure in Kafka depends on the connector configuration:
 
 **Database Schema**:
 
-The `business_events` table uses a hybrid approach combining flat columns for efficient filtering and a JSONB column for full event data:
-
-```sql
-CREATE TABLE business_events (
-    id VARCHAR(255) PRIMARY KEY,              -- From eventHeader.uuid
-    event_name VARCHAR(255) NOT NULL,         -- From eventHeader.eventName
-    event_type VARCHAR(255),                  -- From eventHeader.eventType
-    created_date TIMESTAMP WITH TIME ZONE,    -- From eventHeader.createdDate
-    saved_date TIMESTAMP WITH TIME ZONE,      -- From eventHeader.savedDate
-    event_data JSONB NOT NULL                 -- Full event JSON (eventHeader + eventBody)
-);
-
--- Indexes for efficient filtering
-CREATE INDEX idx_business_events_event_type ON business_events(event_type);
-CREATE INDEX idx_business_events_created_date ON business_events(created_date);
-```
-
-**Data Model**:
-
-- **Flat Columns**: `id`, `event_name`, `event_type`, `created_date`, `saved_date` - extracted from `eventHeader` for efficient querying and filtering
-- **JSONB Column**: `event_data` - stores the complete event structure including:
-  - `eventHeader`: UUID, eventName, createdDate, savedDate, eventType
-  - `eventBody`: entities array with entityType, entityId, updatedAttributes
-  - Full nested structure preserved for consumers
+The `business_events` table schema is defined in the [Data Model Architecture](#data-model-architecture) section. It uses a hybrid approach combining relational columns for efficient filtering and a JSONB column for full event data.
 
 **How It Works**:
 
-- Producer APIs insert events into `business_events` table with both flat columns and full JSONB data
+- Producer APIs insert events into `business_events` table with both relational columns and full JSONB data
 - PostgreSQL Write-Ahead Log (WAL) records all changes
 - Logical replication slots enable CDC capture without impacting database performance
-- CDC connector captures both flat column values and the `event_data` JSONB content
-- Flat columns enable efficient filtering in Flink SQL
+- CDC connector captures both relational column values and the `event_data` JSONB content
+- Relational columns enable efficient filtering in Flink SQL
 - JSONB column preserves full event structure for consumers
 
 **Configuration**:
@@ -350,7 +273,7 @@ For high-throughput write operations from serverless Lambda functions, **RDS Pro
 
 - **Purpose**: Manages database connections efficiently for Lambda functions writing events to `business_events` table
 - **Benefits**:
-  - **Connection Multiplexing**: 1000+ concurrent Lambda instances share a pool of 50-100 actual database connections
+  - **Connection Multiplexing**: 2000+ concurrent Lambda instances share a pool of 1,442 actual connections to Aurora (80% of max)
   - **Reduced Connection Overhead**: Eliminates "too many clients already" errors by pooling connections
   - **Automatic Failover**: Handles connection health checks and automatic failover
   - **Improved Latency**: Reuses connections, avoiding connection setup overhead
@@ -362,243 +285,8 @@ For high-throughput write operations from serverless Lambda functions, **RDS Pro
 - **Configuration**: Managed via Terraform (`terraform/modules/rds-proxy/`)
   - Enabled by default when both Aurora and Python Lambda are enabled
   - Can be disabled via `enable_rds_proxy = false` variable
-- **Capacity**: Enables 1000+ concurrent Lambda executions vs ~16 without proxy
-
-**Detailed Explanation: How RDS Proxy Solves Connection Exhaustion**
-
-#### The Problem Without RDS Proxy
-
-**Connection Multiplication Effect:**
-
-Without RDS Proxy, each Lambda instance maintains its own connection pool directly to Aurora:
-
-```text
-Without RDS Proxy:
-- Each Lambda instance: 2 connections (reduced from 5)
-- Aurora db.r5.large: 1,802 max_connections
-- Maximum concurrent Lambdas: 1,802 / 2 = ~901 Lambdas (theoretical)
-- At 1000+ concurrent Lambdas: 2000+ connections needed → "too many clients already" error
-- Even with larger instances, connection exhaustion occurs at high concurrency
-```
-
-**What Happens:**
-1. Each Lambda container maintains its own connection pool (2 connections)
-2. With high concurrency, AWS spins up many Lambda containers simultaneously
-3. Each container holds connections even when idle (Lambda containers are reused)
-4. Aurora's connection limit is quickly exhausted
-5. New Lambda invocations fail with "too many clients already" errors
-
-#### How RDS Proxy Solves This
-
-**Connection Multiplexing Architecture:**
-
-RDS Proxy acts as an intermediary layer that multiplexes many Lambda connections into fewer Aurora connections:
-
-```text
-With RDS Proxy:
-- Each Lambda instance: 1-2 connections to RDS Proxy
-- RDS Proxy: Maintains pool of 1,442 actual connections to Aurora (80% of 1,802 max)
-- RDS Proxy: Multiplexes many Lambda connections → fewer Aurora connections
-- Maximum concurrent Lambdas: 2000+ (proxy handles pooling efficiently)
-- Reserved connections: 360 (20% headroom for admin/emergency use)
-```
-
-**Key Mechanisms:**
-
-1. **Connection Pooling at Proxy Layer**
-   - Lambda functions connect to RDS Proxy endpoint (not directly to Aurora)
-   - RDS Proxy maintains a smaller pool of actual connections to Aurora
-   - Many Lambda connections share the same Aurora connections
-   - Connections are borrowed from the pool when needed, returned when done
-
-2. **Connection Reuse**
-   - RDS Proxy reuses Aurora connections across multiple Lambda requests
-   - Idle Lambda connections don't hold Aurora connections
-   - Connections are borrowed from the pool when needed, returned when idle
-   - Reduces connection setup/teardown overhead
-
-3. **Connection Lifecycle Management**
-   - **max_connections_percent = 80**: Uses up to 80% of Aurora's max connections (leaves 20% headroom for admin connections)
-   - **max_idle_connections_percent = 50**: Keeps 50% idle for burst capacity
-   - **connection_borrow_timeout = 120**: Waits up to 2 minutes for available connection
-   - Automatic health checks and failover handling
-
-4. **Reduced Per-Lambda Overhead**
-   - Each Lambda uses 1-2 connections to proxy (reduced from 5 direct connections)
-   - Proxy manages the actual Aurora connection pool
-   - Lambda containers can scale without exhausting Aurora connections
-
-#### Real-World Example
-
-**Scenario: 500 Concurrent Lambda Executions**
-
-**Without RDS Proxy:**
-
-```text
-500 Lambdas × 2 connections = 1,000 connections needed
-Aurora db.r5.large limit = 1,802 connections
-Result: ✅ Would succeed, but at 1000+ Lambdas: 2000+ connections needed → ❌ Connection exhaustion
-```
-
-**With RDS Proxy:**
-
-```text
-500 Lambdas × 2 connections to proxy = 1,000 proxy connections
-RDS Proxy maintains pool of ~1,442 connections to Aurora (80% of 1,802 max)
-RDS Proxy multiplexes: 1,000 Lambda connections → 1,442 Aurora connections available
-Result: ✅ All 500 Lambdas succeed with significant headroom
-```
-
-#### Performance Benefits
-
-1. **Reduced Connection Setup Time**
-   - Proxy reuses connections, avoiding per-request setup overhead
-   - Typical savings: 10-50ms per request
-
-2. **Better Resource Utilization**
-   - Aurora connections are used more efficiently
-   - Less time spent on connection setup/teardown
-   - More CPU cycles available for actual queries
-
-3. **Automatic Failover**
-   - Proxy handles connection health checks
-   - Automatic retry on connection failures
-   - Better resilience to transient network issues
-
-4. **No Lambda Throttling from DB Connections**
-   - Lambda can scale to account limits (1000+ concurrent)
-   - Database connection limits no longer block Lambda scaling
-   - Enables true serverless scaling
-
-#### Do You Need to Increase RDS Size?
-
-**Short Answer: Probably Not, But It Depends on Your Workload**
-
-**Current Configuration:**
-- **Aurora Instance**: `db.r5.large` (1,802 max_connections)
-- **RDS Proxy Config**: `max_connections_percent = 80` (uses 80% of available connections, reserves 20% for admin)
-- **RDS Proxy Config**: `max_idle_connections_percent = 50` (keeps 50% idle for bursts)
-- **Effective RDS Proxy Connections**: 1,442 (80% of 1,802)
-- **Reserved for Admin**: 360 connections (20% headroom)
-
-**Capacity with RDS Proxy:**
-
-```text
-Aurora max connections: 1,802 (db.r5.large)
-RDS Proxy available connections: 1,442 (80% of max)
-Reserved for admin/emergency: 360 connections (20% headroom)
-With connection multiplexing: Supports 2000+ concurrent Lambdas
-Each Lambda uses 1-2 connections to proxy
-Proxy efficiently manages the 1,442 Aurora connections
-```
-
-**When You Might Need to Upgrade:**
-
-1. **High Connection Wait Times**
-   - Monitor: `ConnectionBorrowedCount` and `ConnectionBorrowedWaitTime` CloudWatch metrics
-   - If wait times are consistently high (>1 second), proxy pool may be saturated
-
-2. **Aurora CPU/Memory Pressure**
-   - More connections can increase CPU/memory usage
-   - Monitor: `CPUUtilization`, `DatabaseConnections`, `FreeableMemory`
-   - If CPU consistently > 80%, consider upgrade
-
-3. **Need for More Connections Beyond Multiplexing**
-   - If you need >1000 concurrent Lambdas with heavy DB usage
-   - If CDC connectors or other services also need connections
-   - If you have multiple applications sharing the database
-
-4. **Performance Requirements**
-   - Larger instances provide more CPU/memory for query processing
-   - Better for complex queries or high write throughput
-   - Consider if query performance is a bottleneck
-
-**Upgrade Options (if needed):**
-
-**Current Production Configuration:**
-- **Aurora Instance**: `db.r5.large` (1,802 max_connections)
-- **RDS Proxy**: 1,442 available connections (80% of max)
-- **Capacity**: Supports 2000+ concurrent Lambda executions
-
-**Further Upgrade Options (if needed):**
-
-```text
-db.r5.large → db.r5.xlarge
-- Max connections: 1,802 → 3,604
-- Cost: ~2x
-- Benefit: 2x connection capacity, more CPU/memory
-```
-
-```text
-db.r5.large → db.r5.2xlarge
-- Max connections: 1,802 → 5,000 (max limit)
-- Cost: ~4x
-- Benefit: Maximum connection capacity, significantly more CPU/memory
-```
-
-**Option 2: Monitor Current Configuration**
-
-```text
-Current production setup:
-1. Aurora db.r5.large with RDS Proxy (1,442 available connections)
-2. Monitor CloudWatch metrics:
-   - DatabaseConnections (should stay < 1,802)
-   - ConnectionBorrowedCount (proxy metrics)
-   - ConnectionBorrowedWaitTime (should be < 100ms)
-   - CPUUtilization (should stay < 80%)
-3. Upgrade only if metrics indicate saturation
-```
-
-**Current Production Configuration:**
-
-**Aurora `db.r5.large` + RDS Proxy (80% max connections):**
-
-1. **High Connection Capacity**
-   - 1,802 max connections (4x increase from db.t3.medium)
-   - 1,442 connections available via RDS Proxy (80% of max)
-   - 360 connections reserved for admin/emergency use (20% headroom)
-   - Supports 2000+ concurrent Lambda executions with headroom
-
-2. **Optimized Connection Pooling**
-   - RDS Proxy uses 80% of max connections (not 100%)
-   - Leaves 20% headroom for admin connections, CDC connectors, and emergency use
-   - Prevents connection exhaustion during spikes
-   - Better stability under high load
-
-3. **Performance Benefits**
-   - More CPU and memory (16 GB RAM vs 4 GB)
-   - Better query performance for high write throughput
-   - Handles complex queries more efficiently
-   - Reduced connection wait times
-
-4. **When to Consider Further Upgrade**
-   - Connection wait times consistently > 1 second
-   - Aurora CPU consistently > 80%
-   - Need > 3000 concurrent Lambdas with heavy DB usage
-   - DatabaseConnections consistently > 1,600 (approaching 1,802 limit)
-
-**Monitoring Strategy:**
-
-Key metrics to watch:
-
-```bash
-# RDS Proxy Metrics
-- DatabaseConnections: Should stay < Aurora max_connections
-- ConnectionBorrowedCount: Number of connections borrowed
-- ConnectionBorrowedWaitTime: Should be < 100ms typically
-
-# Aurora Metrics  
-- DatabaseConnections: Should stay < max_connections
-- CPUUtilization: Should stay < 80%
-- FreeableMemory: Should have sufficient headroom
-
-# Lambda Metrics
-- ConcurrentExecutions: Track peak concurrency
-- Throttles: Should decrease significantly
-- Duration: Should improve with connection reuse
-```
-
-**Conclusion:** The current production configuration (`db.r5.large` with RDS Proxy at 80% max connections) provides significant capacity for high Lambda concurrency. With 1,442 available connections and 360 reserved for admin use, the system can handle 2000+ concurrent Lambda executions with substantial headroom. Monitor CloudWatch metrics regularly and consider further upgrades only if metrics indicate saturation (connection wait times > 1s, CPU > 80%, or approaching connection limits).
+- **Capacity**: Supports 2000+ concurrent Lambda executions vs ~16 without proxy
+- **Monitoring**: Monitor CloudWatch metrics (`ConnectionBorrowedWaitTime`, `DatabaseConnections`, `CPUUtilization`) to detect saturation
 
 **Aurora Auto-Start/Stop for Cost Optimization**:
 
@@ -661,6 +349,7 @@ The Python REST Lambda handler includes automatic database startup logic:
 1. **Connection Error Detection**: Catches database connection errors during API requests
 2. **Auto-Start Invocation**: Invokes auto-start Lambda to check/start database
 3. **User-Friendly Response**: Returns HTTP 503 with retry guidance:
+
    ```json
    {
      "error": "Service Temporarily Unavailable",
@@ -669,6 +358,7 @@ The Python REST Lambda handler includes automatic database startup logic:
      "retry_after": 120
    }
    ```
+
 4. **Retry Header**: Includes `Retry-After: 120` header for client guidance
 
 **Example Flow**:
@@ -704,7 +394,7 @@ The Python REST Lambda handler includes automatic database startup logic:
 **When Auto-Start/Stop is Enabled**:
 
 - **Environments**: Only dev/staging (not production)
-- **Conditions**: 
+- **Conditions**:
   - `enable_aurora = true`
   - `enable_python_lambda = true`
   - `environment != "prod"`
@@ -736,7 +426,7 @@ Key CloudWatch metrics to monitor:
 
 **Best Practices**:
 
-1. **Production Environments**: Auto-start/stop is disabled for production to ensure availability
+1. **Confluent Cloud Environments**: Auto-start/stop is disabled for Confluent Cloud to ensure availability
 2. **CDC Connectors**: CDC connectors connect directly to Aurora (not through RDS Proxy)
    - **Note**: If database is stopped, CDC connectors will fail until database restarts
    - **Recommendation**: For production CDC pipelines, keep database running or use separate production database
@@ -775,61 +465,25 @@ To disable auto-start/stop functionality:
 
 **Purpose**: Captures database changes from `business_events` table and streams them to Kafka
 
-**Connector Options**:
+**Connector Configuration**:
 
-The system supports four connector implementations with different capabilities:
-
-#### Recommended Connectors (Include ExtractNewRecordState Transform)
-
-1. **PostgresCdcSourceV2 (Debezium)** ⭐ **Most Recommended**
+**PostgresCdcSourceV2 (Debezium) - Recommended**
    - **Connector Class**: `PostgresCdcSourceV2`
    - **Configuration**: `connectors/postgres-cdc-source-v2-debezium-business-events-confluent-cloud.json`
    - **Features**:
      - Fully managed connector service with V2 architecture
      - Full CDC metadata support (`__op`, `__table`, `__ts_ms`, `__deleted`)
      - Proper ExtractNewRecordState transform support
-     - Best for production deployments
+     - Best for Confluent Cloud deployments
    - **Flink SQL**: Use `business-events-routing-confluent-cloud.sql`
-
-2. **Debezium PostgreSQL Connector** ⭐ **Currently Used in Setup Scripts**
-   - **Connector Class**: `io.debezium.connector.postgresql.PostgresConnector`
-   - **Configuration**: `connectors/postgres-debezium-business-events-confluent-cloud.json`
-   - **Features**:
-     - Open-source Debezium connector
-     - Full ExtractNewRecordState transform support
-     - More configuration flexibility
-     - Used by `setup-business-events-pipeline.sh` script
-   - **Flink SQL**: Use `business-events-routing-confluent-cloud.sql`
-
-3. **Confluent Managed PostgresCdcSource (Fixed)** ✅ **Recommended**
-   - **Connector Class**: `PostgresCdcSource`
-   - **Configuration**: `connectors/postgres-cdc-source-business-events-confluent-cloud-fixed.json`
-   - **Features**:
-     - Fully managed connector service
-     - Includes ExtractNewRecordState transform (fixed version)
-     - Automatic scaling and monitoring
-     - Adds CDC metadata: `__op`, `__table`, `__ts_ms`
-   - **Flink SQL**: Use `business-events-routing-confluent-cloud.sql`
-
-#### Non-Recommended Connector (Missing ExtractNewRecordState)
-
-4. **Confluent Managed PostgresCdcSource (Basic)** ⚠️ **NOT RECOMMENDED**
-   - **Connector Class**: `PostgresCdcSource`
-   - **Configuration**: `connectors/postgres-cdc-source-business-events-confluent-cloud.json`
-   - **Limitations**:
-     - Missing ExtractNewRecordState transform
-     - Does not add `__op`, `__table`, `__ts_ms` fields
-     - Requires workaround in Flink SQL
-   - **Flink SQL**: Use `business-events-routing-confluent-cloud-no-op.sql` (adds metadata in Flink)
-   - **Note**: This configuration is deprecated. Use the `-fixed.json` version instead.
 
 **How It Works**:
 
 - Connects to PostgreSQL replication slot (created automatically)
 - Reads WAL changes via logical replication
-- Captures flat column values (`id`, `event_name`, `event_type`, `created_date`, `saved_date`)
+- Captures relational column values (`id`, `event_name`, `event_type`, `created_date`, `saved_date`)
 - Captures `event_data` JSONB column as JSON string
-- **Recommended connectors** apply **ExtractNewRecordState** transform to unwrap Debezium envelope:
+- **PostgresCdcSourceV2** applies **ExtractNewRecordState** transform to unwrap Debezium envelope:
   - Extracts actual record data (not before/after structure)
   - Adds CDC metadata: `__op` (operation: 'c'=create, 'u'=update, 'd'=delete), `__table`, `__ts_ms`
 - Applies **RegexRouter** transform to route to `raw-business-events` topic
@@ -838,81 +492,19 @@ The system supports four connector implementations with different capabilities:
 
 **Event Structure Output**:
 
-The connector output structure depends on whether ExtractNewRecordState transform is configured:
-
-**With ExtractNewRecordState Transform** (Recommended connectors):
-
-```json
-{
-  "id": "event-uuid-123",
-  "event_name": "LoanCreated",
-  "event_type": "LoanCreated",
-  "created_date": "2024-01-15T10:30:00Z",
-  "saved_date": "2024-01-15T10:30:05Z",
-  "event_data": "{\"eventHeader\":{...},\"eventBody\":{...}}",
-  "__op": "c",
-  "__table": "business_events",
-  "__ts_ms": 1705312205000
-}
-```
-
-**Without ExtractNewRecordState Transform** (Non-recommended connector):
-
-```json
-{
-  "id": "event-uuid-123",
-  "event_name": "LoanCreated",
-  "event_type": "LoanCreated",
-  "created_date": "2024-01-15T10:30:00Z",
-  "saved_date": "2024-01-15T10:30:05Z",
-  "event_data": "{\"eventHeader\":{...},\"eventBody\":{...}}"
-}
-```
-
-**Note**: When using the non-recommended connector, the `-no-op.sql` Flink SQL file adds `__op` and `__table` fields in the SELECT statement, but this is less efficient than having the connector add them.
+The connector output structure matches the event structure in Kafka as defined in the [Data Model Architecture](#data-model-architecture) section. The PostgresCdcSourceV2 connector includes ExtractNewRecordState transform, so events include CDC metadata fields (`__op`, `__table`, `__ts_ms`, `__deleted`).
 
 **Key Configuration**:
 
 - **Format**: JSON (using `JsonConverter` with `schemas.enable=false`)
-- **Transform**: `ExtractNewRecordState` to unwrap Debezium envelope (required for recommended connectors)
-- **Transform**: `RegexRouter` or `TopicRegexRouter` to route to `raw-business-events` topic
+- **Transform**: `ExtractNewRecordState` to unwrap Debezium envelope
+- **Transform**: `TopicRegexRouter` (`io.confluent.connect.cloud.transforms.TopicRegexRouter`) to route to `raw-business-events` topic
 - **Table**: `public.business_events`
 - **Replication Slot**: Created automatically by connector
 
-**Configuration Files**:
+**Configuration File**:
 
-- `connectors/postgres-cdc-source-v2-debezium-business-events-confluent-cloud.json` - ⭐ Most recommended (V2 Debezium)
-- `connectors/postgres-debezium-business-events-confluent-cloud.json` - ⭐ Currently used in setup scripts
-- `connectors/postgres-cdc-source-business-events-confluent-cloud-fixed.json` - ✅ Recommended (Fixed PostgresCdcSource)
-- `connectors/postgres-cdc-source-business-events-confluent-cloud.json` - ⚠️ NOT RECOMMENDED (Missing transform)
-
-**Connector-Flink SQL Compatibility Matrix**:
-
-| Connector Configuration | ExtractNewRecordState | CDC Metadata Fields | Flink SQL File | Recommendation |
-|------------------------|----------------------|---------------------|---------------|----------------|
-| `postgres-cdc-source-v2-debezium-*.json` | ✅ Yes | `__op`, `__table`, `__ts_ms`, `__deleted` | `business-events-routing-confluent-cloud.sql` | ⭐ Most Recommended |
-| `postgres-debezium-*.json` | ✅ Yes | `__op`, `__table`, `__ts_ms` | `business-events-routing-confluent-cloud.sql` | ⭐ Currently Used |
-| `postgres-cdc-source-*-fixed.json` | ✅ Yes | `__op`, `__table`, `__ts_ms` | `business-events-routing-confluent-cloud.sql` | ✅ Recommended |
-| `postgres-cdc-source-*.json` (basic) | ❌ No | None (added in Flink) | `business-events-routing-confluent-cloud-no-op.sql` | ⚠️ NOT RECOMMENDED |
-
-**Migration Path**:
-
-If you're currently using the non-recommended connector (`postgres-cdc-source-business-events-confluent-cloud.json`):
-
-1. **Option 1 (Recommended)**: Migrate to `postgres-cdc-source-v2-debezium-business-events-confluent-cloud.json`
-   - Update connector configuration
-   - Switch Flink SQL to `business-events-routing-confluent-cloud.sql`
-   - Restart connector
-
-2. **Option 2**: Migrate to `postgres-cdc-source-business-events-confluent-cloud-fixed.json`
-   - Update connector configuration
-   - Switch Flink SQL to `business-events-routing-confluent-cloud.sql`
-   - Restart connector
-
-3. **Option 3**: Continue using Debezium connector (`postgres-debezium-business-events-confluent-cloud.json`)
-   - Already includes ExtractNewRecordState
-   - Already uses `business-events-routing-confluent-cloud.sql`
-   - No changes needed
+- `connectors/postgres-cdc-source-v2-debezium-business-events-confluent-cloud.json` - Recommended connector configuration
 
 ### 3. Kafka Broker
 
@@ -920,7 +512,7 @@ If you're currently using the non-recommended connector (`postgres-cdc-source-bu
 
 - `raw-business-events`: All CDC events from PostgreSQL (3 partitions)
   - Format: JSON
-  - Structure: Flat columns + `event_data` JSONB + CDC metadata
+  - Structure: Relational columns + `event_data` JSONB + CDC metadata
 - `filtered-loan-created-events`: Loan created events (auto-created by Flink)
 - `filtered-loan-payment-submitted-events`: Loan payment events (auto-created by Flink)
 - `filtered-service-events`: Service-related events (auto-created by Flink)
@@ -984,13 +576,13 @@ If you're currently using the non-recommended connector (`postgres-cdc-source-bu
 **How It Works**:
 
 - **Consumes from Kafka**: Reads events from `raw-business-events` topic (acts as Kafka consumer)
-- **Applies Filtering**: Applies filtering logic defined in Flink SQL statements using flat columns (`event_type`, `__op`)
+- **Applies Filtering**: Applies filtering logic defined in Flink SQL statements using relational columns (`event_type`, `__op`)
 - **Writes to Kafka**: Writes filtered events to consumer-specific Kafka topics (acts as Kafka producer)
   - `filtered-loan-created-events`
   - `filtered-loan-payment-submitted-events`
   - `filtered-service-events`
   - `filtered-car-created-events`
-- **Preserves Structure**: Maintains flat structure + `event_data` JSONB field for consumers
+- **Preserves Structure**: Maintains relational structure + `event_data` JSONB field for consumers
 - **Maintains State**: Maintains exactly-once semantics via automatic checkpoints
 - **Auto-Scales**: Automatically adjusts compute resources based on throughput
 
@@ -1032,28 +624,15 @@ In **Confluent Cloud**, Flink jobs are deployed as **SQL statements** rather tha
 - **Routing**: Routes matching events to different Kafka topics based on filter conditions
 - **Fault Tolerance**: Automatic checkpoints ensure exactly-once semantics (managed by Confluent Cloud)
 
-**Flink SQL File Variants**:
+**Flink SQL File**:
 
-The system provides two Flink SQL files to support different connector configurations:
-
-1. **`business-events-routing-confluent-cloud.sql`** ⭐ **Recommended**
-   - **Use With**: Connectors that include ExtractNewRecordState transform
+**`business-events-routing-confluent-cloud.sql`** - **Recommended**
+   - **Use With**: PostgresCdcSourceV2 connector (includes ExtractNewRecordState transform)
    - **Source Table**: Expects `__op`, `__table`, `__ts_ms` fields from connector
    - **Filtering**: Can filter by `__op` field (e.g., `WHERE event_type = 'LoanCreated' AND __op = 'c'`)
-   - **Compatible Connectors**:
-     - `postgres-cdc-source-v2-debezium-business-events-confluent-cloud.json`
-     - `postgres-debezium-business-events-confluent-cloud.json`
-     - `postgres-cdc-source-business-events-confluent-cloud-fixed.json`
+   - **Compatible Connector**: `postgres-cdc-source-v2-debezium-business-events-confluent-cloud.json`
 
-2. **`business-events-routing-confluent-cloud-no-op.sql`** ⚠️ **Workaround for Non-Recommended Connector**
-   - **Use With**: Connectors that do NOT include ExtractNewRecordState transform
-   - **Source Table**: Does NOT expect `__op`, `__table`, `__ts_ms` fields
-   - **Filtering**: Cannot filter by `__op` (assumes all events are inserts)
-   - **Workaround**: Adds `__op` and `__table` fields in SELECT statement (less efficient)
-   - **Compatible Connectors**:
-     - `postgres-cdc-source-business-events-confluent-cloud.json` (non-recommended)
-
-**Recommendation**: Always use `business-events-routing-confluent-cloud.sql` with a recommended connector that includes ExtractNewRecordState transform. The `-no-op.sql` variant is a workaround and should only be used if you cannot migrate to a recommended connector.
+**Note**: The `business-events-routing-confluent-cloud-no-op.sql` file exists for compatibility with connectors that do not include ExtractNewRecordState transform, but it is not recommended. Always use the recommended PostgresCdcSourceV2 connector with `business-events-routing-confluent-cloud.sql`.
 
 **Example Flink SQL Statement** (from `flink-jobs/business-events-routing-confluent-cloud.sql` - Recommended):
 
@@ -1062,7 +641,7 @@ The system provides two Flink SQL files to support different connector configura
 -- Step 1: Create Source Table
 -- ============================================================================
 -- Source Table: Raw Business Events from Kafka (CDC connector output)
--- Structure matches the flat output from CDC connector
+-- Structure matches the relational output from CDC connector
 CREATE TABLE `raw-business-events` (
     `id` STRING,                    -- Event UUID
     `event_name` STRING,            -- Event name (e.g., "LoanCreated")
@@ -1084,6 +663,7 @@ CREATE TABLE `raw-business-events` (
 -- ============================================================================
 -- Sink Table: Filtered Loan Created Events
 CREATE TABLE `filtered-loan-created-events` (
+    `key` BYTES,
     `id` STRING,
     `event_name` STRING,
     `event_type` STRING,
@@ -1103,6 +683,7 @@ CREATE TABLE `filtered-loan-created-events` (
 -- Filter LoanCreated events and route to filtered topic
 INSERT INTO `filtered-loan-created-events`
 SELECT 
+    CAST(`id` AS BYTES) AS `key`,
     `id`,
     `event_name`,
     `event_type`,
@@ -1117,18 +698,48 @@ WHERE `event_type` = 'LoanCreated' AND `__op` = 'c';  -- Filter by event_type an
 -- Additional filters for other event types:
 -- Loan Payment Submitted Events
 INSERT INTO `filtered-loan-payment-submitted-events`
-SELECT * FROM `raw-business-events`
+SELECT 
+    CAST(`id` AS BYTES) AS `key`,
+    `id`,
+    `event_name`,
+    `event_type`,
+    `created_date`,
+    `saved_date`,
+    `event_data`,
+    `__op`,
+    `__table`
+FROM `raw-business-events`
 WHERE `event_type` = 'LoanPaymentSubmitted' AND `__op` = 'c';
 
 -- Car Created Events
 INSERT INTO `filtered-car-created-events`
-SELECT * FROM `raw-business-events`
+SELECT 
+    CAST(`id` AS BYTES) AS `key`,
+    `id`,
+    `event_name`,
+    `event_type`,
+    `created_date`,
+    `saved_date`,
+    `event_data`,
+    `__op`,
+    `__table`
+FROM `raw-business-events`
 WHERE `event_type` = 'CarCreated' AND `__op` = 'c';
 
--- Service Events (filtered by event_name)
+-- Service Events (filtered by event_type)
 INSERT INTO `filtered-service-events`
-SELECT * FROM `raw-business-events`
-WHERE `event_name` = 'CarServiceDone' AND `__op` = 'c';
+SELECT 
+    CAST(`id` AS BYTES) AS `key`,
+    `id`,
+    `event_name`,
+    `event_type`,
+    `created_date`,
+    `saved_date`,
+    `event_data`,
+    `__op`,
+    `__table`
+FROM `raw-business-events`
+WHERE `event_type` = 'CarServiceDone' AND `__op` = 'c';
 ```
 
 **Example Flink SQL Statement** (from `flink-jobs/business-events-routing-confluent-cloud-no-op.sql` - Workaround):
@@ -1140,7 +751,7 @@ This variant is used when the connector does NOT provide `__op`, `__table`, `__t
 -- Step 1: Create Source Table (No CDC Metadata Fields)
 -- ============================================================================
 -- Source Table: Raw Business Events from Kafka (PostgresCdcSource output)
--- Note: PostgresCdcSource outputs flat structure without __op, __table, __ts_ms
+-- Note: PostgresCdcSource outputs relational structure without __op, __table, __ts_ms
 CREATE TABLE `raw-business-events` (
     `id` STRING,
     `event_name` STRING,
@@ -1199,15 +810,15 @@ WHERE `event_type` = 'LoanCreated';   -- No __op filter (assumes all are inserts
 | **CDC Metadata Source** | From connector (ExtractNewRecordState) | Added in Flink SELECT (workaround) |
 | **Filtering by Operation** | Can filter by `__op` (e.g., `WHERE __op = 'c'`) | Cannot filter by `__op` (assumes all inserts) |
 | **Performance** | More efficient (metadata from connector) | Less efficient (metadata added in Flink) |
-| **Recommended** | ✅ Yes (with recommended connectors) | ⚠️ No (workaround only) |
+| **Recommended** | Yes (use with PostgresCdcSourceV2) | No (workaround only, not recommended) |
 
 **Key Differences from Nested Structure**:
 
-- **Flat Structure**: Uses flat columns (`id`, `event_name`, `event_type`, etc.) instead of nested `eventHeader`/`eventBody`
+- **Relational Structure**: Uses relational columns (`id`, `event_name`, `event_type`, etc.) instead of nested `eventHeader`/`eventBody`
 - **JSON Format**: Uses `json-registry` format (not Avro)
 - **CDC Metadata**: Includes `__op`, `__table`, `__ts_ms` from CDC connector
 - **Event Data**: `event_data` is a STRING containing the full JSON event (consumers parse this)
-- **Filtering**: Filters on flat columns (`event_type`, `__op`) for efficiency
+- **Filtering**: Filters on relational columns (`event_type`, `__op`) for efficiency
 
 **Deployment** (Confluent Cloud):
 
@@ -1231,20 +842,19 @@ confluent flink statement list --compute-pool cp-east-123
 confluent flink statement describe ss-456789 --compute-pool cp-east-123
 ```
 
-**Note**: The deployment example above uses `business-events-routing-confluent-cloud.sql` which is the recommended SQL file for connectors with ExtractNewRecordState transform. If you must use the non-recommended connector, replace with `business-events-routing-confluent-cloud-no-op.sql`.
+**Note**: The deployment example above uses `business-events-routing-confluent-cloud.sql` which is the recommended SQL file for the PostgresCdcSourceV2 connector.
 
 **Topic Creation**: Filtered topics (`filtered-loan-created-events`, `filtered-service-events`, etc.) are automatically created by Flink when it writes to them for the first time. No manual topic creation is required for filtered topics. Only the `raw-business-events` topic needs to be created manually before deploying the CDC connector.
 
 **Filter Types Supported**:
 
-- **Event Type Filtering**: Filter by `event_type` column (e.g., `'LoanCreated'`, `'CarCreated'`)
-- **Event Name Filtering**: Filter by `event_name` column (e.g., `'CarServiceDone'`)
+- **Event Type Filtering**: Filter by `event_type` column (e.g., `'LoanCreated'`, `'CarCreated'`, `'CarServiceDone'`)
 - **Operation Type Filtering**: Filter by `__op` to capture only creates (`'c'`), updates (`'u'`), or deletes (`'d'`)
 - **Multi-Condition Filtering**: Combine conditions with AND/OR logic (e.g., `event_type = 'LoanCreated' AND __op = 'c'`)
-- **Value-Based Filtering**: Can filter on flat column values (dates, IDs, etc.)
+- **Value-Based Filtering**: Can filter on relational column values (dates, IDs, etc.)
 - **JSON Data Filtering**: For nested filtering, parse `event_data` JSON string using JSON functions (advanced)
 
-**Note**: The current implementation filters on flat columns for efficiency. To filter on nested data within `event_data`, you would need to parse the JSON string using Flink's JSON functions.
+**Note**: The current implementation filters on relational columns for efficiency. To filter on nested data within `event_data`, you would need to parse the JSON string using Flink's JSON functions.
 
 ### 7. Consumer Applications
 
@@ -1287,13 +897,13 @@ Consumers **do NOT connect to Flink**. Instead, they connect directly to **Kafka
      - `filtered-car-created-events`
    - These topics are **created in Kafka** automatically by Flink when it first writes to them
    - Flink acts as a **producer** to these filtered topics
-   - Events maintain the flat structure: `id`, `event_name`, `event_type`, `created_date`, `saved_date`, `event_data` (JSON string), `__op`, `__table`
+   - Events maintain the relational structure: `id`, `event_name`, `event_type`, `created_date`, `saved_date`, `event_data` (JSON string), `__op`, `__table`
 
 2. **Consumers Connect to Kafka**:
    - Consumer applications connect to Kafka brokers using `bootstrap.servers`
    - They subscribe to the filtered topics using Kafka consumer groups
    - Consumers are standard Kafka consumers - they have no direct connection to Flink
-   - Consumers receive JSON messages with flat structure
+   - Consumers receive JSON messages with relational structure
 
 **Confluent Cloud Connection**:
 
@@ -1308,7 +918,7 @@ environment:
   CONSUMER_GROUP_ID: loan-consumer-group
 ```
 
-**Confluent Cloud (Production)**:
+**Confluent Cloud**:
 
 ```yaml
 environment:
@@ -1360,30 +970,15 @@ docker-compose up -d
 
 **Event Processing in Consumers**:
 
-Consumers receive events in the following flat structure:
+Consumers receive events in the relational structure format defined in the [Data Model Architecture](#data-model-architecture) section. The implementation pattern:
 
-```json
-{
-  "id": "event-uuid-123",
-  "event_name": "LoanCreated",
-  "event_type": "LoanCreated",
-  "created_date": "2024-01-15T10:30:00Z",
-  "saved_date": "2024-01-15T10:30:05Z",
-  "event_data": "{\"eventHeader\":{\"uuid\":\"...\",\"eventName\":\"LoanCreated\",...},\"eventBody\":{\"entities\":[...]}}",
-  "__op": "c",
-  "__table": "business_events"
-}
-```
-
-**Consumer Implementation Pattern**:
-
-1. **Parse Flat Structure**: Extract filtering metadata from flat columns (`event_type`, `event_name`, `__op`)
-2. **Parse Event Data**: Extract and parse the `event_data` JSON string to access nested event structure:
+1. **Parse Relational Structure**: Extract metadata from relational columns (`event_type`, `event_name`, `__op`)
+2. **Parse Event Data**: Parse the `event_data` JSON string to access nested structure:
 
    ```python
    import json
    
-   # Parse flat structure
+   # Extract relational fields
    event_type = message['event_type']
    event_name = message['event_name']
    
@@ -1396,52 +991,11 @@ Consumers receive events in the following flat structure:
 
 3. **Process Entities**: Access nested entity data from the parsed `event_data`
 
-**Example Consumer Implementation** (from `consumers/loan-consumer/consumer.py`):
-
-All consumers follow the same pattern for parsing flat structure events:
-
-```python
-def process_event(event_value):
-    """Process a loan event"""
-    # Extract flat structure fields
-    event_id = event_value.get('id', 'Unknown')
-    event_name = event_value.get('event_name', 'Unknown')
-    event_type = event_value.get('event_type', 'Unknown')
-    created_date = event_value.get('created_date', 'Unknown')
-    saved_date = event_value.get('saved_date', 'Unknown')
-    cdc_op = event_value.get('__op', 'Unknown')
-    cdc_table = event_value.get('__table', 'Unknown')
-    
-    # Parse event_data JSON string to access nested structure
-    event_data_str = event_value.get('event_data', '{}')
-    try:
-        event_data = json.loads(event_data_str) if isinstance(event_data_str, str) else event_data_str
-    except json.JSONDecodeError as e:
-        logger.error(f"Failed to parse event_data JSON: {e}")
-        event_data = {}
-    
-    # Extract nested structure
-    event_header = event_data.get('eventHeader', {})
-    event_body = event_data.get('eventBody', {})
-    entities = event_body.get('entities', [])
-    
-    # Process entities with nested structure
-    for entity in entities:
-        entity_type = entity.get('entityType', 'Unknown')
-        entity_id = entity.get('entityId', 'Unknown')
-        updated_attrs = entity.get('updatedAttributes', {})
-        
-        # Access nested attributes based on entity type
-        if entity_type == 'Loan':
-            loan_data = updated_attrs.get('loan', {})
-            loan_amount = loan_data.get('loanAmount')
-            balance = loan_data.get('balance')
-            status = loan_data.get('status')
-```
+See `consumers/loan-consumer/consumer.py` for a complete implementation example.
 
 **Key Points**:
 
-- All consumers parse the **flat structure** first (id, event_name, event_type, etc.)
+- All consumers parse the **relational structure** first (id, event_name, event_type, etc.)
 - The `event_data` field is a **JSON string** that must be parsed with `json.loads()`
 - After parsing `event_data`, consumers can access the nested structure (eventHeader, eventBody, entities)
 - Each consumer processes entity-specific attributes based on the entity type
@@ -1479,7 +1033,7 @@ docker-compose up -d
 
 Each consumer prints events to stdout with detailed information including:
 
-- Flat structure fields (id, event_name, event_type, created_date, saved_date)
+- Relational structure fields (id, event_name, event_type, created_date, saved_date)
 - CDC metadata (`__op`, `__table`)
 - Parsed nested structure from event_data (eventHeader, eventBody, entities)
 - Entity-specific attributes based on entity type
@@ -1504,8 +1058,6 @@ Each consumer prints events to stdout with detailed information including:
 
 **Purpose**: Declarative filter definitions that generate Flink SQL automatically
 
-**Structure**: See `flink-jobs/filters.yaml` for examples
-
 **Supported Operators**:
 
 - `equals`: Exact match
@@ -1516,11 +1068,9 @@ Each consumer prints events to stdout with detailed information including:
 - `matches`: Regex pattern matching
 - `isNull`, `isNotNull`: Null checks
 
-For detailed information, see [CODE_GENERATION.md](CODE_GENERATION.md).
-
 ---
 
-## Production Deployment Considerations
+## Confluent Cloud Deployment Considerations
 
 ### Disaster Recovery
 
@@ -1536,9 +1086,7 @@ For comprehensive disaster recovery procedures, backup strategies, failover mech
 
 ### Performance Tuning
 
-For comprehensive performance tuning strategies, optimization techniques, and troubleshooting guides, see [PERFORMANCE_TUNING.md](PERFORMANCE_TUNING.md).
-
-**Summary**:
+**Key Areas for Optimization**:
 
 - **Kafka Tuning**: Broker configuration, topic settings, producer/consumer optimization
 - **Flink Tuning**: Parallelism, state backend, checkpoint configuration, operator optimization
@@ -1550,7 +1098,6 @@ For comprehensive performance tuning strategies, optimization techniques, and tr
 ## Related Documentation
 
 - **[DISASTER_RECOVERY.md](DISASTER_RECOVERY.md)**: Comprehensive disaster recovery procedures and failover mechanisms
-- **[PERFORMANCE_TUNING.md](PERFORMANCE_TUNING.md)**: Performance optimization strategies and tuning guides
 - **[CONFLUENT_CLOUD_SETUP_GUIDE.md](CONFLUENT_CLOUD_SETUP_GUIDE.md)**: Complete Confluent Cloud setup guide
 
 ## References
