@@ -1,6 +1,6 @@
 # CDC Streaming Architecture
 
-A configurable streaming architecture that enables event-based consumers to subscribe to filtered subsets of events. This implementation uses Confluent Platform (Kafka, Schema Registry, Control Center, Connect), **Confluent Managed PostgreSQL CDC Source Connector** (recommended) or Debezium connectors for CDC, and Flink SQL for stream processing.
+A configurable streaming architecture that enables event-based consumers to subscribe to filtered subsets of events. This implementation uses Confluent Platform (Kafka, Schema Registry, Control Center, Connect), **Confluent Managed PostgreSQL CDC Source Connector** (for Confluent Cloud) or Debezium connectors (for local development) for CDC, and Flink SQL for stream processing.
 
 
 ## Overview
@@ -15,7 +15,7 @@ This CDC streaming system captures changes from PostgreSQL database tables and s
 
 ## Architecture
 
-The system captures database changes via CDC, streams them through Kafka, and uses Flink SQL to filter and route events to consumer-specific topics. Key components include Confluent Platform (Kafka, Schema Registry, Kafka Connect), Flink for stream processing, and **Confluent Managed PostgreSQL CDC Source Connector** (recommended) or Debezium-based PostgreSQL CDC connector.
+The system captures database changes via CDC, streams them through Kafka, and uses Flink SQL to filter and route events to consumer-specific topics. Key components include Confluent Platform (Kafka, Schema Registry, Kafka Connect), Flink for stream processing, and **Confluent Managed PostgreSQL CDC Source Connector** (for Confluent Cloud) or Debezium-based PostgreSQL CDC connector (for local development).
 
 For comprehensive architecture documentation including detailed data flow diagrams, component deep dives, and how consumers interact with the system, see [ARCHITECTURE.md](ARCHITECTURE.md).
 
@@ -23,11 +23,11 @@ For comprehensive architecture documentation including detailed data flow diagra
 
 This system uses specific example structures for car entities and loan created events:
 
-- **Car Entity Example**: [`data/entities/car/car-large.json`](../../data/entities/car/car-large.json)
+- **Car Entity Example**: [`data/entities/car/car-large.json`](../data/entities/car/car-large.json)
   - Large car entity structure with all required fields
   - Used as reference for car entity validation and test data generation
   
-- **Loan Created Event Example**: [`data/schemas/event/samples/loan-created-event.json`](../../data/schemas/event/samples/loan-created-event.json)
+- **Loan Created Event Example**: [`data/schemas/event/samples/loan-created-event.json`](../data/schemas/event/samples/loan-created-event.json)
   - Complete loan created event structure
   - Used as reference for loan event filtering and validation
 
@@ -37,7 +37,7 @@ These examples are used by:
 - Filter configuration in Flink SQL jobs - specifically targets `LoanCreated` events
 - Schema documentation and examples
 
-For generating test data based on these examples, see the [Test Data Generation](#test-data-generation) section.
+For generating test data based on these examples, see the [Testing - Generate Test Events](#testing) section below.
 
 ## Prerequisites
 
@@ -105,7 +105,7 @@ The setup guide includes:
 
 **Note:** Topics are created in Confluent Cloud, not locally.
 
-For topic creation in Confluent Cloud, see [CONFLUENT_CLOUD_SETUP_GUIDE.md](CONFLUENT_CLOUD_SETUP_GUIDE.md) - [Topic Creation](#topic-creation) section.
+For topic creation in Confluent Cloud, see [CONFLUENT_CLOUD_SETUP_GUIDE.md](CONFLUENT_CLOUD_SETUP_GUIDE.md#topic-creation) - Topic Creation section.
 
 **Note**: Filtered topics (`filtered-loan-created-events`, `filtered-car-created-events`, `filtered-loan-payment-submitted-events`, `filtered-service-events`, etc.) are automatically created by Flink when it writes to them. Only `raw-business-events` needs manual creation.
 
@@ -113,13 +113,13 @@ For topic creation in Confluent Cloud, see [CONFLUENT_CLOUD_SETUP_GUIDE.md](CONF
 
 **Note:** Connectors are deployed in Confluent Cloud, not locally.
 
-For connector deployment in Confluent Cloud, see [CONFLUENT_CLOUD_SETUP_GUIDE.md](CONFLUENT_CLOUD_SETUP_GUIDE.md) - [Connector Setup](#connector-setup) section.
+For connector deployment in Confluent Cloud, see [CONFLUENT_CLOUD_SETUP_GUIDE.md](CONFLUENT_CLOUD_SETUP_GUIDE.md#connector-setup) - Connector Setup section.
 
 ### 4. Deploy Flink SQL Jobs
 
-#### Option A: Confluent Cloud Flink (Recommended)
+#### Option A: Confluent Cloud Flink
 
-For Flink SQL deployment in Confluent Cloud, see [CONFLUENT_CLOUD_SETUP_GUIDE.md](CONFLUENT_CLOUD_SETUP_GUIDE.md) - [Flink Compute Pool Setup](#flink-compute-pool-setup) and [Deploy Flink SQL Statements](#deploy-flink-sql-statements) sections.
+For Flink SQL deployment in Confluent Cloud, see [CONFLUENT_CLOUD_SETUP_GUIDE.md](CONFLUENT_CLOUD_SETUP_GUIDE.md#flink-compute-pool-setup) for Flink Compute Pool Setup and [Deploy Flink SQL Statements](CONFLUENT_CLOUD_SETUP_GUIDE.md#deploy-flink-sql-statements) sections.
 
 Confluent Cloud Flink provides:
 - Managed infrastructure with auto-scaling
@@ -227,7 +227,7 @@ The **deeply nested data model** uses hierarchical JSON structures where attribu
 
 **Example Structure:**
 
-See [`data/schemas/event/samples/loan-created-event.json`](../../data/schemas/event/samples/loan-created-event.json) for a complete example of a deeply nested event structure. The entity structure is defined in [`data/schemas/entity/loan.json`](../../data/schemas/entity/loan.json).
+See [`data/schemas/event/samples/loan-created-event.json`](../data/schemas/event/samples/loan-created-event.json) for a complete example of a deeply nested event structure. The entity structure is defined in [`data/schemas/entity/loan.json`](../data/schemas/entity/loan.json).
 
 **Database Schema (DDL):**
 ```sql
@@ -255,13 +255,13 @@ WHERE (updated_attributes->'loan'->>'loanAmount')::numeric > 100000;
 **Schema Definitions:**
 
 Data model schemas are defined in the `data/` folder:
-- Event schema: [`data/schemas/event/event.json`](../../data/schemas/event/event.json)
-- Event header schema: [`data/schemas/event/event-header.json`](../../data/schemas/event/event-header.json)
-- Entity schemas: [`data/schemas/entity/`](../../data/schemas/entity/)
-- Sample event data: [`data/schemas/event/samples/`](../../data/schemas/event/samples/)
-- Sample entity data: [`data/entities/`](../../data/entities/)
+- Event schema: [`data/schemas/event/event.json`](../data/schemas/event/event.json)
+- Event header schema: [`data/schemas/event/event-header.json`](../data/schemas/event/event-header.json)
+- Entity schemas: [`data/schemas/entity/`](../data/schemas/entity/)
+- Sample event data: [`data/schemas/event/samples/`](../data/schemas/event/samples/)
+- Sample entity data: [`data/entities/`](../data/entities/)
 
-For complete schema definitions and examples, see the [data folder README](../../data/README.md).
+For complete schema definitions and examples, see the [data folder README](../data/README.md).
 
 **Characteristics:**
 - Preserves type information (numbers, booleans, strings)
@@ -281,7 +281,7 @@ The **flat data model** uses a key-value map structure where all values are stri
 
 **Example Structure:**
 
-The flat data model uses dot notation in keys to represent nested paths. For the underlying entity structure, see [`data/schemas/entity/loan.json`](../../data/schemas/entity/loan.json). The flat representation would convert nested attributes to dot-notation keys (e.g., `loan.loanAmount`, `loan.balance`).
+The flat data model uses dot notation in keys to represent nested paths. For the underlying entity structure, see [`data/schemas/entity/loan.json`](../data/schemas/entity/loan.json). The flat representation would convert nested attributes to dot-notation keys (e.g., `loan.loanAmount`, `loan.balance`).
 
 **Database Schema (DDL):**
 ```sql
@@ -308,7 +308,7 @@ WHERE (updated_attributes->>'loan.loanAmount')::numeric > 100000;
 
 **Schema Definitions:**
 
-For flat data model structures, refer to the entity schemas in the `data/` folder. The schemas define the structure that can be flattened using dot notation for keys. See [`data/schemas/entity/`](../../data/schemas/entity/) for complete entity schema definitions.
+For flat data model structures, refer to the entity schemas in the `data/` folder. The schemas define the structure that can be flattened using dot notation for keys. See [`data/schemas/entity/`](../data/schemas/entity/) for complete entity schema definitions.
 
 **Characteristics:**
 - Compatible with Flink SQL `MAP<STRING, STRING>` type
@@ -453,7 +453,7 @@ Access Flink Web UI at: http://localhost:8082
 - Check checkpoint status
 - View task manager details
 
-#### Option B: Confluent Cloud (Production - Recommended)
+#### Option B: Confluent Cloud
 
 Monitor Flink statements via Confluent Cloud:
 
@@ -517,7 +517,7 @@ Access Confluent Cloud Console at: https://confluent.cloud
 
 ### Generate Test Events
 
-#### Using Example-Based Test Data Generation (Recommended for Loan Created Events)
+#### Using Example-Based Test Data Generation
 
 Generate test data based on the example structures (`car-large.json` and `loan-created-event.json`):
 
@@ -599,3 +599,88 @@ Quick verification:
 1. **Check Raw Events**: Verify events appear in `raw-business-events` topic
 2. **Check Filtered Events**: Verify filtered events appear in consumer-specific topics
 3. **Check Consumer Logs**: Verify consumers receive and process events
+
+## Shared Scripts
+
+The `scripts/shared/` subdirectory contains shared scripts for managing Confluent Cloud connectors and Flink statements.
+
+### `scripts/shared/deploy-connector.sh`
+
+Deploy Confluent Cloud CDC connectors with consistent error handling and validation.
+
+**Usage:**
+```bash
+./scripts/shared/deploy-connector.sh <config-file> [options]
+```
+
+**Parameters:**
+- `config-file`: Path to connector configuration JSON file (relative to `connectors/` directory or absolute path)
+- `--env-id ENV_ID`: Confluent environment ID (optional)
+- `--cluster-id CLUSTER_ID`: Kafka cluster ID (optional)
+- `--force`: Force deletion of existing connector without confirmation
+
+**Example:**
+```bash
+./scripts/shared/deploy-connector.sh \
+  postgres-cdc-source-business-events-confluent-cloud.json
+```
+
+**Required Environment Variables:**
+- `KAFKA_API_KEY`: Confluent Cloud API key
+- `KAFKA_API_SECRET`: Confluent Cloud API secret
+- `DB_HOSTNAME`: Database hostname
+- `DB_USERNAME`: Database username
+- `DB_PASSWORD`: Database password
+- `DB_NAME`: Database name
+
+**Migration from Individual Scripts:**
+
+The following individual scripts can now use the shared script:
+- `deploy-business-events-connector.sh` → `deploy-connector.sh postgres-cdc-source-business-events-confluent-cloud.json`
+- `deploy-connector-with-unwrap.sh` → `deploy-connector.sh postgres-cdc-source-business-events-confluent-cloud-fixed.json`
+
+### `scripts/shared/flink-manager.sh`
+
+Manage Flink SQL statements with a unified interface.
+
+**Usage:**
+```bash
+./scripts/shared/flink-manager.sh <action> [options]
+```
+
+**Actions:**
+- `cleanup`: Remove COMPLETED and FAILED statements (no confirmation)
+- `delete-failed`: Delete FAILED and COMPLETED statements (with confirmation)
+- `list`: List all statements
+- `status <name>`: Get status of a specific statement
+- `delete <name>`: Delete a specific statement
+
+**Example:**
+```bash
+# List all statements
+./scripts/shared/flink-manager.sh list
+
+# Cleanup completed/failed statements
+./scripts/shared/flink-manager.sh cleanup
+
+# Delete with confirmation
+./scripts/shared/flink-manager.sh delete-failed
+
+# Get status of a statement
+./scripts/shared/flink-manager.sh status my-statement
+
+# Delete specific statement
+./scripts/shared/flink-manager.sh delete my-statement
+```
+
+**Environment Variables:**
+- `FLINK_COMPUTE_POOL_ID`: Flink compute pool ID (default: `lfcp-2xqo0m`)
+- `KAFKA_CLUSTER_ID`: Kafka cluster ID (default: `lkc-rno3vp`)
+
+**Migration from Individual Scripts:**
+
+The following individual scripts can now use the shared script:
+- `cleanup-flink-statements.sh` → `flink-manager.sh cleanup`
+- `delete-failed-completed-flink-statements.sh` → `flink-manager.sh delete-failed`
+
+For detailed usage information, see the [Shared Scripts Documentation](../scripts/README.md#shared-scripts).

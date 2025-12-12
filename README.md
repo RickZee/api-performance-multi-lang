@@ -76,7 +76,7 @@ python load-test/shared/run-tests.py smoke --payload-size 400b --payload-size 4k
 
 ![Test Runner Demo](docs/test-runner-all-apis-demo.gif)
 
-**Using the Python Test Runner (Recommended):**
+**Using the Python Test Runner:**
 
 ```bash
 cd load-test/shared
