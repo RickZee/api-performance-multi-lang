@@ -123,3 +123,9 @@ variable "cloudwatch_logs_retention_days" {
   default     = 7
 }
 
+variable "additional_environment_variables" {
+  description = "Additional environment variables to add to the Lambda function"
+  type        = map(string)
+  default     = {}
+}
+

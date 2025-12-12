@@ -110,11 +110,66 @@ async def main():
         print("✓ Connected successfully")
         print()
         
-        # Execute schema
-        print("Running schema migration...")
-        await conn.execute(schema_sql)
-        print("✓ Schema initialized successfully")
-        print()
+        # Check if business_events table already exists
+        print("Checking if schema already exists...")
+        table_exists = await conn.fetchval("""
+            SELECT EXISTS (
+                SELECT FROM information_schema.tables 
+                WHERE table_schema = 'public' 
+                AND table_name = 'business_events'
+            );
+        """)
+        
+        if table_exists:
+            print("✓ Schema already exists (business_events table found)")
+            print("  Skipping schema initialization to avoid unnecessary re-runs")
+        else:
+            # Execute schema in a transaction for atomicity
+            print("Running schema migration...")
+            async with conn.transaction():
+                # asyncpg.execute() can handle multiple statements in one call
+                # This is more efficient and ensures proper execution order
+                # The schema SQL is already idempotent (uses IF NOT EXISTS)
+                try:
+                    await conn.execute(schema_sql)
+                except Exception as e:
+                    # If executing all at once fails, try splitting statements
+                    error_str = str(e).lower()
+                    if 'relation' in error_str and 'does not exist' in error_str:
+                        # This might be a statement ordering issue, try splitting
+                        print("  Note: Executing statements individually for better error handling...")
+                        # Split by semicolon and execute each statement
+                        statements = []
+                        parts = schema_sql.split(';')
+                        
+                        for part in parts:
+                            # Clean up the statement
+                            stmt = part.strip()
+                            # Remove leading/trailing whitespace and normalize newlines
+                            stmt = ' '.join(line.strip() for line in stmt.split('\n') if line.strip() and not line.strip().startswith('--'))
+                            # Skip empty statements
+                            if stmt:
+                                statements.append(stmt)
+                        
+                        # Execute each statement with semicolon
+                        for stmt in statements:
+                            if stmt:
+                                try:
+                                    # Ensure statement ends with semicolon
+                                    if not stmt.rstrip().endswith(';'):
+                                        stmt = stmt + ';'
+                                    await conn.execute(stmt)
+                                except Exception as e2:
+                                    # Ignore "already exists" errors for idempotent operations
+                                    error_str2 = str(e2).lower()
+                                    if 'already exists' not in error_str2 and 'duplicate' not in error_str2:
+                                        print(f"  Error executing statement: {stmt[:100]}...")
+                                        raise
+                    else:
+                        # Re-raise if it's not a relation error
+                        raise
+            print("✓ Schema initialized successfully")
+            print()
         
         # Verify tables
         print("Verifying tables...")
@@ -126,7 +181,7 @@ async def main():
         """)
         
         if tables:
-            print("Tables created:")
+            print("Tables found:")
             for table in tables:
                 print(f"  - {table['tablename']}")
         else:

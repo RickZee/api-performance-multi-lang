@@ -174,10 +174,10 @@ module "vpc" {
   count  = var.enable_aurora ? 1 : 0
   source = "./modules/vpc"
 
-  project_name      = var.project_name
-  enable_ipv6       = var.enable_ipv6
+  project_name       = var.project_name
+  enable_ipv6        = var.enable_ipv6
   enable_nat_gateway = var.enable_nat_gateway
-  tags              = local.common_tags
+  tags               = local.common_tags
 }
 
 # Aurora PostgreSQL Module
@@ -196,8 +196,8 @@ module "aurora" {
   count  = var.enable_aurora ? 1 : 0
   source = "./modules/aurora"
 
-  project_name      = var.project_name
-  vpc_id            = module.vpc[0].vpc_id
+  project_name = var.project_name
+  vpc_id       = module.vpc[0].vpc_id
   # For public access, use ONLY public subnets to ensure instance is in public subnet
   # AWS RDS requires at least 2 subnets in different AZs - we have 2 public subnets which is sufficient
   # Using only public subnets ensures the instance is actually publicly accessible
@@ -213,10 +213,45 @@ module "aurora" {
   allowed_cidr_blocks   = var.aurora_allowed_cidr_blocks
   enable_ipv6           = var.enable_ipv6
   # Backup retention: use provided value or environment-based default (3 days for dev/staging, 7 for prod)
-  backup_retention_period = var.backup_retention_period != null ? var.backup_retention_period : (local.is_production ? 7 : 3)
+  backup_retention_period       = var.backup_retention_period != null ? var.backup_retention_period : (local.is_production ? 7 : 3)
   additional_security_group_ids = []
 
   tags = local.common_tags
+}
+
+# RDS Proxy Module (enables connection pooling for high Lambda parallelism)
+module "rds_proxy" {
+  count  = var.enable_aurora && var.enable_python_lambda && var.enable_rds_proxy ? 1 : 0
+  source = "./modules/rds-proxy"
+
+  project_name                   = var.project_name
+  vpc_id                         = module.vpc[0].vpc_id
+  subnet_ids                     = module.vpc[0].private_subnet_ids
+  aurora_cluster_id              = module.aurora[0].cluster_id
+  aurora_security_group_id       = module.aurora[0].security_group_id
+  lambda_security_group_ids      = var.enable_aurora ? [aws_security_group.lambda[0].id] : []
+  database_user                  = var.database_user
+  database_password              = var.database_password
+  cloudwatch_logs_retention_days = var.cloudwatch_logs_retention_days
+  # Connection pool settings: Use 80% of max connections to leave headroom for admin connections
+  max_connections_percent      = 80
+  max_idle_connections_percent = 50
+  connection_borrow_timeout    = 120
+
+  tags = local.common_tags
+}
+
+# Security group rule: Allow RDS Proxy to access Aurora
+resource "aws_security_group_rule" "aurora_from_rds_proxy" {
+  count = var.enable_aurora && var.enable_python_lambda && var.enable_rds_proxy ? 1 : 0
+
+  type                     = "ingress"
+  from_port                = 5432
+  to_port                  = 5432
+  protocol                 = "tcp"
+  source_security_group_id = module.rds_proxy[0].security_group_id
+  security_group_id        = module.aurora[0].security_group_id
+  description              = "Allow RDS Proxy to access Aurora PostgreSQL"
 }
 
 # Local values for database connection string
@@ -227,8 +262,12 @@ locals {
   # Use Aurora endpoint if available, otherwise use provided endpoint or URL
   aurora_endpoint = var.enable_aurora ? try(module.aurora[0].cluster_endpoint, var.aurora_endpoint) : var.aurora_endpoint
 
+  # Use RDS Proxy endpoint if available (for connection pooling), otherwise use Aurora endpoint
+  rds_proxy_endpoint = var.enable_aurora && var.enable_python_lambda && var.enable_rds_proxy ? try(module.rds_proxy[0].proxy_endpoint, null) : null
+  database_endpoint  = local.rds_proxy_endpoint != null ? local.rds_proxy_endpoint : local.aurora_endpoint
+
   database_url = local.has_database_url ? var.database_url : (
-    local.aurora_endpoint != "" ? "postgresql://${var.database_user}:${var.database_password}@${local.aurora_endpoint}:5432/${var.database_name}" : ""
+    local.database_endpoint != "" ? "postgresql://${var.database_user}:${var.database_password}@${local.database_endpoint}:5432/${var.database_name}" : ""
   )
 
   # Confluent Cloud IP ranges for public internet access
@@ -258,33 +297,53 @@ locals {
   is_production = var.environment == "prod"
 }
 
+# Aurora Auto-Start Lambda (only for dev/staging environments)
+# Starts Aurora cluster when invoked by API Lambda on connection failure
+# Defined before Python Lambda so it can be referenced in environment variables
+module "aurora_auto_start" {
+  count  = var.enable_aurora && !local.is_production && var.enable_python_lambda ? 1 : 0
+  source = "./modules/aurora-auto-start"
+
+  function_name                  = "${var.project_name}-aurora-auto-start"
+  aurora_cluster_id              = module.aurora[0].cluster_id
+  aurora_cluster_arn             = module.aurora[0].cluster_arn
+  aws_region                     = var.aws_region
+  cloudwatch_logs_retention_days = var.cloudwatch_logs_retention_days
+
+  tags = local.common_tags
+}
+
 # Python REST Lambda module (optional - disabled by default)
 module "python_rest_lambda" {
   count  = var.enable_python_lambda ? 1 : 0
   source = "./modules/lambda"
 
-  function_name     = "${var.project_name}-python-rest-lambda"
-  s3_bucket         = aws_s3_bucket.lambda_deployments.id
-  s3_key            = "python-rest/lambda-deployment.zip"
-  handler           = "lambda_handler.handler"
-  runtime           = "python3.11"
-  architectures     = ["x86_64"]
-  memory_size       = var.lambda_memory_size
-  timeout           = var.lambda_timeout
-  log_level         = var.log_level
+  function_name                  = "${var.project_name}-python-rest-lambda"
+  s3_bucket                      = aws_s3_bucket.lambda_deployments.id
+  s3_key                         = "python-rest/lambda-deployment.zip"
+  handler                        = "lambda_handler.handler"
+  runtime                        = "python3.11"
+  architectures                  = ["x86_64"]
+  memory_size                    = var.lambda_memory_size
+  timeout                        = var.lambda_timeout
+  log_level                      = var.log_level
   cloudwatch_logs_retention_days = var.cloudwatch_logs_retention_days
-  database_url      = local.database_url
-  aurora_endpoint   = local.aurora_endpoint
-  database_name     = var.database_name
-  database_user     = var.database_user
-  database_password = var.database_password
+  database_url                   = local.database_url
+  aurora_endpoint                = local.database_endpoint # Use RDS Proxy endpoint if available, otherwise Aurora endpoint
+  database_name                  = var.database_name
+  database_user                  = var.database_user
+  database_password              = var.database_password
 
-  vpc_config = local.has_vpc_config ? {
+  additional_environment_variables = var.enable_aurora && !local.is_production && var.enable_python_lambda ? {
+    AURORA_AUTO_START_FUNCTION_NAME = module.aurora_auto_start[0].function_name
+  } : {}
+
+  vpc_config = var.enable_aurora ? {
     security_group_ids = [aws_security_group.lambda[0].id]
-    subnet_ids         = var.subnet_ids
-    } : (var.enable_aurora ? {
-      security_group_ids = [module.aurora[0].security_group_id]
-      subnet_ids         = module.vpc[0].private_subnet_ids
+    subnet_ids         = module.vpc[0].private_subnet_ids
+    } : (local.has_vpc_config ? {
+      security_group_ids = [aws_security_group.lambda[0].id]
+      subnet_ids         = var.subnet_ids
   } : null)
 
   api_name        = "${var.project_name}-python-rest-http-api"
@@ -305,15 +364,45 @@ module "aurora_auto_stop" {
   count  = var.enable_aurora && !local.is_production && var.enable_python_lambda ? 1 : 0
   source = "./modules/aurora-auto-stop"
 
-  function_name      = "${var.project_name}-aurora-auto-stop"
-  aurora_cluster_id  = module.aurora[0].cluster_id
-  aurora_cluster_arn = module.aurora[0].cluster_arn
-  api_gateway_id     = module.python_rest_lambda[0].api_id
-  aws_region         = var.aws_region
-  inactivity_hours   = 3
+  function_name                  = "${var.project_name}-aurora-auto-stop"
+  aurora_cluster_id              = module.aurora[0].cluster_id
+  aurora_cluster_arn             = module.aurora[0].cluster_arn
+  api_gateway_id                 = module.python_rest_lambda[0].api_id
+  aws_region                     = var.aws_region
+  inactivity_hours               = 3
   cloudwatch_logs_retention_days = var.cloudwatch_logs_retention_days
 
   tags = local.common_tags
+}
+
+# IAM policy to allow Python Lambda to invoke auto-start Lambda
+resource "aws_iam_role_policy" "python_lambda_auto_start" {
+  count = var.enable_aurora && !local.is_production && var.enable_python_lambda ? 1 : 0
+  name  = "${var.project_name}-python-lambda-auto-start-policy"
+  role  = module.python_rest_lambda[0].role_arn
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect = "Allow"
+        Action = [
+          "lambda:InvokeFunction"
+        ]
+        Resource = module.aurora_auto_start[0].function_arn
+      }
+    ]
+  })
+}
+
+# Lambda permission to allow Python Lambda to invoke auto-start Lambda
+resource "aws_lambda_permission" "aurora_auto_start_python_lambda" {
+  count         = var.enable_aurora && !local.is_production && var.enable_python_lambda ? 1 : 0
+  statement_id  = "AllowExecutionFromPythonLambda"
+  action        = "lambda:InvokeFunction"
+  function_name = module.aurora_auto_start[0].function_name
+  principal     = "lambda.amazonaws.com"
+  source_arn    = module.python_rest_lambda[0].function_arn
 }
 
 # Optional database module
