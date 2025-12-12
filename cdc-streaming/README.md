@@ -538,6 +538,8 @@ This script:
 
 Use the consolidated `send-batch-events.js` script to send a configurable number of events of each type (always sends all 4 types: Car Created, Loan Created, Loan Payment Submitted, Car Service Done):
 
+**Basic Usage:**
+
 ```bash
 # Send 5 events of each type (default, 4 types = 20 total)
 k6 run --env HOST=producer-api-java-rest --env PORT=8081 ../../load-test/k6/send-batch-events.js
@@ -546,23 +548,69 @@ k6 run --env HOST=producer-api-java-rest --env PORT=8081 ../../load-test/k6/send
 k6 run --env HOST=producer-api-java-rest --env PORT=8081 --env EVENTS_PER_TYPE=1000 ../../load-test/k6/send-batch-events.js
 
 # Lambda API with 1000 events per type
-k6 run --env API_URL=https://xxxxx.execute-api.us-east-1.amazonaws.com --env EVENTS_PER_TYPE=1000 ../../load-test/k6/send-batch-events.js
+k6 run --env LAMBDA_PYTHON_REST_API_URL=https://xxxxx.execute-api.us-east-1.amazonaws.com --env EVENTS_PER_TYPE=1000 ../../load-test/k6/send-batch-events.js
 ```
 
-Configuration options:
+**Parallel Execution with Multiple VUs:**
+
+The script supports configurable parallelism to distribute events of each type across multiple Virtual Users (VUs) for improved throughput:
+
+```bash
+# Send 10 events of each type with 1 VU per event type (4 total VUs, sequential)
+k6 run --env LAMBDA_PYTHON_REST_API_URL=https://xxxxx.execute-api.us-east-1.amazonaws.com \
+  --env EVENTS_PER_TYPE=10 \
+  --env VUS_PER_EVENT_TYPE=1 \
+  ../../load-test/k6/send-batch-events.js
+
+# Send 100 events of each type with 5 VUs per event type (20 total VUs, parallel)
+k6 run --env LAMBDA_PYTHON_REST_API_URL=https://xxxxx.execute-api.us-east-1.amazonaws.com \
+  --env EVENTS_PER_TYPE=100 \
+  --env VUS_PER_EVENT_TYPE=5 \
+  ../../load-test/k6/send-batch-events.js
+
+# Send 1000 events of each type with 10 VUs per event type (40 total VUs, highly parallel)
+k6 run --env LAMBDA_PYTHON_REST_API_URL=https://xxxxx.execute-api.us-east-1.amazonaws.com \
+  --env EVENTS_PER_TYPE=1000 \
+  --env VUS_PER_EVENT_TYPE=10 \
+  ../../load-test/k6/send-batch-events.js
+```
+
+**How Parallelism Works:**
+
+- **Total VUs**: `VUS_PER_EVENT_TYPE × 4` (one VU group per event type)
+- **Events per VU**: `EVENTS_PER_TYPE ÷ VUS_PER_EVENT_TYPE` (events split evenly across VUs)
+- **Event Distribution**: Each VU group handles one event type, with events distributed evenly within the group
+- **Example**: With `EVENTS_PER_TYPE=100` and `VUS_PER_EVENT_TYPE=5`:
+  - Total VUs: 20 (5 per event type × 4 types)
+  - Each VU sends: 20 events (100 ÷ 5)
+  - Total events: 400 (100 per type × 4 types)
+
+**Configuration Options:**
+
 - `EVENTS_PER_TYPE`: Number of events per type (default: 5)
+- `VUS_PER_EVENT_TYPE`: Number of VUs per event type for parallelism (default: 1)
+  - Set to 1 for sequential execution (4 total VUs)
+  - Set to 5-10 for moderate parallelism (20-40 total VUs)
+  - Set to 20+ for high parallelism (80+ total VUs)
 - `HOST`: API hostname (for regular REST APIs, default: localhost)
 - `PORT`: API port (for regular REST APIs, default: 8081)
 - `API_URL`: Full API URL (for Lambda APIs, takes precedence over HOST/PORT)
 - `LAMBDA_API_URL`: Alternative Lambda API URL variable
 - `LAMBDA_PYTHON_REST_API_URL`: Python Lambda API URL variable
 
-The script will:
+**Performance Considerations:**
+
+- **Sequential (VUS_PER_EVENT_TYPE=1)**: Lower throughput, easier to debug
+- **Moderate Parallelism (VUS_PER_EVENT_TYPE=5-10)**: Good balance of throughput and resource usage
+- **High Parallelism (VUS_PER_EVENT_TYPE=20+)**: Maximum throughput, requires sufficient API capacity
+
+**The script will:**
 1. Generate events of all 4 types (Car, Loan, Payment, Service)
-2. Send events to the REST API (regular or Lambda)
-3. Events are stored in PostgreSQL
-4. CDC connector captures changes and streams to Kafka
-5. Flink filters and routes events to consumer topics
+2. Distribute events across VUs based on `VUS_PER_EVENT_TYPE`
+3. Send events to the REST API (regular or Lambda) in parallel
+4. Events are stored in PostgreSQL
+5. CDC connector captures changes and streams to Kafka
+6. Flink filters and routes events to consumer topics
 
 #### Using the k6 Test Data Generation Script (Alternative)
 

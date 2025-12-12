@@ -157,7 +157,7 @@ FROM `raw-business-events`
 WHERE `event_type` = 'LoanPaymentSubmitted' AND `__op` = 'c';
 
 -- INSERT Statement: Service Events Filter
--- Filters CarServiceDone events by eventName
+-- Filters CarServiceDone events by eventType
 INSERT INTO `filtered-service-events`
 SELECT 
     CAST(`id` AS BYTES) AS `key`,
@@ -170,4 +170,4 @@ SELECT
     `__op`,
     `__table`
 FROM `raw-business-events`
-WHERE `event_name` = 'CarServiceDone' AND `__op` = 'c';
+WHERE `event_type` = 'CarServiceDone' AND `__op` = 'c';

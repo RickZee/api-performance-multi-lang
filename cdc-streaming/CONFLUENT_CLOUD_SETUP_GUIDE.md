@@ -677,9 +677,14 @@ LIMIT 10;
 
 Once source table works, create sink and INSERT:
 
+**Important: Sink Tables Require `key` Column**
+
+When using the Confluent connector in Confluent Cloud Flink, sink tables automatically include a `key BYTES` column. You must include this column in your sink table definition and provide it in your INSERT statement.
+
 ```sql
--- Create sink table
+-- Create sink table (note: includes key BYTES column)
 CREATE TABLE my_sink_table (
+    `key` BYTES,           -- Required: Kafka message key
     id STRING,
     processed_field STRING
 ) WITH (
@@ -687,11 +692,22 @@ CREATE TABLE my_sink_table (
     'value.format' = 'json-registry'
 );
 
--- Deploy INSERT statement
+-- Deploy INSERT statement (must include key)
 INSERT INTO my_sink_table
-SELECT id, UPPER(name) as processed_field
+SELECT 
+    CAST(id AS BYTES) AS `key`,  -- Derive key from id or other field
+    id, 
+    UPPER(name) as processed_field
 FROM my_source_table;
 ```
+
+**Why the `key` Column is Required:**
+- Confluent Cloud Flink's sink tables automatically include a `key BYTES` column for Kafka message keys
+- Kafka messages have both key and value - the connector requires both
+- Using `id` as the key ensures:
+  - Same `id` values go to the same partition (partitioning)
+  - Events with the same `id` are ordered within a partition
+  - Useful for downstream consumers that process by `id`
 
 ### Common Pitfalls
 
@@ -699,6 +715,8 @@ FROM my_source_table;
 2. **JSON Parsing**: Use `JSON_VALUE(field, '$.path')` to extract from JSON strings
 3. **Schema Registry**: JSON format requires Schema Registry integration or use `'raw'` format
 4. **Multiple Statements**: CLI doesn't support multiple CREATE/INSERT statements well - use Web Console
+5. **Missing `key` Column in Sink Tables**: Sink tables must include `key BYTES` as the first column, and INSERT statements must provide it (e.g., `CAST(id AS BYTES) AS key`)
+6. **Missing `INSERT INTO` Clause**: INSERT statements must start with `INSERT INTO <table>` - SELECT-only statements will be automatically stopped after 5 minutes
 
 ### Working with CDC Data
 
@@ -1310,6 +1328,80 @@ confluent kafka topic describe raw-business-events
 # 4. Verify CDC connector is sending events
 confluent connector describe <connector-name> --output json | jq '.status'
 ```
+
+#### Issue 10: Flink Statement Automatically Stopped - Missing INSERT INTO Clause
+
+**Symptoms:**
+- Flink statement status is `STOPPED` instead of `RUNNING`
+- Status detail shows: "This statement was automatically stopped since no client has consumed the results for 5 minutes or more."
+- Some INSERT statements are RUNNING while others are STOPPED
+- Statement was deployed as a SELECT query without `INSERT INTO` clause
+
+**Root Cause:**
+When deploying Flink INSERT statements via CLI, if the SQL extraction process misses the `INSERT INTO` clause, the statement is deployed as just a SELECT query. SELECT statements without INSERT don't write to any sink, so Confluent Cloud automatically stops them after 5 minutes of no consumption.
+
+**Example of Incorrect Statement:**
+```sql
+-- ❌ WRONG: Missing INSERT INTO clause
+SELECT CAST(`id` AS BYTES) AS `key`, `id`, `event_name`, `event_type`, ...
+FROM `raw-business-events`
+WHERE `event_type` = 'LoanCreated' AND `__op` = 'c';
+```
+
+**Example of Correct Statement:**
+```sql
+-- ✅ CORRECT: Includes INSERT INTO clause
+INSERT INTO `filtered-loan-created-events`
+SELECT CAST(`id` AS BYTES) AS `key`, `id`, `event_name`, `event_type`, ...
+FROM `raw-business-events`
+WHERE `event_type` = 'LoanCreated' AND `__op` = 'c';
+```
+
+**Diagnosis:**
+```bash
+# Check statement details to see the actual SQL
+confluent flink statement describe <statement-name> --output json | jq '.statement'
+
+# Look for statements that start with SELECT instead of INSERT INTO
+confluent flink statement list --compute-pool <compute-pool-id> --output json | \
+  jq -r '.[] | select(.status == "STOPPED" and (.statement | startswith("SELECT"))) | "\(.name) - \(.status_detail)"'
+```
+
+**Solutions:**
+```bash
+# 1. Delete the incorrectly deployed statement
+confluent flink statement delete <statement-name> --force
+
+# 2. Extract the correct SQL from the source file (ensuring INSERT INTO is included)
+cd /path/to/project
+FLINK_SQL_FILE="cdc-streaming/flink-jobs/business-events-routing-confluent-cloud.sql"
+
+# Extract INSERT statement with proper awk pattern that includes INSERT INTO
+INSERT_SQL=$(awk '/INSERT INTO.*filtered-loan-created-events/,/;/{if(/INSERT/ || /SELECT/ || /FROM/ || /WHERE/ || /^[^-\/]/) print}' "$FLINK_SQL_FILE" | \
+  grep -v "^--" | tr '\n' ' ' | sed 's/  */ /g' | sed 's/^ *//;s/ *$//')
+
+# Verify the SQL starts with INSERT INTO
+echo "$INSERT_SQL" | grep -q "^INSERT INTO" && echo "✓ SQL is correct" || echo "✗ SQL is missing INSERT INTO"
+
+# 3. Redeploy with correct SQL
+confluent flink statement create <statement-name> \
+  --compute-pool <compute-pool-id> \
+  --database <kafka-cluster-id> \
+  --sql "$INSERT_SQL" \
+  --wait
+
+# 4. Verify statement is now RUNNING
+confluent flink statement describe <statement-name> | grep -E "(Status|Statement)"
+```
+
+**Prevention:**
+- Always verify extracted SQL includes `INSERT INTO` before deploying
+- Use Web Console for initial deployment to catch syntax issues early
+- When using CLI, validate SQL extraction with: `echo "$SQL" | grep "^INSERT INTO"`
+- Consider using deployment scripts that validate SQL before deployment
+
+**Key Takeaway:**
+All Flink INSERT statements must include the `INSERT INTO <sink-table>` clause. SELECT-only statements will be automatically stopped by Confluent Cloud as they don't produce any consumable output.
 
 #### Issue 9: Cleaning Up Flink Statements
 
