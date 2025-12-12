@@ -379,7 +379,7 @@ module "aurora_auto_stop" {
 resource "aws_iam_role_policy" "python_lambda_auto_start" {
   count = var.enable_aurora && !local.is_production && var.enable_python_lambda ? 1 : 0
   name  = "${var.project_name}-python-lambda-auto-start-policy"
-  role  = module.python_rest_lambda[0].role_arn
+  role  = module.python_rest_lambda[0].role_name
 
   policy = jsonencode({
     Version = "2012-10-17"

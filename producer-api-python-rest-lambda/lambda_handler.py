@@ -15,7 +15,7 @@ sys.path.insert(0, os.path.dirname(__file__))
 from config import load_lambda_config
 from constants import API_NAME
 from models.event import Event
-from repository import BusinessEventRepository, get_connection_pool
+from repository import BusinessEventRepository, get_connection_pool, DuplicateEventError
 from service import EventProcessingService
 
 # Configure logging
@@ -234,6 +234,18 @@ async def _handle_process_event(event_body: str) -> Dict[str, Any]:
                 "message": "Event processed successfully",
             },
         )
+    except DuplicateEventError as e:
+        # Handle duplicate event ID (409 Conflict)
+        logger.warning(f"{API_NAME} Duplicate event ID: {e.event_id}")
+        return _create_response(
+            409,
+            {
+                "error": "Conflict",
+                "message": e.message,
+                "eventId": e.event_id,
+                "status": 409,
+            },
+        )
     except Exception as e:
         # Check if it's a database connection error
         if _is_database_connection_error(e):
@@ -348,6 +360,10 @@ async def _handle_bulk_events(event_body: str) -> Dict[str, Any]:
             
             await service.process_event(event)
             processed_count += 1
+        except DuplicateEventError as e:
+            # Handle duplicate event ID (409 Conflict) - count as failed
+            logger.warning(f"{API_NAME} Duplicate event ID in bulk: {e.event_id}")
+            failed_count += 1
         except Exception as e:
             if _is_database_connection_error(e):
                 logger.warning(f"{API_NAME} Database connection error processing event: {e}")
