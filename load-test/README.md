@@ -146,3 +146,58 @@ For more information, see:
 - [Lambda gRPC API README](../producer-api-go-grpc-lambda/README.md)
 - [Terraform README](../terraform/README.md)
 
+## K6 Shared Utilities
+
+The `k6/shared/` subdirectory contains shared JavaScript utilities for k6 load testing scripts.
+
+### `k6/shared/event-generators.js`
+
+Reusable event generation functions for creating test events.
+
+**Functions:**
+- `generateUUID()`: Generate UUID v4
+- `generateTimestamp()`: Generate ISO 8601 timestamp
+- `generateCarCreatedEvent(carId)`: Generate Car Created event
+- `generateLoanCreatedEvent(carId, loanId)`: Generate Loan Created event
+- `generateLoanPaymentEvent(loanId, amount)`: Generate Loan Payment Submitted event
+- `generateCarServiceDoneEvent(carId, serviceId)`: Generate Car Service Done event
+- `generateLinkedEventSet()`: Generate a complete linked event set
+
+**Usage:**
+```javascript
+import { 
+    generateCarCreatedEvent,
+    generateLoanCreatedEvent 
+} from './shared/event-generators.js';
+
+export default function() {
+    const carEvent = generateCarCreatedEvent();
+    const loanEvent = generateLoanCreatedEvent('CAR-123');
+    // ... send events
+}
+```
+
+**Migration from Individual Scripts:**
+
+Update existing k6 scripts to use shared event generators:
+
+**Before:**
+```javascript
+function generateUUID() {
+    // ... duplicate code ...
+}
+
+function generateCarCreatedEvent() {
+    // ... duplicate code ...
+}
+```
+
+**After:**
+```javascript
+import { generateUUID, generateCarCreatedEvent } from './shared/event-generators.js';
+```
+
+This eliminates code duplication and ensures consistent event generation across all k6 tests.
+
+For detailed usage information, see the [Shared Scripts Documentation](../scripts/README.md#shared-scripts).
+

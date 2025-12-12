@@ -128,7 +128,7 @@ Or use the deploy script with the build flag:
 Deploy the Terraform configuration:
 
 ```bash
-# Interactive deployment (recommended for first time)
+# Interactive deployment (for first time)
 ./scripts/deploy.sh
 
 # Auto-approve deployment
@@ -254,7 +254,7 @@ database_password = "your-secure-password"
 
 **Note**: Database creation requires VPC configuration.
 
-### Option 2: Aurora PostgreSQL (Recommended)
+### Option 2: Aurora PostgreSQL (for Confluent Cloud)
 
 To create Aurora PostgreSQL cluster with new VPC:
 
