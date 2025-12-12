@@ -1407,10 +1407,10 @@ confluent connect describe <connector-name> --output json | \
 
 | Component | Has `__op` Field? | Flink Filter Works? |
 |-----------|-------------------|---------------------|
-| Database Table | ❌ No | N/A |
-| Basic Connector (route only) | ❌ No | ❌ Filter fails |
-| Fixed Connector (unwrap + route) | ✅ Yes | ✅ Filter works |
-| Flink Statement Expects | ✅ Yes | ✅ If data has it |
+| Database Table | No | N/A |
+| Basic Connector (route only) | No | Filter fails |
+| Fixed Connector (unwrap + route) | Yes | Filter works |
+| Flink Statement Expects | Yes | If data has it |
 
 #### Issue 8: Flink Statements Not Processing New Events
 
@@ -1463,7 +1463,7 @@ When deploying Flink INSERT statements via CLI, if the SQL extraction process mi
 
 **Example of Incorrect Statement:**
 ```sql
--- ❌ WRONG: Missing INSERT INTO clause
+-- WRONG: Missing INSERT INTO clause
 SELECT CAST(`id` AS BYTES) AS `key`, `id`, `event_name`, `event_type`, ...
 FROM `raw-business-events`
 WHERE `event_type` = 'LoanCreated' AND `__op` = 'c';
@@ -1471,7 +1471,7 @@ WHERE `event_type` = 'LoanCreated' AND `__op` = 'c';
 
 **Example of Correct Statement:**
 ```sql
--- ✅ CORRECT: Includes INSERT INTO clause
+-- CORRECT: Includes INSERT INTO clause
 INSERT INTO `filtered-loan-created-events`
 SELECT CAST(`id` AS BYTES) AS `key`, `id`, `event_name`, `event_type`, ...
 FROM `raw-business-events`
@@ -1684,7 +1684,7 @@ async def _run_migrations(pool):
 
 async def _initialize_service():
     pool = await get_connection_pool(_config.database_url)
-    await _run_migrations(pool)  # ❌ Don't do this
+    await _run_migrations(pool)  # Don't do this
     # ...
 ```
 
@@ -1693,7 +1693,7 @@ async def _initialize_service():
 # In lambda_handler.py
 async def _initialize_service():
     pool = await get_connection_pool(_config.database_url)
-    # ✅ No migration code - schema managed separately
+    # No migration code - schema managed separately
     # ...
 ```
 

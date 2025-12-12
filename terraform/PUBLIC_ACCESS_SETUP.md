@@ -11,7 +11,7 @@ This guide covers **Option 1: Public Internet Access** for connecting RDS/Aurora
 - **Temporary Setup**: Before implementing PrivateLink (Option 2)
 - **Non-Production**: Environments where security requirements are less strict
 
-**⚠️ For Production**: Prefer AWS PrivateLink (Option 2) over public access for better security.
+**For Production**: Prefer AWS PrivateLink (Option 2) over public access for better security.
 
 ## Requirements
 

@@ -4,7 +4,7 @@
 
 A configurable streaming architecture that captures PostgreSQL database changes and routes filtered events to consumer-specific Kafka topics using Confluent Cloud and Flink SQL.
 
-## 🎯 What It Does
+## What It Does
 
 ```text
 PostgreSQL → CDC Connector → Kafka → Flink SQL → Filtered Topics → Consumers
@@ -16,7 +16,7 @@ The system automatically:
 - **Filters** events by type using Flink SQL
 - **Routes** filtered events to consumer-specific topics
 
-## 📸 Visual Overview
+## Visual Overview
 
 <img src="screenshots/1-connector.png" alt="PostgreSQL CDC Connector Configuration" width="800"/>
 
@@ -38,7 +38,7 @@ The system automatically:
 
 *Example consumer application logs showing event processing*
 
-## 🚀 Quick Start
+## Quick Start
 
 ### Prerequisites
 
@@ -74,16 +74,16 @@ The system automatically:
    - View connectors, topics, and Flink statements
    - Monitor metrics and throughput
 
-## 📋 Key Features
+## Key Features
 
-- ✅ **Real-time CDC** from PostgreSQL to Kafka
-- ✅ **Intelligent Filtering** via Flink SQL
-- ✅ **Auto-scaling** with Confluent Cloud Flink
-- ✅ **Schema Management** with Schema Registry
-- ✅ **Multi-topic Routing** to consumer-specific topics
-- ✅ **Fully Managed** infrastructure (Confluent Cloud)
+- **Real-time CDC** from PostgreSQL to Kafka
+- **Intelligent Filtering** via Flink SQL
+- **Auto-scaling** with Confluent Cloud Flink
+- **Schema Management** with Schema Registry
+- **Multi-topic Routing** to consumer-specific topics
+- **Fully Managed** infrastructure (Confluent Cloud)
 
-## 📚 Documentation
+## Documentation
 
 | Document | Description |
 |----------|-------------|
@@ -93,7 +93,7 @@ The system automatically:
 | [ADVANCED_USE_CASES.md](ADVANCED_USE_CASES.md) | Advanced monitoring, testing, and configuration |
 | [DISASTER_RECOVERY.md](DISASTER_RECOVERY.md) | Disaster recovery procedures |
 
-## 🔧 Configuration
+## Configuration
 
 ### Filter Configuration
 
@@ -108,7 +108,7 @@ Connector configuration files:
 
 For detailed configuration, see [ARCHITECTURE.md](ARCHITECTURE.md).
 
-## 📊 Data Model
+## Data Model
 
 The system uses a **hybrid data model** combining:
 - **Relational columns** for efficient filtering (`id`, `event_type`, `event_name`)
@@ -125,7 +125,7 @@ See [`data/schemas/event/samples/loan-created-event.json`](../data/schemas/event
 
 For complete schema definitions, see the [data folder README](../data/README.md).
 
-## 🧪 Testing
+## Testing
 
 ### Basic Test Event Generation
 
@@ -145,7 +145,7 @@ k6 run --env HOST=producer-api-java-rest --env PORT=8081 \
 
 For advanced testing scenarios including parallel execution and high-throughput testing, see [ADVANCED_USE_CASES.md](ADVANCED_USE_CASES.md).
 
-## 📈 Monitoring
+## Monitoring
 
 ### Confluent Cloud Console
 
@@ -172,7 +172,7 @@ confluent flink statement list --compute-pool <compute-pool-id>
 
 For detailed monitoring commands and REST API integration, see [ADVANCED_USE_CASES.md](ADVANCED_USE_CASES.md).
 
-## 🏗️ Architecture
+## Architecture
 
 ```text
 ┌─────────────┐
@@ -212,7 +212,7 @@ For detailed monitoring commands and REST API integration, see [ADVANCED_USE_CAS
 
 For detailed architecture documentation, see [ARCHITECTURE.md](ARCHITECTURE.md).
 
-## 🔗 Related Documentation
+## Related Documentation
 
 - **[ARCHITECTURE.md](ARCHITECTURE.md)**: Complete system architecture and data flow
 - **[CONFLUENT_CLOUD_SETUP_GUIDE.md](CONFLUENT_CLOUD_SETUP_GUIDE.md)**: Step-by-step setup instructions
