@@ -44,6 +44,10 @@ const TOTAL_EVENTS = EVENTS_PER_TYPE * NUM_EVENT_TYPES;
 export const options = {
     vus: 1,
     iterations: TOTAL_EVENTS,
+    thresholds: {
+        // Abort if error rate exceeds 50% (half of requests failing)
+        'http_req_failed': ['rate<0.5'],
+    },
 };
 
 // Get API configuration from environment
@@ -319,6 +323,17 @@ export default function (data) {
             return body.includes('successfully') || body.includes('processed') || body.includes('Event processed') || r.status === 200;
         },
     });
+    
+    // Log errors immediately for visibility
+    if (!success || res.status !== 200) {
+        const errorMsg = res.status >= 400 ? `HTTP ${res.status}: ${res.body?.substring(0, 200) || 'No response body'}` : 'Request failed checks';
+        console.error(`[ERROR] ${eventType} event failed (iteration ${iteration + 1}/${options.iterations}): ${errorMsg}`);
+        
+        // Log first few errors in detail, then summarize
+        if (iteration < 5) {
+            console.error(`  Full response: ${JSON.stringify(res.body).substring(0, 500)}`);
+        }
+    }
     
     errorRate.add(!success);
     eventsSent.add(success);

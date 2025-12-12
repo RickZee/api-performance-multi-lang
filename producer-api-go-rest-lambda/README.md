@@ -12,7 +12,7 @@ This is the serverless Lambda version of the Producer API Go REST. It provides t
 - **Aurora Serverless PostgreSQL** support with optimized connection pooling
 - **All REST endpoints**: `/api/v1/events`, `/api/v1/events/bulk`, `/api/v1/events/health`
 - **Connection pooling** optimized for Lambda container reuse
-- **Automatic migrations** on startup
+- **Infrastructure as Code**: Database schema initialized automatically by Terraform
 
 ## Quick Start
 

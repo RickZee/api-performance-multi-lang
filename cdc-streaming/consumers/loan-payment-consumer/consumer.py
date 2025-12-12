@@ -126,6 +126,7 @@ def main():
     consumer_config = {
         'bootstrap.servers': KAFKA_BOOTSTRAP_SERVERS,
         'group.id': CONSUMER_GROUP_ID,
+        'client.id': 'loan-payment-consumer-client',  # Unique client ID for monitoring and quota management
         'auto.offset.reset': 'earliest',
         'enable.auto.commit': True,
         'session.timeout.ms': 30000,
