@@ -3,6 +3,11 @@ output "cluster_id" {
   value       = aws_rds_cluster.this.cluster_identifier
 }
 
+output "cluster_arn" {
+  description = "Aurora cluster ARN"
+  value       = aws_rds_cluster.this.arn
+}
+
 output "cluster_endpoint" {
   description = "Aurora cluster endpoint (writer)"
   value       = aws_rds_cluster.this.endpoint

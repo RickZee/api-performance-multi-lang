@@ -534,9 +534,39 @@ This script:
 - Generates events matching these exact structures
 - Sends events to the producer API
 
-#### Using the k6 Test Data Generation Script
+#### Using the Consolidated k6 Batch Events Script
 
-Use the provided script to generate test data using k6 and the Java REST API:
+Use the consolidated `send-batch-events.js` script to send a configurable number of events of each type (always sends all 4 types: Car Created, Loan Created, Loan Payment Submitted, Car Service Done):
+
+```bash
+# Send 5 events of each type (default, 4 types = 20 total)
+k6 run --env HOST=producer-api-java-rest --env PORT=8081 ../../load-test/k6/send-batch-events.js
+
+# Send 1000 events of each type (4 types = 4000 total)
+k6 run --env HOST=producer-api-java-rest --env PORT=8081 --env EVENTS_PER_TYPE=1000 ../../load-test/k6/send-batch-events.js
+
+# Lambda API with 1000 events per type
+k6 run --env API_URL=https://xxxxx.execute-api.us-east-1.amazonaws.com --env EVENTS_PER_TYPE=1000 ../../load-test/k6/send-batch-events.js
+```
+
+Configuration options:
+- `EVENTS_PER_TYPE`: Number of events per type (default: 5)
+- `HOST`: API hostname (for regular REST APIs, default: localhost)
+- `PORT`: API port (for regular REST APIs, default: 8081)
+- `API_URL`: Full API URL (for Lambda APIs, takes precedence over HOST/PORT)
+- `LAMBDA_API_URL`: Alternative Lambda API URL variable
+- `LAMBDA_PYTHON_REST_API_URL`: Python Lambda API URL variable
+
+The script will:
+1. Generate events of all 4 types (Car, Loan, Payment, Service)
+2. Send events to the REST API (regular or Lambda)
+3. Events are stored in PostgreSQL
+4. CDC connector captures changes and streams to Kafka
+5. Flink filters and routes events to consumer topics
+
+#### Using the k6 Test Data Generation Script (Alternative)
+
+Use the provided script to generate test data using k6 with configurable load:
 
 ```bash
 cd cdc-streaming/scripts
@@ -558,13 +588,6 @@ Configuration options:
 - `PAYLOAD_SIZE`: Payload size - 400b, 4k, 8k, 32k, 64k (default: 4k)
 - `API_HOST`: API hostname (default: producer-api-java-rest)
 - `API_PORT`: API port (default: 8081)
-
-The script will:
-1. Generate events using k6 load testing tool
-2. Send events to the Java REST API
-3. Events are stored in PostgreSQL
-4. CDC connector captures changes and streams to Kafka
-5. Flink filters and routes events to consumer topics
 
 #### Manual Event Generation
 

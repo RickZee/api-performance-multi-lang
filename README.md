@@ -280,6 +280,11 @@ The k6 test scripts are located in `load-test/k6/`:
 
 - **`rest-api-test.js`**: REST API test script (used for producer-api-java-rest, producer-api-rust-rest, and producer-api-go-rest)
 - **`grpc-api-test.js`**: gRPC API test script (used for producer-api-java-grpc, producer-api-rust-grpc, and producer-api-go-grpc)
+- **`send-batch-events.js`**: Consolidated script to send configurable number of events of each type (always sends all 4 types: Car Created, Loan Created, Loan Payment Submitted, Car Service Done)
+  - Default: 5 events per type (20 total)
+  - Configurable via `EVENTS_PER_TYPE` environment variable
+  - Supports both regular REST APIs (HOST/PORT) and Lambda APIs (API_URL)
+  - Usage: `k6 run --env HOST=producer-api-java-rest --env PORT=8081 --env EVENTS_PER_TYPE=1000 load-test/k6/send-batch-events.js`
 - **`shared/helpers.js`**: Shared utilities for event generation
 - **`config.js`**: Centralized test configuration
 

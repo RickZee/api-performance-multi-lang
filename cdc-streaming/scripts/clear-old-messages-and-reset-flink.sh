@@ -160,8 +160,8 @@ echo -e "${BLUE}═════════════════════�
 echo ""
 echo -e "${CYAN}Next Steps:${NC}"
 echo "  1. Send new test events:"
-echo "     cd cdc-streaming"
-echo "     k6 run scripts/send-5-events-k6.js"
+echo "     k6 run --env API_URL=\$LAMBDA_PYTHON_REST_API_URL ../../load-test/k6/send-batch-events.js"
+echo "     # Or with custom count: k6 run --env API_URL=\$LAMBDA_PYTHON_REST_API_URL --env EVENTS_PER_TYPE=1000 ../../load-test/k6/send-batch-events.js"
 echo ""
 echo "  2. Wait 1-2 minutes for processing"
 echo ""
@@ -172,4 +172,5 @@ echo ""
 echo "  4. Check consumer logs:"
 echo "     docker-compose logs service-consumer --tail 50"
 echo ""
+
 
