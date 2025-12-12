@@ -172,3 +172,4 @@ echo ""
 echo "  4. Check consumer logs:"
 echo "     docker-compose logs service-consumer --tail 50"
 echo ""
+

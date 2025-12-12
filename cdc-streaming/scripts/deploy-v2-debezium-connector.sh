@@ -124,3 +124,4 @@ echo "  2. Check connector logs for any errors"
 echo "  3. Verify events in raw-business-events topic have __op, __table, __ts_ms fields"
 echo "  4. Proceed with Flink statement deployment"
 echo ""
+

@@ -67,7 +67,7 @@ resource "aws_security_group" "aurora" {
   )
 }
 
-# Security Group Rules: Allow access from additional security groups (e.g., EKS node groups)
+# Security Group Rules: Allow access from additional security groups
 resource "aws_security_group_rule" "aurora_from_additional_sg" {
   count = length(var.additional_security_group_ids)
 

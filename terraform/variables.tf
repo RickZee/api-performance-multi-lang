@@ -159,12 +159,6 @@ variable "lambda_timeout" {
   default     = 30
 }
 
-variable "enable_lambda_functions" {
-  description = "Enable Go Lambda functions (gRPC and REST). Set to false if only using Java API in Docker."
-  type        = bool
-  default     = false
-}
-
 variable "enable_python_lambda" {
   description = "Enable Python Lambda function"
   type        = bool
@@ -199,47 +193,5 @@ variable "enable_terraform_state_backend" {
   description = "Whether to create S3 bucket for Terraform state backend (uses S3 native locking, no DynamoDB required)"
   type        = bool
   default     = true
-}
-
-variable "enable_eks" {
-  description = "Whether to create EKS cluster for deploying the Java API"
-  type        = bool
-  default     = false
-}
-
-variable "kubernetes_version" {
-  description = "Kubernetes version for EKS cluster"
-  type        = string
-  default     = "1.28"
-}
-
-variable "eks_node_group_desired_size" {
-  description = "Desired number of nodes in EKS node group"
-  type        = number
-  default     = 2
-}
-
-variable "eks_node_group_max_size" {
-  description = "Maximum number of nodes in EKS node group"
-  type        = number
-  default     = 4
-}
-
-variable "eks_node_group_min_size" {
-  description = "Minimum number of nodes in EKS node group"
-  type        = number
-  default     = 1
-}
-
-variable "eks_node_group_instance_types" {
-  description = "Instance types for EKS node group"
-  type        = list(string)
-  default     = ["t3.medium"]
-}
-
-variable "eks_cluster_endpoint_public_access_cidrs" {
-  description = "CIDR blocks allowed to access EKS cluster API endpoint"
-  type        = list(string)
-  default     = ["0.0.0.0/0"] # Can be restricted later
 }
 

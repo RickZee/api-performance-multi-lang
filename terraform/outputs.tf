@@ -1,33 +1,3 @@
-output "grpc_api_url" {
-  description = "API Gateway HTTP API endpoint URL for gRPC"
-  value       = var.enable_lambda_functions ? module.grpc_lambda[0].api_url : null
-}
-
-output "rest_api_url" {
-  description = "API Gateway HTTP API endpoint URL for REST"
-  value       = var.enable_lambda_functions ? module.rest_lambda[0].api_url : null
-}
-
-output "grpc_function_name" {
-  description = "gRPC Lambda function name"
-  value       = var.enable_lambda_functions ? module.grpc_lambda[0].function_name : null
-}
-
-output "rest_function_name" {
-  description = "REST Lambda function name"
-  value       = var.enable_lambda_functions ? module.rest_lambda[0].function_name : null
-}
-
-output "grpc_function_arn" {
-  description = "gRPC Lambda function ARN"
-  value       = var.enable_lambda_functions ? module.grpc_lambda[0].function_arn : null
-}
-
-output "rest_function_arn" {
-  description = "REST Lambda function ARN"
-  value       = var.enable_lambda_functions ? module.rest_lambda[0].function_arn : null
-}
-
 output "python_rest_api_url" {
   description = "API Gateway HTTP API endpoint URL for Python REST"
   value       = var.enable_python_lambda ? module.python_rest_lambda[0].api_url : null
@@ -133,31 +103,4 @@ output "terraform_state_bucket_name" {
 #   description = "DynamoDB table name for Terraform state locking"
 #   value       = var.enable_terraform_state_backend ? aws_dynamodb_table.terraform_state_lock[0].name : null
 # }
-
-# EKS Outputs
-output "eks_cluster_id" {
-  description = "EKS cluster ID"
-  value       = var.enable_eks && var.enable_aurora ? module.eks[0].cluster_id : null
-}
-
-output "eks_cluster_name" {
-  description = "EKS cluster name"
-  value       = var.enable_eks && var.enable_aurora ? module.eks[0].cluster_name : null
-}
-
-output "eks_cluster_endpoint" {
-  description = "EKS cluster endpoint"
-  value       = var.enable_eks && var.enable_aurora ? module.eks[0].cluster_endpoint : null
-}
-
-output "eks_cluster_arn" {
-  description = "EKS cluster ARN"
-  value       = var.enable_eks && var.enable_aurora ? module.eks[0].cluster_arn : null
-}
-
-output "eks_cluster_certificate_authority_data" {
-  description = "EKS cluster certificate authority data (for kubectl config)"
-  value       = var.enable_eks && var.enable_aurora ? module.eks[0].cluster_certificate_authority_data : null
-  sensitive   = true
-}
 

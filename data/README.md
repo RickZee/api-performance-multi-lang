@@ -2,31 +2,6 @@
 
 This directory contains JSON schemas, entity data samples, and event templates for the event-based processing system.
 
-## Directory Structure
-
-```
-data/
-├── schemas/           # JSON Schema definitions
-│   ├── event/         # Event schemas
-│   │   ├── event.json
-│   │   └── event-header.json
-│   └── entity/        # Entity schemas
-│       ├── entity-header.json
-│       ├── car.json
-│       ├── loan.json
-│       ├── loan-payment.json
-│       ├── service-record.json
-│       ├── service-details.json
-│       └── part-used.json
-├── entities/          # Sample entity data files
-│   └── car/
-│       ├── car-small.json
-│       ├── car-medium.json
-│       └── car-large.json
-└── templates/         # Event templates for code generation
-    └── event-templates.json
-```
-
 ## Schemas
 
 ### Event Schemas
@@ -121,4 +96,3 @@ All entities must:
 - Entity timestamps (`createdAt`, `updatedAt`) are defined in the entity header, not as direct properties of the entity.
 - All date-time fields use ISO 8601 format.
 - All monetary amounts use `multipleOf: 0.01` for precision.
-

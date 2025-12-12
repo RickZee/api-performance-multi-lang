@@ -1,6 +1,6 @@
 #!/bin/bash
 # Rotate Aurora PostgreSQL master password
-# Updates Aurora cluster and all consumers (Lambda, EKS, CDC connectors)
+# Updates Aurora cluster and all consumers (Lambda, CDC connectors)
 
 set -e
 
@@ -24,7 +24,6 @@ BACKUP_FILE="$BACKUP_DIR/password_backup_$TIMESTAMP.txt"
 # Flags
 DRY_RUN=false
 SKIP_LAMBDA=false
-SKIP_EKS=false
 FORCE=false
 
 # Function to print usage
@@ -37,7 +36,6 @@ Rotate Aurora PostgreSQL master password and update all consumers.
 OPTIONS:
     --dry-run              Show what would be done without making changes
     --skip-lambda          Skip updating Lambda functions
-    --skip-eks             Skip updating EKS secrets
     --force                Skip confirmation prompts
     --backup-dir DIR       Directory for password backups (default: ~/.aurora-password-backups)
     -h, --help             Show this help message
@@ -48,9 +46,6 @@ EXAMPLES:
 
     # Rotate password with all updates
     $0
-
-    # Rotate password skipping EKS (if not using EKS)
-    $0 --skip-eks
 
 EOF
     exit 1
@@ -65,10 +60,6 @@ while [[ $# -gt 0 ]]; do
             ;;
         --skip-lambda)
             SKIP_LAMBDA=true
-            shift
-            ;;
-        --skip-eks)
-            SKIP_EKS=true
             shift
             ;;
         --force)
@@ -127,11 +118,6 @@ check_prerequisites() {
         missing=1
     fi
     
-    if [ "$SKIP_EKS" = false ] && ! command -v kubectl &> /dev/null; then
-        log_error "kubectl not found (required for EKS updates)"
-        missing=1
-    fi
-    
     if [ ! -f "$VALIDATE_SCRIPT" ]; then
         log_error "Validation script not found: $VALIDATE_SCRIPT"
         missing=1
@@ -173,12 +159,7 @@ get_terraform_outputs() {
     AWS_REGION=$(terraform output -raw aws_region 2>/dev/null || aws configure get region || echo "us-east-1")
     
     # Get Lambda function names
-    GRPC_FUNCTION=$(terraform output -raw grpc_function_name 2>/dev/null || echo "")
-    REST_FUNCTION=$(terraform output -raw rest_function_name 2>/dev/null || echo "")
     PYTHON_REST_FUNCTION=$(terraform output -raw python_rest_function_name 2>/dev/null || echo "")
-    
-    # Get EKS cluster name
-    EKS_CLUSTER_NAME=$(terraform output -raw eks_cluster_name 2>/dev/null || echo "")
     
     # Get current password from terraform.tfvars
     TFVARS_FILE="$TERRAFORM_DIR/terraform.tfvars"
@@ -419,51 +400,9 @@ update_lambda_functions() {
     
     log_info "Updating Lambda functions..."
     
-    update_lambda_function "$GRPC_FUNCTION"
-    update_lambda_function "$REST_FUNCTION"
     update_lambda_function "$PYTHON_REST_FUNCTION"
     
     log_success "All Lambda functions updated"
-}
-
-# Function to update EKS secrets
-update_eks_secrets() {
-    if [ "$SKIP_EKS" = true ]; then
-        log_info "Skipping EKS secret updates"
-        return 0
-    fi
-    
-    if [ -z "$EKS_CLUSTER_NAME" ]; then
-        log_info "EKS cluster not found, skipping EKS updates"
-        return 0
-    fi
-    
-    log_info "Updating EKS secrets..."
-    
-    # Update kubeconfig
-    log_info "Updating kubeconfig for cluster: $EKS_CLUSTER_NAME"
-    aws eks update-kubeconfig --region "$AWS_REGION" --name "$EKS_CLUSTER_NAME" > /dev/null 2>&1
-    
-    if [ "$DRY_RUN" = true ]; then
-        log_info "[DRY RUN] Would update Kubernetes secret aurora-credentials with new password"
-        return 0
-    fi
-    
-    # Update the secret
-    local r2dbc_url="r2dbc:postgresql://${AURORA_ENDPOINT}:${AURORA_PORT}/${DATABASE_NAME}"
-    
-    kubectl create secret generic aurora-credentials \
-        --from-literal=r2dbc-url="$r2dbc_url" \
-        --from-literal=username="$DATABASE_USER" \
-        --from-literal=password="$NEW_PASSWORD" \
-        --dry-run=client -o yaml | kubectl apply -f - > /dev/null
-    
-    log_success "EKS secret updated"
-    
-    # Trigger rolling restart of deployments using the secret
-    log_info "Triggering rolling restart of deployments..."
-    kubectl rollout restart deployment -l app=producer-api-java-rest 2>/dev/null || true
-    log_success "Deployments restarted"
 }
 
 # Function to update terraform.tfvars
@@ -572,9 +511,9 @@ validate_all_connections() {
         return 1
     fi
     
-    # Note: Lambda and EKS validation would require invoking functions/checking pods
+    # Note: Lambda validation would require invoking functions
     # which is beyond the scope of this script
-    log_info "Lambda and EKS connections should be validated manually"
+    log_info "Lambda connections should be validated manually"
 }
 
 # Function to print summary
@@ -590,10 +529,6 @@ print_summary() {
     
     if [ "$SKIP_LAMBDA" = false ]; then
         echo -e "${GREEN}✓${NC} Lambda functions updated"
-    fi
-    
-    if [ "$SKIP_EKS" = false ] && [ -n "$EKS_CLUSTER_NAME" ]; then
-        echo -e "${GREEN}✓${NC} EKS secrets updated"
     fi
     
     echo ""
@@ -625,7 +560,7 @@ main() {
     if [ "$FORCE" = false ] && [ "$DRY_RUN" = false ]; then
         echo ""
         log_warn "This will rotate the Aurora PostgreSQL master password"
-        log_warn "All consumers (Lambda, EKS, CDC) will be updated"
+        log_warn "All consumers (Lambda, CDC) will be updated"
         echo ""
         read -p "Continue? (yes/no): " confirm
         if [ "$confirm" != "yes" ]; then
@@ -645,7 +580,6 @@ main() {
     }
     
     update_lambda_functions
-    update_eks_secrets
     update_terraform_tfvars
     update_env_aurora
     

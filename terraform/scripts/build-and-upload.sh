@@ -2,7 +2,7 @@
 set -e
 
 # Build and upload Lambda functions to S3
-# This script builds both Go gRPC and Go REST Lambda functions and uploads them to S3
+# This script builds the Python REST Lambda function and uploads it to S3
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 TERRAFORM_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
@@ -65,46 +65,6 @@ fi
 
 print_info "Using S3 bucket: $BUCKET_NAME"
 
-# Build gRPC Lambda function
-print_info "Building gRPC Lambda function..."
-cd "$PROJECT_ROOT/producer-api-go-grpc"
-if [ -f "scripts/build-lambda.sh" ]; then
-    bash scripts/build-lambda.sh
-    if [ -f "lambda-deployment.zip" ]; then
-        print_info "Uploading gRPC Lambda to S3..."
-        aws s3 cp lambda-deployment.zip "s3://${BUCKET_NAME}/grpc/lambda-deployment.zip"
-        print_info "gRPC Lambda uploaded successfully"
-        # Clean up local zip file
-        rm -f lambda-deployment.zip
-    else
-        print_error "gRPC Lambda deployment package not found"
-        exit 1
-    fi
-else
-    print_error "gRPC Lambda build script not found"
-    exit 1
-fi
-
-# Build REST Lambda function
-print_info "Building REST Lambda function..."
-cd "$PROJECT_ROOT/producer-api-go-rest"
-if [ -f "scripts/build-lambda.sh" ]; then
-    bash scripts/build-lambda.sh
-    if [ -f "lambda-deployment.zip" ]; then
-        print_info "Uploading REST Lambda to S3..."
-        aws s3 cp lambda-deployment.zip "s3://${BUCKET_NAME}/rest/lambda-deployment.zip"
-        print_info "REST Lambda uploaded successfully"
-        # Clean up local zip file
-        rm -f lambda-deployment.zip
-    else
-        print_error "REST Lambda deployment package not found"
-        exit 1
-    fi
-else
-    print_error "REST Lambda build script not found"
-    exit 1
-fi
-
 # Build Python REST Lambda function
 print_info "Building Python REST Lambda function..."
 cd "$PROJECT_ROOT/producer-api-python-rest-lambda"
@@ -125,5 +85,5 @@ else
     exit 1
 fi
 
-print_info "All Lambda functions built and uploaded successfully!"
+print_info "Python REST Lambda function built and uploaded successfully!"
 

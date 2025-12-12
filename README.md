@@ -108,36 +108,7 @@ cd load-test/shared
 
 ### Lambda API Testing
 
-Lambda APIs can be tested both locally (using SAM Local) and in AWS:
-
-**Local Lambda Testing:**
-
-```bash
-cd load-test/shared
-
-# Start local Lambda functions
-./start-local-lambdas.sh
-
-# Run Lambda tests (local execution)
-./run-lambda-tests.sh smoke local
-
-# Stop local Lambda functions
-./stop-local-lambdas.sh
-```
-
-**AWS Lambda Testing:**
-
-```bash
-cd load-test/shared
-
-# Deploy Lambda functions to AWS
-./deploy-all-lambdas.sh
-
-# Run Lambda tests (cloud execution)
-./run-lambda-tests.sh smoke cloud
-```
-
-For detailed Lambda deployment and testing instructions, see:
+Lambda APIs can be tested both locally (using SAM Local) and in AWS. For detailed Lambda deployment and testing instructions, see:
 - [Lambda REST API README](producer-api-go-rest-lambda/README.md)
 - [Lambda gRPC API README](producer-api-go-grpc-lambda/README.md)
 - [Terraform README](terraform/README.md) for infrastructure deployment
@@ -509,8 +480,6 @@ See `load-test/EXPANDED_TESTING_STRATEGY.md` for detailed implementation status 
 
 ### Troubleshooting
 
-For comprehensive troubleshooting, see [PROBLEMS_AND_SOLUTIONS.md](PROBLEMS_AND_SOLUTIONS.md) which consolidates all problems and solutions from the project.
-
 **Common Issues:**
 
 1. **Container Build Failures**
@@ -604,39 +573,6 @@ docker container prune --filter "until=24h"
 ```
 
 **Warning**: Using `--volumes` flag will delete all unused volumes, including database data. The test script automatically checks disk space before running tests.
-
-## Project Structure
-
-```text
-producer-api-performance/
-├── producer-api-java-rest/    # Spring Boot REST API
-├── producer-api-java-grpc/    # Java gRPC API
-├── producer-api-rust-rest/    # Rust REST API
-├── producer-api-rust-grpc/    # Rust gRPC API
-├── producer-api-go-rest/      # Go REST API
-├── producer-api-go-grpc/      # Go gRPC API
-├── producer-api-go-rest-lambda/   # AWS Lambda REST API
-├── producer-api-go-grpc-lambda/   # AWS Lambda gRPC API
-├── load-test/                 # k6 performance testing framework
-│   ├── k6/                    # k6 test scripts
-│   │   ├── rest-api-test.js           # REST API test script
-│   │   ├── grpc-api-test.js           # gRPC API test script
-│   │   ├── lambda-rest-api-test.js    # Lambda REST test script
-│   │   └── lambda-grpc-api-test.js    # Lambda gRPC test script
-│   ├── shared/                # Test execution scripts
-│   │   ├── collect-db-metrics.py      # DB query metrics collection
-│   │   ├── secrets-mock-service.py    # Mock secrets store
-│   │   ├── jwt-test-helper.py         # JWT token generation
-│   │   ├── run-lambda-tests.sh        # Lambda test execution
-│   │   ├── start-local-lambdas.sh     # Start local Lambda functions
-│   │   ├── deploy-all-lambdas.sh      # Deploy Lambda functions
-│   │   └── migrations/                # Database schema migrations
-│   └── results/               # Test results
-├── postgres/                  # Database initialization scripts
-├── terraform/                 # Terraform infrastructure as code
-├── docker-compose.yml         # Docker services configuration
-└── README.md                  # This file
-```
 
 ## Infrastructure and Requirements
 

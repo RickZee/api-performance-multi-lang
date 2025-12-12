@@ -2,7 +2,6 @@
 
 A configurable streaming architecture that enables event-based consumers to subscribe to filtered subsets of events. This implementation uses Confluent Platform (Kafka, Schema Registry, Control Center, Connect), **Confluent Managed PostgreSQL CDC Source Connector** (recommended) or Debezium connectors for CDC, and Flink SQL for stream processing.
 
-> **For troubleshooting and problems/solutions**, see [PROBLEMS_AND_SOLUTIONS.md](../PROBLEMS_AND_SOLUTIONS.md)
 
 ## Overview
 
@@ -35,7 +34,7 @@ This system uses specific example structures for car entities and loan created e
 These examples are used by:
 - Test data generation scripts (`scripts/generate-test-data-from-examples.sh`)
 - Entity validation scripts (`scripts/validate-entity-structure.py`)
-- Filter configuration (`flink-jobs/filters.yaml`) - specifically targets `LoanCreated` events
+- Filter configuration in Flink SQL jobs - specifically targets `LoanCreated` events
 - Schema documentation and examples
 
 For generating test data based on these examples, see the [Test Data Generation](#test-data-generation) section.
@@ -114,9 +113,7 @@ For topic creation in Confluent Cloud, see [CONFLUENT_CLOUD_SETUP_GUIDE.md](CONF
 
 **Note:** Connectors are deployed in Confluent Cloud, not locally.
 
-For connector deployment in Confluent Cloud, see:
-- [CONFLUENT_CONNECTOR_GUIDE.md](CONFLUENT_CONNECTOR_GUIDE.md) - Confluent managed connectors guide
-- [CONFLUENT_CLOUD_SETUP_GUIDE.md](CONFLUENT_CLOUD_SETUP_GUIDE.md) - [Connector Setup](#connector-setup) section
+For connector deployment in Confluent Cloud, see [CONFLUENT_CLOUD_SETUP_GUIDE.md](CONFLUENT_CLOUD_SETUP_GUIDE.md) - [Connector Setup](#connector-setup) section.
 
 ### 4. Deploy Flink SQL Jobs
 
@@ -195,34 +192,13 @@ confluent kafka topic consume filtered-loan-created-events --max-messages 10
 
 ### Filter Configuration
 
-Edit `flink-jobs/filters.yaml` to modify filtering rules. See `flink-jobs/filters-examples.yaml` for comprehensive examples.
-
-**Code Generation**: Flink SQL queries can be automatically generated from YAML filter configurations. For detailed information on filter configuration, available operators, examples, and SQL generation, see [CODE_GENERATION.md](CODE_GENERATION.md).
-
-Quick start:
-```bash
-# Validate filters
-python scripts/validate-filters.py
-
-# Generate SQL
-python scripts/generate-flink-sql.py \
-  --config flink-jobs/filters.yaml \
-  --output flink-jobs/routing-generated.sql
-
-# Validate generated SQL
-python scripts/validate-sql.py --sql flink-jobs/routing-generated.sql
-```
+Filtering rules are defined directly in Flink SQL files. Edit the SQL files in `flink-jobs/` to modify filtering rules.
 
 ### Flink SQL Jobs
 
-**Option 1: Generated SQL (Recommended)**
-- SQL is automatically generated from `filters.yaml`
-- See [CODE_GENERATION.md](CODE_GENERATION.md) for code generation guide
-- Generated file: `flink-jobs/routing-generated.sql`
-
-**Option 2: Manual SQL**
-- Edit `flink-jobs/routing-local-docker.sql` manually for custom queries
-- See `flink-jobs/routing-examples.sql` for comprehensive examples
+Edit the Flink SQL files directly:
+- `flink-jobs/business-events-routing-confluent-cloud.sql` - Main routing job for Confluent Cloud
+- `flink-jobs/business-events-routing-confluent-cloud-no-op.sql` - No-op version for testing
 
 For detailed Flink SQL examples, query types, table definitions, and deployment patterns, see [ARCHITECTURE.md](ARCHITECTURE.md).
 
@@ -250,21 +226,8 @@ This system supports two different data model approaches for representing entity
 The **deeply nested data model** uses hierarchical JSON structures where attributes can contain nested objects and arrays. This is the natural structure used by producer APIs when creating events.
 
 **Example Structure:**
-```json
-{
-  "updatedAttributes": {
-    "loan": {
-      "loanAmount": 50000,
-      "balance": 50000,
-      "status": "active"
-    },
-    "borrower": {
-      "name": "John Doe",
-      "creditScore": 750
-    }
-  }
-}
-```
+
+See [`data/schemas/event/samples/loan-created-event.json`](../../data/schemas/event/samples/loan-created-event.json) for a complete example of a deeply nested event structure. The entity structure is defined in [`data/schemas/entity/loan.json`](../../data/schemas/entity/loan.json).
 
 **Database Schema (DDL):**
 ```sql
@@ -289,81 +252,16 @@ FROM loan_entities
 WHERE (updated_attributes->'loan'->>'loanAmount')::numeric > 100000;
 ```
 
-**Data Transfer Object (DTO):**
-```typescript
-// TypeScript/JavaScript example
-interface LoanAttributes {
-  loanAmount: number;
-  balance: number;
-  status: string;
-}
+**Schema Definitions:**
 
-interface BorrowerAttributes {
-  name: string;
-  creditScore: number;
-}
+Data model schemas are defined in the `data/` folder:
+- Event schema: [`data/schemas/event/event.json`](../../data/schemas/event/event.json)
+- Event header schema: [`data/schemas/event/event-header.json`](../../data/schemas/event/event-header.json)
+- Entity schemas: [`data/schemas/entity/`](../../data/schemas/entity/)
+- Sample event data: [`data/schemas/event/samples/`](../../data/schemas/event/samples/)
+- Sample entity data: [`data/entities/`](../../data/entities/)
 
-interface UpdatedAttributes {
-  loan: LoanAttributes;
-  borrower: BorrowerAttributes;
-}
-
-interface EntityUpdate {
-  entityType: string;
-  entityId: string;
-  updatedAttributes: UpdatedAttributes;
-}
-
-// Go example
-type LoanAttributes struct {
-    LoanAmount int64  `json:"loanAmount"`
-    Balance    int64  `json:"balance"`
-    Status     string `json:"status"`
-}
-
-type BorrowerAttributes struct {
-    Name       string `json:"name"`
-    CreditScore int   `json:"creditScore"`
-}
-
-type UpdatedAttributes struct {
-    Loan     LoanAttributes     `json:"loan"`
-    Borrower BorrowerAttributes `json:"borrower"`
-}
-
-type EntityUpdate struct {
-    EntityType        string           `json:"entityType"`
-    EntityID          string           `json:"entityId"`
-    UpdatedAttributes UpdatedAttributes `json:"updatedAttributes"`
-}
-
-// Java example
-public class LoanAttributes {
-    private Long loanAmount;
-    private Long balance;
-    private String status;
-    // getters and setters
-}
-
-public class BorrowerAttributes {
-    private String name;
-    private Integer creditScore;
-    // getters and setters
-}
-
-public class UpdatedAttributes {
-    private LoanAttributes loan;
-    private BorrowerAttributes borrower;
-    // getters and setters
-}
-
-public class EntityUpdate {
-    private String entityType;
-    private String entityId;
-    private UpdatedAttributes updatedAttributes;
-    // getters and setters
-}
-```
+For complete schema definitions and examples, see the [data folder README](../../data/README.md).
 
 **Characteristics:**
 - Preserves type information (numbers, booleans, strings)
@@ -382,17 +280,8 @@ public class EntityUpdate {
 The **flat data model** uses a key-value map structure where all values are strings and nested paths are represented using dot notation in keys.
 
 **Example Structure:**
-```json
-{
-  "updatedAttributes": {
-    "loan.loanAmount": "50000",
-    "loan.balance": "50000",
-    "loan.status": "active",
-    "borrower.name": "John Doe",
-    "borrower.creditScore": "750"
-  }
-}
-```
+
+The flat data model uses dot notation in keys to represent nested paths. For the underlying entity structure, see [`data/schemas/entity/loan.json`](../../data/schemas/entity/loan.json). The flat representation would convert nested attributes to dot-notation keys (e.g., `loan.loanAmount`, `loan.balance`).
 
 **Database Schema (DDL):**
 ```sql
@@ -417,55 +306,9 @@ FROM loan_entities
 WHERE (updated_attributes->>'loan.loanAmount')::numeric > 100000;
 ```
 
-**Data Transfer Object (DTO):**
-```typescript
-// TypeScript/JavaScript example
-interface EntityUpdate {
-  entityType: string;
-  entityId: string;
-  updatedAttributes: Record<string, string>; // Map<string, string>
-}
+**Schema Definitions:**
 
-// Example usage:
-const entity: EntityUpdate = {
-  entityType: "Loan",
-  entityId: "loan-123",
-  updatedAttributes: {
-    "loan.loanAmount": "50000",
-    "loan.balance": "50000",
-    "loan.status": "active",
-    "borrower.name": "John Doe",
-    "borrower.creditScore": "750"
-  }
-};
-
-// Go example
-type EntityUpdate struct {
-    EntityType        string            `json:"entityType"`
-    EntityID          string            `json:"entityId"`
-    UpdatedAttributes map[string]string `json:"updatedAttributes"`
-}
-
-// Java example
-public class EntityUpdate {
-    private String entityType;
-    private String entityId;
-    private Map<String, String> updatedAttributes; // All values are strings
-    // getters and setters
-}
-
-// Example usage:
-EntityUpdate entity = new EntityUpdate();
-entity.setEntityType("Loan");
-entity.setEntityId("loan-123");
-Map<String, String> attrs = new HashMap<>();
-attrs.put("loan.loanAmount", "50000");
-attrs.put("loan.balance", "50000");
-attrs.put("loan.status", "active");
-attrs.put("borrower.name", "John Doe");
-attrs.put("borrower.creditScore", "750");
-entity.setUpdatedAttributes(attrs);
-```
+For flat data model structures, refer to the entity schemas in the `data/` folder. The schemas define the structure that can be flattened using dot notation for keys. See [`data/schemas/entity/`](../../data/schemas/entity/) for complete entity schema definitions.
 
 **Characteristics:**
 - Compatible with Flink SQL `MAP<STRING, STRING>` type
@@ -510,9 +353,7 @@ The current implementation uses a **hybrid approach**:
 
 - **For New Implementations**: Consider flattening at the API level if filtering performance is critical and you can coordinate API versioning
 - **For Existing Systems**: Use JSON parsing functions in Flink SQL to access nested fields, preserving API compatibility
-- **For Type Safety**: Consider Avro schema-first design with explicit nested record types (see `confluent-flink-cdc-problems.md` for details)
-
-For detailed solutions, workarounds, and implementation patterns addressing nested vs flat data model challenges, see [confluent-flink-cdc-problems.md](confluent-flink-cdc-problems.md).
+- **For Type Safety**: Consider Avro schema-first design with explicit nested record types
 
 ## Monitoring
 
@@ -753,8 +594,6 @@ curl -X POST http://localhost:9081/api/v1/events \
 ```
 
 ### Verify Event Flow
-
-For comprehensive pipeline validation including detailed steps for verifying events in Kafka, validating Flink jobs, troubleshooting common issues, and end-to-end testing procedures, see [PIPELINE_VALIDATION.md](PIPELINE_VALIDATION.md). For troubleshooting, see [PROBLEMS_AND_SOLUTIONS.md](../../PROBLEMS_AND_SOLUTIONS.md) and [TROUBLESHOOTING_GUIDE.md](TROUBLESHOOTING_GUIDE.md).
 
 Quick verification:
 1. **Check Raw Events**: Verify events appear in `raw-business-events` topic

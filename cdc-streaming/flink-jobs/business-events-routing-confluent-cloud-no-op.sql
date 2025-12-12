@@ -159,3 +159,4 @@ SELECT
     'business_events' AS `__table`    -- Add __table in Flink
 FROM `raw-business-events`
 WHERE `event_name` = 'CarServiceDone';
+

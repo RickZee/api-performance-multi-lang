@@ -102,10 +102,6 @@ check_prerequisites() {
         missing=1
     fi
     
-    if ! command -v kubectl &> /dev/null; then
-        log_warn "kubectl not found (EKS rollback will be skipped)"
-    fi
-    
     if [ ! -f "$VALIDATE_SCRIPT" ]; then
         log_error "Validation script not found: $VALIDATE_SCRIPT"
         missing=1
@@ -170,12 +166,7 @@ get_terraform_outputs() {
     cd "$TERRAFORM_DIR"
     
     # Get Lambda function names
-    GRPC_FUNCTION=$(terraform output -raw grpc_function_name 2>/dev/null || echo "")
-    REST_FUNCTION=$(terraform output -raw rest_function_name 2>/dev/null || echo "")
     PYTHON_REST_FUNCTION=$(terraform output -raw python_rest_function_name 2>/dev/null || echo "")
-    
-    # Get EKS cluster name
-    EKS_CLUSTER_NAME=$(terraform output -raw eks_cluster_name 2>/dev/null || echo "")
     
     log_success "Retrieved Terraform outputs"
 }
@@ -292,46 +283,9 @@ update_lambda_function() {
 update_lambda_functions() {
     log_info "Rolling back Lambda functions..."
     
-    update_lambda_function "$GRPC_FUNCTION"
-    update_lambda_function "$REST_FUNCTION"
     update_lambda_function "$PYTHON_REST_FUNCTION"
     
     log_success "All Lambda functions rolled back"
-}
-
-# Function to update EKS secrets
-update_eks_secrets() {
-    if [ -z "$EKS_CLUSTER_NAME" ]; then
-        log_info "EKS cluster not found, skipping EKS rollback"
-        return 0
-    fi
-    
-    if ! command -v kubectl &> /dev/null; then
-        log_warn "kubectl not found, skipping EKS rollback"
-        return 0
-    fi
-    
-    log_info "Rolling back EKS secrets..."
-    
-    # Update kubeconfig
-    log_info "Updating kubeconfig for cluster: $EKS_CLUSTER_NAME"
-    aws eks update-kubeconfig --region "$AWS_REGION" --name "$EKS_CLUSTER_NAME" > /dev/null 2>&1
-    
-    # Update the secret
-    local r2dbc_url="r2dbc:postgresql://${AURORA_ENDPOINT}:${AURORA_PORT}/${DATABASE_NAME}"
-    
-    kubectl create secret generic aurora-credentials \
-        --from-literal=r2dbc-url="$r2dbc_url" \
-        --from-literal=username="$DATABASE_USER" \
-        --from-literal=password="$OLD_PASSWORD" \
-        --dry-run=client -o yaml | kubectl apply -f - > /dev/null
-    
-    log_success "EKS secret rolled back"
-    
-    # Trigger rolling restart
-    log_info "Triggering rolling restart of deployments..."
-    kubectl rollout restart deployment -l app=producer-api-java-rest 2>/dev/null || true
-    log_success "Deployments restarted"
 }
 
 # Function to update terraform.tfvars
@@ -423,10 +377,6 @@ print_summary() {
     echo -e "${GREEN}✓${NC} .env.aurora file rolled back"
     echo -e "${GREEN}✓${NC} Lambda functions rolled back"
     
-    if [ -n "$EKS_CLUSTER_NAME" ]; then
-        echo -e "${GREEN}✓${NC} EKS secrets rolled back"
-    fi
-    
     echo ""
     echo -e "${YELLOW}⚠ IMPORTANT:${NC}"
     echo "  1. Update CDC connector configurations manually if needed"
@@ -448,7 +398,7 @@ main() {
     if [ "$FORCE" = false ]; then
         echo ""
         log_warn "This will rollback the Aurora PostgreSQL master password to the previous value"
-        log_warn "All consumers (Lambda, EKS) will be updated"
+        log_warn "All consumers (Lambda) will be updated"
         echo ""
         read -p "Continue? (yes/no): " confirm
         if [ "$confirm" != "yes" ]; then
@@ -464,7 +414,6 @@ main() {
     }
     
     update_lambda_functions
-    update_eks_secrets
     update_terraform_tfvars
     update_env_aurora
     
