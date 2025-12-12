@@ -1,7 +1,6 @@
-# CDC Streaming Architecture
+# A system to stream and filter database changes to different consumers
 
 A configurable streaming architecture that enables event-based consumers to subscribe to filtered subsets of events. This implementation uses Confluent Platform (Kafka, Schema Registry, Control Center, Connect), **Confluent Managed PostgreSQL CDC Source Connector** (for Confluent Cloud) or Debezium connectors (for local development) for CDC, and Flink SQL for stream processing.
-
 
 ## Overview
 
@@ -18,6 +17,30 @@ This CDC streaming system captures changes from PostgreSQL database tables and s
 The system captures database changes via CDC, streams them through Kafka, and uses Flink SQL to filter and route events to consumer-specific topics. Key components include Confluent Platform (Kafka, Schema Registry, Kafka Connect), Flink for stream processing, and **Confluent Managed PostgreSQL CDC Source Connector** (for Confluent Cloud) or Debezium-based PostgreSQL CDC connector (for local development).
 
 For comprehensive architecture documentation including detailed data flow diagrams, component deep dives, and how consumers interact with the system, see [ARCHITECTURE.md](ARCHITECTURE.md).
+
+### Architecture Screenshots
+
+The following screenshots illustrate key components and views of the CDC streaming system:
+
+<img src="screenshots/1-connector.png" alt="PostgreSQL CDC Connector Configuration" width="800"/>
+
+*Figure 1: PostgreSQL CDC Source Connector configuration in Confluent Cloud*
+
+<img src="screenshots/2-main-topic-lineage.png" alt="Main Topic Lineage" width="800"/>
+
+*Figure 2: Data lineage showing the flow from PostgreSQL CDC connector through Kafka topics*
+
+<img src="screenshots/3-all-topics.png" alt="All Topics Overview" width="800"/>
+
+*Figure 3: Overview of all Kafka topics in the system, including raw and filtered event topics*
+
+<img src="screenshots/4-flink-insert-statement.png" alt="Flink Insert Statement" width="800"/>
+
+*Figure 4: Flink SQL insert statement for filtering and routing events to consumer-specific topics*
+
+<img src="screenshots/5-consumer-log.png" alt="Consumer Application Logs" width="800"/>
+
+*Figure 5: Example consumer application logs showing event processing*
 
 ## Example Data Structures
 
