@@ -90,3 +90,8 @@ Use AWS PrivateLink for Confluent Cloud connectivity.
 EOT
   )
 }
+
+output "schema_initialized" {
+  description = "Schema initialization status (true if schema_init resource exists)"
+  value       = null_resource.schema_init.id != null ? true : false
+}

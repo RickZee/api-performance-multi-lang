@@ -9,9 +9,19 @@ The Terraform setup includes:
 - **API Gateway**: HTTP API with CORS configuration
 - **S3 Bucket**: Versioned S3 bucket for Lambda deployment packages
 - **VPC Support**: Optional VPC configuration with security groups
-- **Database Support**: Optional RDS PostgreSQL database
+- **Aurora PostgreSQL**: Aurora cluster with logical replication enabled
+- **Schema Initialization**: Automatic database schema initialization from `data/schema.sql`
 
 This setup works alongside the existing SAM templates, providing an alternative deployment method.
+
+### Database Schema Management
+
+The database schema is automatically initialized by Terraform when the Aurora cluster is created. The schema is defined in `data/schema.sql` and includes:
+- `business_events` table - Primary table for event storage
+- Entity tables (`car_entities`, `loan_entities`, etc.)
+- All required indexes
+
+**Important**: Schema initialization happens automatically during Terraform deployment. No manual schema setup is required. The schema is managed as Infrastructure as Code, ensuring consistency across deployments.
 
 ## Prerequisites
 

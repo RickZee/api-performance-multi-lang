@@ -181,7 +181,8 @@ print_error "Something went wrong"
 
 This directory also contains various utility scripts:
 
-- **Database Setup**: `setup-aurora-connection.sh`, `setup-postgres-access.sh`, `init-aurora-schema.sh`
+- **Database Setup**: `setup-aurora-connection.sh`, `setup-postgres-access.sh`
+- **Schema Initialization**: `init-aurora-schema.sh` (legacy - schema now managed by Terraform)
 - **Connector Management**: `setup-connector.sh`, `deploy-aurora-connector.sh`, `troubleshoot-cdc-connector.sh`
 - **Test Data Generation**: `generate-test-data.sh`, `generate-test-data-from-examples.sh`
 - **Kafka/Topic Management**: `create-topics.sh`, `cleanup-confluent-cloud.sh`

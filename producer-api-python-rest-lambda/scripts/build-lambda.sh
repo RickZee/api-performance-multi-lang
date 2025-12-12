@@ -30,7 +30,7 @@ find "$PROJECT_ROOT" -maxdepth 1 -name "*.py" -exec cp {} "$PACKAGE_DIR/" \;
 cp -r "$PROJECT_ROOT/models" "$PACKAGE_DIR/" 2>/dev/null || true
 cp -r "$PROJECT_ROOT/repository" "$PACKAGE_DIR/" 2>/dev/null || true
 cp -r "$PROJECT_ROOT/service" "$PACKAGE_DIR/" 2>/dev/null || true
-cp -r "$PROJECT_ROOT/migrations" "$PACKAGE_DIR/" 2>/dev/null || true
+# Note: Migrations are managed by Terraform infrastructure as code, not included in Lambda package
 
 # Remove unnecessary files
 find "$PACKAGE_DIR" -type d -name "__pycache__" -exec rm -rf {} + 2>/dev/null || true
