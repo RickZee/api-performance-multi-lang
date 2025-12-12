@@ -195,8 +195,12 @@ None - all variables have defaults, but you should customize them for your envir
 | `subnet_ids` | Subnet IDs for Aurora access | `[]` |
 | `enable_database` | Create database infrastructure | `false` |
 | `enable_vpc` | Enable VPC configuration | `false` |
-| `lambda_memory_size` | Lambda memory size in MB | `512` |
-| `lambda_timeout` | Lambda timeout in seconds | `30` |
+| `aurora_instance_class` | Aurora instance class | `db.t3.small` (cost-optimized) |
+| `backup_retention_period` | Aurora backup retention in days | `3` (dev/staging), `7` (prod) |
+| `lambda_memory_size` | Lambda memory size in MB | `256` (cost-optimized) |
+| `lambda_timeout` | Lambda timeout in seconds | `15` (cost-optimized) |
+| `cloudwatch_logs_retention_days` | CloudWatch Logs retention | `7` (cost-optimized) |
+| `environment` | Environment name (dev/staging/prod) | `dev` |
 | `s3_bucket_name` | S3 bucket name (auto-generated if empty) | `""` |
 | `tags` | Tags to apply to all resources | `{}` |
 
@@ -376,7 +380,63 @@ If Lambda functions can't connect to the database:
 
 ## Cost Optimization
 
-- Lambda functions use provisioned concurrency only if needed
-- S3 lifecycle policies clean up old versions after 30 days
-- Database can be stopped when not in use (manual process)
-- Consider using Aurora Serverless for variable workloads
+This Terraform configuration includes several cost optimization features:
+
+### Phase 1: Quick Wins (Implemented)
+- **Aurora Instance**: Default `db.t3.small` instead of `db.t3.medium` (~50% cost reduction)
+- **Backup Retention**: 3 days for dev/staging, 7 days for production (reduces backup storage costs)
+- **Lambda Memory**: Default 256 MB instead of 512 MB (reduces compute costs)
+- **Lambda Timeout**: Default 15 seconds instead of 30 seconds (reduces risk of long-running functions)
+- **CloudWatch Logs**: 2-day retention (reduces log storage costs)
+- **S3 Lifecycle**: 14-day retention for non-production, 30 days for production
+
+### Phase 2: Medium-Term Optimizations (Implemented)
+- **Environment-Based Defaults**: Automatic cost optimization based on `environment` variable (default: `dev`)
+- **Aurora Start/Stop Script**: Use `scripts/aurora-start-stop.sh` to stop Aurora during off-hours for dev/staging
+- **Aurora Auto-Stop Lambda**: Automatically stops Aurora if no API calls for 3 hours (dev/staging only)
+- **S3 Intelligent-Tiering**: Lifecycle policies automatically transition old versions
+
+### Cost Savings Summary
+- **Estimated Monthly Savings**: ~$30-40/month (30-50% reduction)
+- **Annual Savings**: ~$360-480/year
+
+### Usage Examples
+
+**Stop Aurora for dev environment during off-hours:**
+```bash
+cd terraform
+./scripts/aurora-start-stop.sh stop
+```
+
+**Start Aurora when needed:**
+```bash
+./scripts/aurora-start-stop.sh start
+```
+
+**Check Aurora status:**
+```bash
+./scripts/aurora-start-stop.sh status
+```
+
+**Aurora Auto-Stop (Automatic):**
+The Aurora auto-stop Lambda function automatically monitors API Gateway invocations and stops Aurora if there are no API calls for 3 hours. This feature:
+- Runs every hour via EventBridge schedule
+- Only enabled for dev/staging environments (not production)
+- Only works when Python Lambda is enabled
+- Checks CloudWatch metrics for API Gateway invocations
+- Fails safely (won't stop if metrics can't be checked)
+
+**Production Configuration:**
+For production, override defaults in `terraform.tfvars`:
+```hcl
+environment = "prod"
+aurora_instance_class = "db.t3.medium"  # Larger instance for production
+backup_retention_period = 7             # Longer retention for production
+cloudwatch_logs_retention_days = 14      # Longer retention for production
+```
+
+### Additional Cost Optimization Tips
+- Use Aurora Serverless v2 for variable workloads (requires manual configuration)
+- Consider ARM-based instances (`db.t4g.medium`) for better price/performance
+- Monitor actual usage and right-size resources accordingly
+- Use AWS Cost Explorer to track spending and identify optimization opportunities

@@ -38,9 +38,9 @@ variable "engine_version" {
 }
 
 variable "instance_class" {
-  description = "Aurora instance class"
+  description = "Aurora instance class (cost-optimized default: db.t3.small)"
   type        = string
-  default     = "db.t3.medium"
+  default     = "db.t3.small"
 }
 
 variable "instance_count" {
@@ -143,9 +143,9 @@ variable "parameter_group_family" {
 }
 
 variable "backup_retention_period" {
-  description = "Backup retention period in days"
+  description = "Backup retention period in days (cost-optimized default: 3 for dev/test, use 7+ for production)"
   type        = number
-  default     = 7
+  default     = 3
 }
 
 variable "preferred_backup_window" {

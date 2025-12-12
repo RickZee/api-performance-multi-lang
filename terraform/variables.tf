@@ -83,9 +83,9 @@ variable "enable_vpc" {
 }
 
 variable "aurora_instance_class" {
-  description = "Aurora instance class"
+  description = "Aurora instance class (cost-optimized default: db.t3.small)"
   type        = string
-  default     = "db.t3.medium"
+  default     = "db.t3.small"
 }
 
 variable "aurora_publicly_accessible" {
@@ -148,15 +148,15 @@ variable "confluent_cloud_cidrs" {
 }
 
 variable "lambda_memory_size" {
-  description = "Lambda memory size in MB"
+  description = "Lambda memory size in MB (cost-optimized default: 256)"
   type        = number
-  default     = 512
+  default     = 256
 }
 
 variable "lambda_timeout" {
-  description = "Lambda timeout in seconds"
+  description = "Lambda timeout in seconds (cost-optimized default: 15)"
   type        = number
-  default     = 30
+  default     = 15
 }
 
 variable "enable_python_lambda" {
@@ -193,5 +193,31 @@ variable "enable_terraform_state_backend" {
   description = "Whether to create S3 bucket for Terraform state backend (uses S3 native locking, no DynamoDB required)"
   type        = bool
   default     = true
+}
+
+variable "backup_retention_period" {
+  description = "Aurora backup retention period in days. Defaults: 3 for dev/staging, 7 for prod (set via environment variable)"
+  type        = number
+  default     = null
+}
+
+variable "cloudwatch_logs_retention_days" {
+  description = "CloudWatch Logs retention period in days (cost-optimized default: 2)"
+  type        = number
+  default     = 2
+  validation {
+    condition     = contains([1, 3, 5, 7, 14, 30, 60, 90, 120, 150, 180, 365, 400, 545, 731, 1827, 3653], var.cloudwatch_logs_retention_days)
+    error_message = "CloudWatch Logs retention must be one of the valid values: 1, 3, 5, 7, 14, 30, 60, 90, 120, 150, 180, 365, 400, 545, 731, 1827, 3653"
+  }
+}
+
+variable "environment" {
+  description = "Environment name (dev, staging, prod) - used for cost optimization defaults"
+  type        = string
+  default     = "dev"
+  validation {
+    condition     = contains(["dev", "staging", "prod"], var.environment)
+    error_message = "Environment must be one of: dev, staging, prod"
+  }
 }
 

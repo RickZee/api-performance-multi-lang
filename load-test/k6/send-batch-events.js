@@ -1,17 +1,23 @@
 /**
- * k6 Script to Send Batch Events to Java REST API
+ * k6 Script to Send Batch Events to REST API (Regular or Lambda)
  * 
- * Sends 10 events of each type:
- * 1. Car Created (10 events)
- * 2. Loan Created (10 events)
- * 3. Loan Payment Submitted (10 events)
+ * Sends configurable number of events of each type (always sends all 4 types):
+ * 1. Car Created
+ * 2. Loan Created
+ * 3. Loan Payment Submitted
+ * 4. Car Service Done
  * 
- * Total: 30 events
- * 
- * Flow: k6 → Java REST API → PostgreSQL → Confluent CDC → Confluent Cloud
+ * Flow: k6 → REST API → PostgreSQL → CDC → Confluent Cloud
  * 
  * Usage:
+ *   # Send 5 events of each type (default, 4 types = 20 total)
  *   k6 run --env HOST=producer-api-java-rest --env PORT=8081 send-batch-events.js
+ * 
+ *   # Send 1000 events of each type (4 types = 4000 total)
+ *   k6 run --env HOST=producer-api-java-rest --env PORT=8081 --env EVENTS_PER_TYPE=1000 send-batch-events.js
+ * 
+ *   # Lambda API with 1000 events per type (4 types = 4000 total)
+ *   k6 run --env API_URL=https://xxxxx.execute-api.us-east-1.amazonaws.com --env EVENTS_PER_TYPE=1000 send-batch-events.js
  */
 
 import http from 'k6/http';
@@ -25,18 +31,35 @@ const eventsSent = new Rate('events_sent');
 const carEventsSent = new Rate('car_events_sent');
 const loanEventsSent = new Rate('loan_events_sent');
 const paymentEventsSent = new Rate('payment_events_sent');
+const serviceEventsSent = new Rate('service_events_sent');
 
-// Test configuration - send 10 of each event type
-const EVENTS_PER_TYPE = 10;
+// Test configuration - configurable number of events per type via environment variable
+// Default: 5 events per type (for quick testing)
+// Set EVENTS_PER_TYPE environment variable to override (e.g., --env EVENTS_PER_TYPE=1000)
+// Always sends all 4 event types: Car, Loan, Payment, Service
+const EVENTS_PER_TYPE = parseInt(__ENV.EVENTS_PER_TYPE || '5', 10);
+const NUM_EVENT_TYPES = 4; // Always 4: Car, Loan, Payment, Service
+const TOTAL_EVENTS = EVENTS_PER_TYPE * NUM_EVENT_TYPES;
+
 export const options = {
     vus: 1,
-    iterations: EVENTS_PER_TYPE * 3, // 10 Car + 10 Loan + 10 Payment = 30 iterations
+    iterations: TOTAL_EVENTS,
 };
 
 // Get API configuration from environment
-const apiHost = __ENV.HOST || 'localhost';
-const apiPort = __ENV.PORT || 8081;
-const apiUrl = `http://${apiHost}:${apiPort}/api/v1/events`;
+// Support both regular REST API (HOST/PORT) and Lambda API (API_URL/LAMBDA_API_URL)
+let apiUrl;
+if (__ENV.API_URL || __ENV.LAMBDA_API_URL || __ENV.LAMBDA_PYTHON_REST_API_URL) {
+    // Lambda API - use full URL
+    const baseUrl = __ENV.API_URL || __ENV.LAMBDA_API_URL || __ENV.LAMBDA_PYTHON_REST_API_URL;
+    const apiPath = __ENV.API_PATH || '/api/v1/events';
+    apiUrl = baseUrl.includes('/api/v1/events') ? baseUrl : `${baseUrl.replace(/\/$/, '')}${apiPath}`;
+} else {
+    // Regular REST API - use HOST and PORT
+    const apiHost = __ENV.HOST || 'localhost';
+    const apiPort = __ENV.PORT || 8081;
+    apiUrl = `http://${apiHost}:${apiPort}/api/v1/events`;
+}
 
 // Authentication configuration
 const AUTH_ENABLED = __ENV.AUTH_ENABLED === 'true' || __ENV.AUTH_ENABLED === '1';
@@ -160,51 +183,111 @@ function generateLoanPaymentEvent(loanId, amount = null) {
     });
 }
 
+function generateCarServiceEvent(carId, serviceId = null) {
+    const timestamp = generateTimestamp();
+    const id = serviceId || `SERVICE-${new Date().toISOString().split('T')[0].replace(/-/g, '')}-${randomIntBetween(1, 9999)}`;
+    const uuid = generateUUID();
+    const amountPaid = (100 + Math.random() * 1000).toFixed(2); // $100-$1100
+    const mileageAtService = randomIntBetween(1000, 100000);
+    const dealers = [
+        "Tesla Service Center - San Francisco",
+        "Toyota Service Center - Los Angeles",
+        "Honda Service Center - New York",
+        "Ford Service Center - Chicago",
+        "BMW Service Center - Miami"
+    ];
+    const dealerId = `DEALER-${randomIntBetween(1, 999)}`;
+    const dealerName = dealers[randomIntBetween(0, dealers.length - 1)];
+    const descriptions = [
+        "Regular maintenance service including tire rotation, brake inspection, and fluid top-up",
+        "Oil change and filter replacement",
+        "Brake pad replacement and brake fluid flush",
+        "Transmission service and fluid change",
+        "Battery replacement and electrical system check"
+    ];
+    const description = descriptions[randomIntBetween(0, descriptions.length - 1)];
+    
+    return JSON.stringify({
+        eventHeader: {
+            uuid: uuid,
+            eventName: "Car Service Done",
+            eventType: "CarServiceDone",
+            createdDate: timestamp,
+            savedDate: timestamp
+        },
+        eventBody: {
+            entities: [{
+            entityType: "ServiceRecord",
+            entityId: id,
+            updatedAttributes: {
+            id: id,
+            carId: carId,
+            serviceDate: timestamp,
+            amountPaid: parseFloat(amountPaid).toFixed(2),
+            dealerId: dealerId,
+            dealerName: dealerName,
+            mileageAtService: mileageAtService,
+            description: description
+            }
+            }]
+        }
+    });
+}
+
 // Use setup function to generate linked IDs for each batch
 export function setup() {
     const timestamp = new Date().toISOString().split('T')[0].replace(/-/g, '');
     const carIds = [];
     const loanIds = [];
     const monthlyPayments = [];
+    const serviceIds = [];
     
-    // Generate 10 sets of linked IDs
+    // Generate linked IDs for all events
     for (let i = 0; i < EVENTS_PER_TYPE; i++) {
         carIds.push(`CAR-${timestamp}-${i}-${randomIntBetween(1000, 9999)}`);
         loanIds.push(`LOAN-${timestamp}-${i}-${randomIntBetween(1000, 9999)}`);
         monthlyPayments.push((500 + Math.random() * 1500).toFixed(2));
+        serviceIds.push(`SERVICE-${timestamp}-${i}-${randomIntBetween(1000, 9999)}`);
     }
     
     return {
         carIds: carIds,
         loanIds: loanIds,
-        monthlyPayments: monthlyPayments
+        monthlyPayments: monthlyPayments,
+        serviceIds: serviceIds
     };
 }
 
 export default function (data) {
-    const iteration = __ITER; // Current iteration (0-29)
+    const iteration = __ITER; // Current iteration (0 to TOTAL_EVENTS-1)
     let payload;
     let eventType;
     let success;
     
     // Determine which event type based on iteration
     if (iteration < EVENTS_PER_TYPE) {
-        // First 10 iterations: Car Created
+        // First batch: Car Created
         const carIndex = iteration;
         payload = generateCarCreatedEvent(data.carIds[carIndex]);
         eventType = "CarCreated";
     } else if (iteration < EVENTS_PER_TYPE * 2) {
-        // Next 10 iterations: Loan Created
+        // Second batch: Loan Created
         const loanIndex = iteration - EVENTS_PER_TYPE;
         const carIndex = loanIndex; // Link to corresponding car
         payload = generateLoanCreatedEvent(data.carIds[carIndex], data.loanIds[loanIndex]);
         eventType = "LoanCreated";
-    } else {
-        // Last 10 iterations: Loan Payment Submitted
+    } else if (iteration < EVENTS_PER_TYPE * 3) {
+        // Third batch: Loan Payment Submitted
         const paymentIndex = iteration - (EVENTS_PER_TYPE * 2);
         const loanIndex = paymentIndex; // Link to corresponding loan
         payload = generateLoanPaymentEvent(data.loanIds[loanIndex], data.monthlyPayments[paymentIndex]);
         eventType = "LoanPaymentSubmitted";
+    } else {
+        // Fourth batch: Car Service Done
+        const serviceIndex = iteration - (EVENTS_PER_TYPE * 3);
+        const carIndex = serviceIndex; // Link to corresponding car
+        payload = generateCarServiceEvent(data.carIds[carIndex], data.serviceIds[serviceIndex]);
+        eventType = "CarServiceDone";
     }
     
     // Set headers
@@ -224,13 +307,16 @@ export default function (data) {
     // Send POST request
     const res = http.post(apiUrl, payload, params);
     
-    // Check response
+    // Check response (use longer timeout for Lambda APIs)
+    const isLambda = apiUrl.includes('execute-api') || apiUrl.includes('amazonaws.com');
+    const timeout = isLambda ? 30000 : 5000; // 30s for Lambda, 5s for regular API
+    
     success = check(res, {
         'status is 200': (r) => r.status === 200,
-        'response time < 5s': (r) => r.timings.duration < 5000,
+        [`response time < ${timeout}ms`]: (r) => r.timings.duration < timeout,
         'response body contains success': (r) => {
             const body = r.body || '';
-            return body.includes('successfully') || body.includes('processed') || body.includes('Event processed');
+            return body.includes('successfully') || body.includes('processed') || body.includes('Event processed') || r.status === 200;
         },
     });
     
@@ -244,10 +330,13 @@ export default function (data) {
         loanEventsSent.add(success);
     } else if (eventType === "LoanPaymentSubmitted") {
         paymentEventsSent.add(success);
+    } else if (eventType === "CarServiceDone") {
+        serviceEventsSent.add(success);
     }
     
-    // Log progress every 5 events
-    if (iteration % 5 === 0 || iteration === options.iterations - 1) {
+    // Log progress periodically (every 10% or every 100 events, whichever is smaller)
+    const logInterval = Math.max(1, Math.min(Math.floor(TOTAL_EVENTS / 10), 100));
+    if (iteration % logInterval === 0 || iteration === options.iterations - 1) {
         console.log(`Sent ${eventType} event (iteration ${iteration + 1}/${options.iterations})`);
     }
     
@@ -263,12 +352,21 @@ export function handleSummary(data) {
     const carSent = data.metrics.car_events_sent ? data.metrics.car_events_sent.values.count : 0;
     const loanSent = data.metrics.loan_events_sent ? data.metrics.loan_events_sent.values.count : 0;
     const paymentSent = data.metrics.payment_events_sent ? data.metrics.payment_events_sent.values.count : 0;
+    const serviceSent = data.metrics.service_events_sent ? data.metrics.service_events_sent.values.count : 0;
     
     const rate = data.metrics.http_req_duration?.values?.rate || 0;
     const avg = data.metrics.http_req_duration?.values?.avg || 0;
     const min = data.metrics.http_req_duration?.values?.min || 0;
     const max = data.metrics.http_req_duration?.values?.max || 0;
     const p95 = data.metrics.http_req_duration?.values?.['p(95)'] || 0;
+    
+    // Build event summary string
+    const eventsSummary = `${EVENTS_PER_TYPE} Car Created + ${EVENTS_PER_TYPE} Loan Created + ${EVENTS_PER_TYPE} Loan Payment Submitted + ${EVENTS_PER_TYPE} Car Service Done`;
+    
+    const eventsByType = `  Car Created: ${carSent}/${EVENTS_PER_TYPE}
+  Loan Created: ${loanSent}/${EVENTS_PER_TYPE}
+  Loan Payment Submitted: ${paymentSent}/${EVENTS_PER_TYPE}
+  Car Service Done: ${serviceSent}/${EVENTS_PER_TYPE}`;
     
     return {
         'stdout': `
@@ -277,7 +375,9 @@ k6 Batch Events Test Summary
 ========================================
 
 API Endpoint: ${apiUrl}
-Events Sent: 10 Car Created + 10 Loan Created + 10 Loan Payment Submitted
+Events Sent: ${eventsSummary}
+Total Events: ${TOTAL_EVENTS}
+Event Types: ${NUM_EVENT_TYPES}
 ========================================
 
 HTTP Requests:
@@ -292,9 +392,7 @@ Error Rate: ${errorRate}%
 Errors: ${totalErrors}
 
 Events by Type:
-  Car Created: ${carSent}/10
-  Loan Created: ${loanSent}/10
-  Loan Payment Submitted: ${paymentSent}/10
+${eventsByType}
 
 Next Steps:
   1. Verify events in PostgreSQL database

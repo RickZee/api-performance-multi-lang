@@ -32,7 +32,7 @@ resource "aws_s3_bucket_lifecycle_configuration" "lambda_deployments" {
     filter {}
 
     noncurrent_version_expiration {
-      noncurrent_days = 30
+      noncurrent_days = var.environment == "prod" ? 30 : 14
     }
   }
 }
@@ -102,7 +102,7 @@ resource "aws_s3_bucket_lifecycle_configuration" "terraform_state" {
     filter {}
 
     noncurrent_version_expiration {
-      noncurrent_days = 90
+      noncurrent_days = var.environment == "prod" ? 90 : 30
     }
   }
 }
@@ -212,6 +212,8 @@ module "aurora" {
   confluent_cloud_cidrs = local.confluent_cloud_cidrs
   allowed_cidr_blocks   = var.aurora_allowed_cidr_blocks
   enable_ipv6           = var.enable_ipv6
+  # Backup retention: use provided value or environment-based default (3 days for dev/staging, 7 for prod)
+  backup_retention_period = var.backup_retention_period != null ? var.backup_retention_period : (local.is_production ? 7 : 3)
   additional_security_group_ids = []
 
   tags = local.common_tags
@@ -246,9 +248,14 @@ locals {
   common_tags = merge(
     var.tags,
     {
-      Project = "Flink POC"
+      Project     = "Flink POC"
+      Environment = var.environment
     }
   )
+
+  # Environment-based cost optimization defaults
+  # Production uses more conservative settings, dev/staging use cost-optimized defaults
+  is_production = var.environment == "prod"
 }
 
 # Python REST Lambda module (optional - disabled by default)
@@ -265,6 +272,7 @@ module "python_rest_lambda" {
   memory_size       = var.lambda_memory_size
   timeout           = var.lambda_timeout
   log_level         = var.log_level
+  cloudwatch_logs_retention_days = var.cloudwatch_logs_retention_days
   database_url      = local.database_url
   aurora_endpoint   = local.aurora_endpoint
   database_name     = var.database_name
@@ -287,6 +295,23 @@ module "python_rest_lambda" {
     allow_headers = ["Content-Type", "Authorization"]
     max_age       = 300
   }
+
+  tags = local.common_tags
+}
+
+# Aurora Auto-Stop Lambda (only for dev/staging environments)
+# Monitors API Gateway invocations and stops Aurora if no activity for 3 hours
+module "aurora_auto_stop" {
+  count  = var.enable_aurora && !local.is_production && var.enable_python_lambda ? 1 : 0
+  source = "./modules/aurora-auto-stop"
+
+  function_name      = "${var.project_name}-aurora-auto-stop"
+  aurora_cluster_id  = module.aurora[0].cluster_id
+  aurora_cluster_arn = module.aurora[0].cluster_arn
+  api_gateway_id     = module.python_rest_lambda[0].api_id
+  aws_region         = var.aws_region
+  inactivity_hours   = 3
+  cloudwatch_logs_retention_days = var.cloudwatch_logs_retention_days
 
   tags = local.common_tags
 }
