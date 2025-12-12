@@ -1,20 +1,15 @@
 -- Database Schema for Event Storage System
 -- Reusable across all APIs
 -- Database: Aurora RDS PostgreSQL
-
--- Drop existing tables if they exist (for migrations)
-DROP TABLE IF EXISTS business_events CASCADE;
-DROP TABLE IF EXISTS car_entities CASCADE;
-DROP TABLE IF EXISTS loan_entities CASCADE;
-DROP TABLE IF EXISTS loan_payment_entities CASCADE;
-DROP TABLE IF EXISTS service_record_entities CASCADE;
-DROP TABLE IF EXISTS simple_events CASCADE;
+-- 
+-- NOTE: This schema is idempotent - safe to run multiple times without data loss
+-- Uses IF NOT EXISTS to avoid dropping/recreating tables
 
 -- ============================================================================
 -- Business Events Table
 -- Stores complete events with eventHeader fields as columns and full event JSON
 -- ============================================================================
-CREATE TABLE business_events (
+CREATE TABLE IF NOT EXISTS business_events (
     id VARCHAR(255) PRIMARY KEY,  -- from eventHeader.uuid
     event_name VARCHAR(255) NOT NULL,  -- from eventHeader.eventName
     event_type VARCHAR(255),  -- from eventHeader.eventType
@@ -34,7 +29,7 @@ CREATE INDEX IF NOT EXISTS idx_business_events_created_date ON business_events(c
 -- ============================================================================
 
 -- Car Entities Table
-CREATE TABLE car_entities (
+CREATE TABLE IF NOT EXISTS car_entities (
     entity_id VARCHAR(255) PRIMARY KEY,  -- from entityHeader.entityId
     entity_type VARCHAR(255) NOT NULL,  -- from entityHeader.entityType
     created_at TIMESTAMP WITH TIME ZONE,  -- from entityHeader.createdAt
@@ -48,7 +43,7 @@ CREATE INDEX IF NOT EXISTS idx_car_entities_created_at ON car_entities(created_a
 CREATE INDEX IF NOT EXISTS idx_car_entities_updated_at ON car_entities(updated_at);
 
 -- Loan Entities Table
-CREATE TABLE loan_entities (
+CREATE TABLE IF NOT EXISTS loan_entities (
     entity_id VARCHAR(255) PRIMARY KEY,  -- from entityHeader.entityId
     entity_type VARCHAR(255) NOT NULL,  -- from entityHeader.entityType
     created_at TIMESTAMP WITH TIME ZONE,  -- from entityHeader.createdAt
@@ -62,7 +57,7 @@ CREATE INDEX IF NOT EXISTS idx_loan_entities_created_at ON loan_entities(created
 CREATE INDEX IF NOT EXISTS idx_loan_entities_updated_at ON loan_entities(updated_at);
 
 -- Loan Payment Entities Table
-CREATE TABLE loan_payment_entities (
+CREATE TABLE IF NOT EXISTS loan_payment_entities (
     entity_id VARCHAR(255) PRIMARY KEY,  -- from entityHeader.entityId
     entity_type VARCHAR(255) NOT NULL,  -- from entityHeader.entityType
     created_at TIMESTAMP WITH TIME ZONE,  -- from entityHeader.createdAt
@@ -76,7 +71,7 @@ CREATE INDEX IF NOT EXISTS idx_loan_payment_entities_created_at ON loan_payment_
 CREATE INDEX IF NOT EXISTS idx_loan_payment_entities_updated_at ON loan_payment_entities(updated_at);
 
 -- Service Record Entities Table
-CREATE TABLE service_record_entities (
+CREATE TABLE IF NOT EXISTS service_record_entities (
     entity_id VARCHAR(255) PRIMARY KEY,  -- from entityHeader.entityId
     entity_type VARCHAR(255) NOT NULL,  -- from entityHeader.entityType
     created_at TIMESTAMP WITH TIME ZONE,  -- from entityHeader.createdAt

@@ -51,7 +51,7 @@ const EVENTS_PER_VU = Math.ceil(EVENTS_PER_TYPE / VUS_PER_EVENT_TYPE);
 
 export const options = {
     vus: TOTAL_VUS,
-    iterations: EVENTS_PER_VU, // Each VU runs this many iterations
+    iterations: EVENTS_PER_VU * TOTAL_VUS, // Total iterations: each VU runs EVENTS_PER_VU iterations
     thresholds: {
         // Abort if error rate exceeds 50% (half of requests failing)
         'http_req_failed': ['rate<0.5'],
