@@ -16,14 +16,17 @@ resource "null_resource" "schema_init" {
 
   provisioner "local-exec" {
     command = <<-EOT
-      export PGPASSWORD='${replace(replace(var.database_password, "'", "'\"'\"'"), "$", "\\$")}'
-      psql -h ${aws_rds_cluster.this.endpoint} \
-           -U ${var.database_user} \
-           -d ${var.database_name} \
-           -p ${aws_rds_cluster.this.port} \
-           -f ${path.module}/../../../data/schema.sql \
-           -v ON_ERROR_STOP=1
+      cd ${path.module}/../../../ && \
+      python3 scripts/init-aurora-schema.py
     EOT
+
+    environment = {
+      AURORA_ENDPOINT   = aws_rds_cluster.this.endpoint
+      AURORA_PORT       = tostring(aws_rds_cluster.this.port)
+      DATABASE_NAME     = var.database_name
+      DATABASE_USER     = var.database_user
+      DATABASE_PASSWORD = var.database_password
+    }
 
     on_failure = fail
   }

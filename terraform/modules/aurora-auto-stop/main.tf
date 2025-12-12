@@ -217,7 +217,7 @@ resource "aws_lambda_function" "aurora_auto_stop" {
   environment {
     variables = {
       AURORA_CLUSTER_ID = var.aurora_cluster_id
-      AWS_REGION        = var.aws_region
+      # AWS_REGION is automatically provided by Lambda runtime, no need to set it
       API_GATEWAY_ID    = var.api_gateway_id
       INACTIVITY_HOURS  = var.inactivity_hours
     }
