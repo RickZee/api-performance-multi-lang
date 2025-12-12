@@ -25,7 +25,7 @@ async def get_connection_pool(database_url: str) -> asyncpg.Pool:
             _pool = await asyncpg.create_pool(
                 database_url,
                 min_size=1,
-                max_size=5,  # Conservative pool size for Lambda
+                max_size=2,  # Reduced - RDS Proxy handles connection pooling
                 command_timeout=30,
             )
             logger.info("Connection pool created successfully")

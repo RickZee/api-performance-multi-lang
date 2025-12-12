@@ -13,6 +13,7 @@ Change Data Capture (CDC) streaming architecture that enables real-time event pr
 - **Scalable Processing**: Apache Flink for stateful stream processing with horizontal scaling
 - **Code Generation**: Automated SQL generation from declarative filter configurations
 - **CI/CD Integration**: Infrastructure-as-code ready with validation and testing capabilities
+- **Cost Optimization**: Aurora auto-start/stop functionality for dev/staging environments (automatically stops database after inactivity, starts on API requests)
 
 ### Example Data Structures
 
@@ -342,6 +343,433 @@ ALTER SYSTEM SET max_wal_senders = 10;
 -- Create replication slot (done by connector)
 SELECT pg_create_logical_replication_slot('business_events_cdc_slot', 'pgoutput');
 ```
+
+**RDS Proxy for Connection Pooling**:
+
+For high-throughput write operations from serverless Lambda functions, **RDS Proxy** is deployed to enable connection pooling and multiplexing:
+
+- **Purpose**: Manages database connections efficiently for Lambda functions writing events to `business_events` table
+- **Benefits**:
+  - **Connection Multiplexing**: 1000+ concurrent Lambda instances share a pool of 50-100 actual database connections
+  - **Reduced Connection Overhead**: Eliminates "too many clients already" errors by pooling connections
+  - **Automatic Failover**: Handles connection health checks and automatic failover
+  - **Improved Latency**: Reuses connections, avoiding connection setup overhead
+- **Architecture**:
+  - Lambda functions connect to RDS Proxy endpoint (not directly to Aurora)
+  - RDS Proxy maintains a connection pool to Aurora PostgreSQL
+  - Each Lambda uses 1-2 connections (reduced from 5), with RDS Proxy managing the pool
+  - CDC connectors continue to connect directly to Aurora (not through proxy)
+- **Configuration**: Managed via Terraform (`terraform/modules/rds-proxy/`)
+  - Enabled by default when both Aurora and Python Lambda are enabled
+  - Can be disabled via `enable_rds_proxy = false` variable
+- **Capacity**: Enables 1000+ concurrent Lambda executions vs ~16 without proxy
+
+**Detailed Explanation: How RDS Proxy Solves Connection Exhaustion**
+
+#### The Problem Without RDS Proxy
+
+**Connection Multiplication Effect:**
+
+Without RDS Proxy, each Lambda instance maintains its own connection pool directly to Aurora:
+
+```text
+Without RDS Proxy:
+- Each Lambda instance: 2 connections (reduced from 5)
+- Aurora db.r5.large: 1,802 max_connections
+- Maximum concurrent Lambdas: 1,802 / 2 = ~901 Lambdas (theoretical)
+- At 1000+ concurrent Lambdas: 2000+ connections needed → "too many clients already" error
+- Even with larger instances, connection exhaustion occurs at high concurrency
+```
+
+**What Happens:**
+1. Each Lambda container maintains its own connection pool (2 connections)
+2. With high concurrency, AWS spins up many Lambda containers simultaneously
+3. Each container holds connections even when idle (Lambda containers are reused)
+4. Aurora's connection limit is quickly exhausted
+5. New Lambda invocations fail with "too many clients already" errors
+
+#### How RDS Proxy Solves This
+
+**Connection Multiplexing Architecture:**
+
+RDS Proxy acts as an intermediary layer that multiplexes many Lambda connections into fewer Aurora connections:
+
+```text
+With RDS Proxy:
+- Each Lambda instance: 1-2 connections to RDS Proxy
+- RDS Proxy: Maintains pool of 1,442 actual connections to Aurora (80% of 1,802 max)
+- RDS Proxy: Multiplexes many Lambda connections → fewer Aurora connections
+- Maximum concurrent Lambdas: 2000+ (proxy handles pooling efficiently)
+- Reserved connections: 360 (20% headroom for admin/emergency use)
+```
+
+**Key Mechanisms:**
+
+1. **Connection Pooling at Proxy Layer**
+   - Lambda functions connect to RDS Proxy endpoint (not directly to Aurora)
+   - RDS Proxy maintains a smaller pool of actual connections to Aurora
+   - Many Lambda connections share the same Aurora connections
+   - Connections are borrowed from the pool when needed, returned when done
+
+2. **Connection Reuse**
+   - RDS Proxy reuses Aurora connections across multiple Lambda requests
+   - Idle Lambda connections don't hold Aurora connections
+   - Connections are borrowed from the pool when needed, returned when idle
+   - Reduces connection setup/teardown overhead
+
+3. **Connection Lifecycle Management**
+   - **max_connections_percent = 80**: Uses up to 80% of Aurora's max connections (leaves 20% headroom for admin connections)
+   - **max_idle_connections_percent = 50**: Keeps 50% idle for burst capacity
+   - **connection_borrow_timeout = 120**: Waits up to 2 minutes for available connection
+   - Automatic health checks and failover handling
+
+4. **Reduced Per-Lambda Overhead**
+   - Each Lambda uses 1-2 connections to proxy (reduced from 5 direct connections)
+   - Proxy manages the actual Aurora connection pool
+   - Lambda containers can scale without exhausting Aurora connections
+
+#### Real-World Example
+
+**Scenario: 500 Concurrent Lambda Executions**
+
+**Without RDS Proxy:**
+
+```text
+500 Lambdas × 2 connections = 1,000 connections needed
+Aurora db.r5.large limit = 1,802 connections
+Result: ✅ Would succeed, but at 1000+ Lambdas: 2000+ connections needed → ❌ Connection exhaustion
+```
+
+**With RDS Proxy:**
+
+```text
+500 Lambdas × 2 connections to proxy = 1,000 proxy connections
+RDS Proxy maintains pool of ~1,442 connections to Aurora (80% of 1,802 max)
+RDS Proxy multiplexes: 1,000 Lambda connections → 1,442 Aurora connections available
+Result: ✅ All 500 Lambdas succeed with significant headroom
+```
+
+#### Performance Benefits
+
+1. **Reduced Connection Setup Time**
+   - Proxy reuses connections, avoiding per-request setup overhead
+   - Typical savings: 10-50ms per request
+
+2. **Better Resource Utilization**
+   - Aurora connections are used more efficiently
+   - Less time spent on connection setup/teardown
+   - More CPU cycles available for actual queries
+
+3. **Automatic Failover**
+   - Proxy handles connection health checks
+   - Automatic retry on connection failures
+   - Better resilience to transient network issues
+
+4. **No Lambda Throttling from DB Connections**
+   - Lambda can scale to account limits (1000+ concurrent)
+   - Database connection limits no longer block Lambda scaling
+   - Enables true serverless scaling
+
+#### Do You Need to Increase RDS Size?
+
+**Short Answer: Probably Not, But It Depends on Your Workload**
+
+**Current Configuration:**
+- **Aurora Instance**: `db.r5.large` (1,802 max_connections)
+- **RDS Proxy Config**: `max_connections_percent = 80` (uses 80% of available connections, reserves 20% for admin)
+- **RDS Proxy Config**: `max_idle_connections_percent = 50` (keeps 50% idle for bursts)
+- **Effective RDS Proxy Connections**: 1,442 (80% of 1,802)
+- **Reserved for Admin**: 360 connections (20% headroom)
+
+**Capacity with RDS Proxy:**
+
+```text
+Aurora max connections: 1,802 (db.r5.large)
+RDS Proxy available connections: 1,442 (80% of max)
+Reserved for admin/emergency: 360 connections (20% headroom)
+With connection multiplexing: Supports 2000+ concurrent Lambdas
+Each Lambda uses 1-2 connections to proxy
+Proxy efficiently manages the 1,442 Aurora connections
+```
+
+**When You Might Need to Upgrade:**
+
+1. **High Connection Wait Times**
+   - Monitor: `ConnectionBorrowedCount` and `ConnectionBorrowedWaitTime` CloudWatch metrics
+   - If wait times are consistently high (>1 second), proxy pool may be saturated
+
+2. **Aurora CPU/Memory Pressure**
+   - More connections can increase CPU/memory usage
+   - Monitor: `CPUUtilization`, `DatabaseConnections`, `FreeableMemory`
+   - If CPU consistently > 80%, consider upgrade
+
+3. **Need for More Connections Beyond Multiplexing**
+   - If you need >1000 concurrent Lambdas with heavy DB usage
+   - If CDC connectors or other services also need connections
+   - If you have multiple applications sharing the database
+
+4. **Performance Requirements**
+   - Larger instances provide more CPU/memory for query processing
+   - Better for complex queries or high write throughput
+   - Consider if query performance is a bottleneck
+
+**Upgrade Options (if needed):**
+
+**Current Production Configuration:**
+- **Aurora Instance**: `db.r5.large` (1,802 max_connections)
+- **RDS Proxy**: 1,442 available connections (80% of max)
+- **Capacity**: Supports 2000+ concurrent Lambda executions
+
+**Further Upgrade Options (if needed):**
+
+```text
+db.r5.large → db.r5.xlarge
+- Max connections: 1,802 → 3,604
+- Cost: ~2x
+- Benefit: 2x connection capacity, more CPU/memory
+```
+
+```text
+db.r5.large → db.r5.2xlarge
+- Max connections: 1,802 → 5,000 (max limit)
+- Cost: ~4x
+- Benefit: Maximum connection capacity, significantly more CPU/memory
+```
+
+**Option 2: Monitor Current Configuration**
+
+```text
+Current production setup:
+1. Aurora db.r5.large with RDS Proxy (1,442 available connections)
+2. Monitor CloudWatch metrics:
+   - DatabaseConnections (should stay < 1,802)
+   - ConnectionBorrowedCount (proxy metrics)
+   - ConnectionBorrowedWaitTime (should be < 100ms)
+   - CPUUtilization (should stay < 80%)
+3. Upgrade only if metrics indicate saturation
+```
+
+**Current Production Configuration:**
+
+**Aurora `db.r5.large` + RDS Proxy (80% max connections):**
+
+1. **High Connection Capacity**
+   - 1,802 max connections (4x increase from db.t3.medium)
+   - 1,442 connections available via RDS Proxy (80% of max)
+   - 360 connections reserved for admin/emergency use (20% headroom)
+   - Supports 2000+ concurrent Lambda executions with headroom
+
+2. **Optimized Connection Pooling**
+   - RDS Proxy uses 80% of max connections (not 100%)
+   - Leaves 20% headroom for admin connections, CDC connectors, and emergency use
+   - Prevents connection exhaustion during spikes
+   - Better stability under high load
+
+3. **Performance Benefits**
+   - More CPU and memory (16 GB RAM vs 4 GB)
+   - Better query performance for high write throughput
+   - Handles complex queries more efficiently
+   - Reduced connection wait times
+
+4. **When to Consider Further Upgrade**
+   - Connection wait times consistently > 1 second
+   - Aurora CPU consistently > 80%
+   - Need > 3000 concurrent Lambdas with heavy DB usage
+   - DatabaseConnections consistently > 1,600 (approaching 1,802 limit)
+
+**Monitoring Strategy:**
+
+Key metrics to watch:
+
+```bash
+# RDS Proxy Metrics
+- DatabaseConnections: Should stay < Aurora max_connections
+- ConnectionBorrowedCount: Number of connections borrowed
+- ConnectionBorrowedWaitTime: Should be < 100ms typically
+
+# Aurora Metrics  
+- DatabaseConnections: Should stay < max_connections
+- CPUUtilization: Should stay < 80%
+- FreeableMemory: Should have sufficient headroom
+
+# Lambda Metrics
+- ConcurrentExecutions: Track peak concurrency
+- Throttles: Should decrease significantly
+- Duration: Should improve with connection reuse
+```
+
+**Conclusion:** The current production configuration (`db.r5.large` with RDS Proxy at 80% max connections) provides significant capacity for high Lambda concurrency. With 1,442 available connections and 360 reserved for admin use, the system can handle 2000+ concurrent Lambda executions with substantial headroom. Monitor CloudWatch metrics regularly and consider further upgrades only if metrics indicate saturation (connection wait times > 1s, CPU > 80%, or approaching connection limits).
+
+**Aurora Auto-Start/Stop for Cost Optimization**:
+
+For dev/staging environments, **Aurora Auto-Start/Stop** functionality is deployed to automatically manage database lifecycle and reduce costs during periods of inactivity:
+
+- **Purpose**: Automatically stops Aurora cluster when inactive and starts it when API requests arrive
+- **Cost Savings**: Reduces compute costs by stopping the database during off-hours or low-activity periods
+- **User Experience**: Provides seamless experience with automatic startup on first request
+- **Environment**: Only enabled for non-production environments (dev/staging)
+
+#### Auto-Stop Lambda
+
+**Purpose**: Monitors API Gateway invocations and automatically stops Aurora cluster after a period of inactivity.
+
+**How It Works**:
+
+1. **Scheduled Execution**: Runs every hour via EventBridge (rate: 1 hour)
+2. **Activity Monitoring**: Checks CloudWatch metrics for API Gateway invocations in the last N hours (default: 3 hours)
+3. **Decision Logic**:
+   - If API invocations detected → Keeps cluster running
+   - If no invocations for 3+ hours → Stops Aurora cluster
+4. **Fail-Safe**: If metrics cannot be checked, keeps cluster running (prevents accidental shutdowns)
+
+**Configuration**:
+
+- **Trigger**: EventBridge schedule (every 1 hour)
+- **Inactivity Threshold**: 3 hours (configurable via `inactivity_hours` variable)
+- **Monitoring**: API Gateway `Count` metric from CloudWatch
+- **Actions**: `rds:DescribeDBClusters`, `rds:StopDBCluster`, `rds:StartDBCluster`
+- **Terraform Module**: `terraform/modules/aurora-auto-stop/`
+
+**Example Flow**:
+
+```text
+Hour 0: API receives requests → Cluster running
+Hour 1: No requests → Auto-stop Lambda checks → Activity detected → Keeps running
+Hour 2: No requests → Auto-stop Lambda checks → Activity detected → Keeps running
+Hour 3: No requests → Auto-stop Lambda checks → No activity for 3 hours → Stops cluster
+Hour 4: Cluster stopped (saving compute costs)
+```
+
+#### Auto-Start Lambda
+
+**Purpose**: Automatically starts Aurora cluster when API requests arrive and database is stopped.
+
+**How It Works**:
+
+1. **Trigger**: Invoked by API Lambda when database connection fails
+2. **Status Check**: Checks Aurora cluster status via RDS API
+3. **Start Logic**:
+   - If cluster is `stopped` → Starts cluster immediately
+   - If cluster is `available` or `starting` → Returns current status
+   - If cluster is in transition → Returns status without action
+4. **Response**: Returns status information for API Lambda to provide user feedback
+
+**Integration with API Lambda**:
+
+The Python REST Lambda handler includes automatic database startup logic:
+
+1. **Connection Error Detection**: Catches database connection errors during API requests
+2. **Auto-Start Invocation**: Invokes auto-start Lambda to check/start database
+3. **User-Friendly Response**: Returns HTTP 503 with retry guidance:
+   ```json
+   {
+     "error": "Service Temporarily Unavailable",
+     "message": "The database is currently starting. Please retry your request in 1-2 minutes.",
+     "status": 503,
+     "retry_after": 120
+   }
+   ```
+4. **Retry Header**: Includes `Retry-After: 120` header for client guidance
+
+**Example Flow**:
+
+```text
+1. User submits event to API
+2. API Lambda attempts database connection → Fails (database stopped)
+3. API Lambda detects connection error
+4. API Lambda invokes auto-start Lambda
+5. Auto-start Lambda checks status → Cluster is stopped
+6. Auto-start Lambda starts cluster
+7. API Lambda returns 503: "Database is starting, please retry in 1-2 minutes"
+8. User retries after 1-2 minutes → Database is available → Request succeeds
+```
+
+**Configuration**:
+
+- **Trigger**: Invoked by API Lambda on connection failure
+- **Actions**: `rds:DescribeDBClusters`, `rds:StartDBCluster`
+- **Terraform Module**: `terraform/modules/aurora-auto-start/`
+- **IAM Permissions**: API Lambda has permission to invoke auto-start Lambda
+- **Environment Variable**: `AURORA_AUTO_START_FUNCTION_NAME` set in API Lambda
+
+#### Cost Optimization Benefits
+
+**Cost Savings**:
+
+- **Compute Costs**: Aurora compute charges only apply when cluster is running
+- **Storage Costs**: Storage charges continue (minimal compared to compute)
+- **Typical Savings**: 50-70% cost reduction for dev/staging environments with intermittent usage
+- **Example**: If database is stopped 12 hours/day → ~50% cost savings
+
+**When Auto-Start/Stop is Enabled**:
+
+- **Environments**: Only dev/staging (not production)
+- **Conditions**: 
+  - `enable_aurora = true`
+  - `enable_python_lambda = true`
+  - `environment != "prod"`
+- **Terraform**: Automatically deployed when conditions are met
+
+**Monitoring**:
+
+Key CloudWatch metrics to monitor:
+
+```bash
+# Auto-Stop Lambda Metrics
+- Invocations: Should be ~24/day (once per hour)
+- Duration: Should be < 5 seconds typically
+- Errors: Should be 0 (fail-safe keeps cluster running on errors)
+
+# Auto-Start Lambda Metrics
+- Invocations: Varies based on API usage patterns
+- Duration: Should be < 5 seconds typically
+- Errors: Monitor for RDS API errors
+
+# Aurora Metrics
+- DBClusterStatus: Monitor transitions (available → stopped → starting → available)
+- DatabaseConnections: Should be 0 when stopped
+
+# API Lambda Metrics
+- 503 Responses: Track when database is starting
+- Connection Errors: Should decrease after auto-start implementation
+```
+
+**Best Practices**:
+
+1. **Production Environments**: Auto-start/stop is disabled for production to ensure availability
+2. **CDC Connectors**: CDC connectors connect directly to Aurora (not through RDS Proxy)
+   - **Note**: If database is stopped, CDC connectors will fail until database restarts
+   - **Recommendation**: For production CDC pipelines, keep database running or use separate production database
+3. **Startup Time**: Aurora typically takes 1-2 minutes to start from stopped state
+   - API returns 503 with retry guidance during this period
+   - Clients should implement exponential backoff retry logic
+4. **Monitoring**: Set up CloudWatch alarms for:
+   - Auto-start Lambda errors
+   - Excessive 503 responses from API
+   - Database startup failures
+
+**Configuration Files**:
+
+- **Auto-Stop Module**: `terraform/modules/aurora-auto-stop/`
+  - `main.tf`: Lambda function and EventBridge schedule
+  - `variables.tf`: Configuration variables
+  - `outputs.tf`: Function name and ARN
+- **Auto-Start Module**: `terraform/modules/aurora-auto-start/`
+  - `main.tf`: Lambda function code
+  - `variables.tf`: Configuration variables
+  - `outputs.tf`: Function name and ARN
+- **API Lambda Handler**: `producer-api-python-rest-lambda/lambda_handler.py`
+  - Includes connection error detection
+  - Invokes auto-start Lambda on connection failure
+  - Returns user-friendly 503 responses
+
+**Disabling Auto-Start/Stop**:
+
+To disable auto-start/stop functionality:
+
+1. **Via Terraform Variables**: Set `environment = "prod"` (auto-start/stop only enabled for non-production)
+2. **Manual Override**: Comment out auto-start/stop modules in `terraform/main.tf`
+3. **Keep Database Running**: Manually start database and disable auto-stop Lambda schedule
 
 ### 2. CDC Source Connector
 

@@ -138,7 +138,7 @@ variable "confluent_cloud_cidrs" {
   EOT
   type        = list(string)
   default     = []
-  
+
   validation {
     condition = alltrue([
       for cidr in var.confluent_cloud_cidrs : can(regex("^([0-9]{1,3}\\.){3}[0-9]{1,3}/[0-9]{1,2}$", cidr))
@@ -163,6 +163,12 @@ variable "enable_python_lambda" {
   description = "Enable Python Lambda function"
   type        = bool
   default     = false
+}
+
+variable "enable_rds_proxy" {
+  description = "Enable RDS Proxy for connection pooling (recommended for high Lambda parallelism)"
+  type        = bool
+  default     = true
 }
 
 variable "s3_bucket_name" {

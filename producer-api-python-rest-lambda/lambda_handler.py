@@ -3,10 +3,11 @@
 import asyncio
 import json
 import logging
-from typing import Any, Dict
+from typing import Any, Dict, Optional
 
 import sys
 import os
+import boto3
 
 # Add the package directory to the path for Lambda
 sys.path.insert(0, os.path.dirname(__file__))
@@ -27,11 +28,12 @@ logger = logging.getLogger(__name__)
 # Global service instance (reused across invocations)
 _service: EventProcessingService | None = None
 _config = None
+_lambda_client = None
 
 
 async def _initialize_service():
     """Initialize service with connection pool (singleton pattern)."""
-    global _service, _config
+    global _service, _config, _lambda_client
     
     if _service is None:
         _config = load_lambda_config()
@@ -43,6 +45,9 @@ async def _initialize_service():
             logging.getLogger().setLevel(logging.WARNING)
         elif _config.log_level == "error":
             logging.getLogger().setLevel(logging.ERROR)
+        
+        # Initialize Lambda client for auto-start functionality
+        _lambda_client = boto3.client('lambda', region_name=os.getenv('AWS_REGION', 'us-east-1'))
         
         # Get connection pool
         pool = await get_connection_pool(_config.database_url)
@@ -86,6 +91,70 @@ async def _handle_health_check() -> Dict[str, Any]:
             "message": "Producer API is healthy",
         },
     )
+
+
+async def _try_start_database() -> Optional[Dict[str, Any]]:
+    """Attempt to start the database if it's stopped. Returns error response if DB is starting, None otherwise."""
+    global _lambda_client
+    
+    auto_start_function = os.getenv('AURORA_AUTO_START_FUNCTION_NAME')
+    if not auto_start_function:
+        # Auto-start not configured, skip
+        return None
+    
+    try:
+        # Invoke the auto-start Lambda
+        response = _lambda_client.invoke(
+            FunctionName=auto_start_function,
+            InvocationType='RequestResponse'
+        )
+        
+        response_payload = json.loads(response['Payload'].read().decode('utf-8'))
+        
+        if response_payload.get('statusCode') == 200:
+            body = json.loads(response_payload.get('body', '{}'))
+            status = body.get('status', '')
+            
+            if status == 'starting':
+                # Database is starting, return user-friendly message
+                return _create_response(
+                    503,
+                    {
+                        "error": "Service Temporarily Unavailable",
+                        "message": "The database is currently starting. Please retry your request in 1-2 minutes.",
+                        "status": 503,
+                        "retry_after": 120,  # seconds
+                    },
+                    headers={"Retry-After": "120"}
+                )
+            elif status in ['available', 'transitioning']:
+                # Database is available or transitioning, allow request to proceed
+                return None
+    except Exception as e:
+        logger.warning(f"{API_NAME} Failed to check/start database: {e}")
+        # Don't block the request if we can't check database status
+        return None
+    
+    return None
+
+
+def _is_database_connection_error(error: Exception) -> bool:
+    """Check if error is a database connection error."""
+    error_str = str(error).lower()
+    connection_errors = [
+        'connection refused',
+        'connection reset',
+        'connection timed out',
+        'could not connect',
+        'unable to connect',
+        'network is unreachable',
+        'no route to host',
+        'connection closed',
+        'server closed the connection',
+        'timeout expired',
+        'could not translate host name',
+    ]
+    return any(err in error_str for err in connection_errors)
 
 
 async def _handle_process_event(event_body: str) -> Dict[str, Any]:
@@ -166,6 +235,25 @@ async def _handle_process_event(event_body: str) -> Dict[str, Any]:
             },
         )
     except Exception as e:
+        # Check if it's a database connection error
+        if _is_database_connection_error(e):
+            logger.warning(f"{API_NAME} Database connection error detected: {e}")
+            # Try to start the database
+            start_response = await _try_start_database()
+            if start_response:
+                return start_response
+            # If we couldn't start it or it's already starting, return user-friendly error
+            return _create_response(
+                503,
+                {
+                    "error": "Service Temporarily Unavailable",
+                    "message": "Unable to connect to the database. The database may be starting. Please retry your request in a few moments.",
+                    "status": 503,
+                    "retry_after": 60,
+                },
+                headers={"Retry-After": "60"}
+            )
+        
         logger.error(f"{API_NAME} Error processing event: {e}", exc_info=True)
         return _create_response(
             500,
@@ -213,8 +301,28 @@ async def _handle_bulk_events(event_body: str) -> Dict[str, Any]:
     
     processed_count = 0
     failed_count = 0
+    db_connection_error = False
+    db_start_attempted = False
     
-    service = await _initialize_service()
+    try:
+        service = await _initialize_service()
+    except Exception as e:
+        if _is_database_connection_error(e):
+            logger.warning(f"{API_NAME} Database connection error during initialization: {e}")
+            start_response = await _try_start_database()
+            if start_response:
+                return start_response
+            return _create_response(
+                503,
+                {
+                    "error": "Service Temporarily Unavailable",
+                    "message": "Unable to connect to the database. The database may be starting. Please retry your request in a few moments.",
+                    "status": 503,
+                    "retry_after": 60,
+                },
+                headers={"Retry-After": "60"}
+            )
+        raise
     
     for event in events:
         try:
@@ -241,8 +349,28 @@ async def _handle_bulk_events(event_body: str) -> Dict[str, Any]:
             await service.process_event(event)
             processed_count += 1
         except Exception as e:
+            if _is_database_connection_error(e):
+                logger.warning(f"{API_NAME} Database connection error processing event: {e}")
+                db_connection_error = True
+                # Try to start database on first connection error only
+                if not db_start_attempted:
+                    db_start_attempted = True
+                    await _try_start_database()
             logger.error(f"{API_NAME} Error processing event in bulk: {e}", exc_info=True)
             failed_count += 1
+    
+    # If we had database connection errors, return appropriate message
+    if db_connection_error and processed_count == 0:
+        return _create_response(
+            503,
+            {
+                "error": "Service Temporarily Unavailable",
+                "message": "Unable to connect to the database. The database may be starting. Please retry your request in a few moments.",
+                "status": 503,
+                "retry_after": 60,
+            },
+            headers={"Retry-After": "60"}
+        )
     
     success = failed_count == 0
     message = (

@@ -22,7 +22,7 @@
 
 import http from 'k6/http';
 import { check, sleep } from 'k6';
-import { Rate } from 'k6/metrics';
+import { Rate, Trend, Counter } from 'k6/metrics';
 import { randomString, randomIntBetween } from 'https://jslib.k6.io/k6-utils/1.2.0/index.js';
 
 // Custom metrics
@@ -32,6 +32,22 @@ const carEventsSent = new Rate('car_events_sent');
 const loanEventsSent = new Rate('loan_events_sent');
 const paymentEventsSent = new Rate('payment_events_sent');
 const serviceEventsSent = new Rate('service_events_sent');
+
+// Timing metrics
+const requestDuration = new Trend('request_duration', true);
+const timeToFirstByte = new Trend('ttfb', true);
+const connectionTime = new Trend('connection_time', true);
+const dnsTime = new Trend('dns_time', true);
+const totalTestDuration = new Trend('total_test_duration', true);
+
+// Per-event-type timing metrics
+const carEventDuration = new Trend('car_event_duration', true);
+const loanEventDuration = new Trend('loan_event_duration', true);
+const paymentEventDuration = new Trend('payment_event_duration', true);
+const serviceEventDuration = new Trend('service_event_duration', true);
+
+// Test start time (set in setup)
+let testStartTime = null;
 
 // Test configuration - configurable number of events per type via environment variable
 // Default: 5 events per type (for quick testing)
@@ -248,6 +264,102 @@ function generateCarServiceEvent(carId, serviceId = null) {
 
 // Use setup function to generate linked IDs for each batch
 export function setup() {
+    // Record test start time
+    testStartTime = Date.now();
+    
+    // ============================================================================
+    // Database Schema Check
+    // ============================================================================
+    // Verify that the business_events table exists before running the test
+    // This prevents wasting time on a test that will fail due to missing schema
+    console.log('Checking database schema...');
+    
+    // Create a minimal test event to check if the schema exists
+    const testEvent = JSON.stringify({
+        eventHeader: {
+            uuid: generateUUID(),
+            eventName: "Car Created",
+            eventType: "CarCreated",
+            createdDate: generateTimestamp(),
+            savedDate: generateTimestamp()
+        },
+        eventBody: {
+            entities: [{
+                entityType: "Car",
+                entityId: "TEST-SCHEMA-CHECK",
+                updatedAttributes: {
+                    id: "TEST-SCHEMA-CHECK",
+                    vin: "TEST1234567890123",
+                    make: "Test",
+                    model: "Test Model",
+                    year: 2024
+                }
+            }]
+        }
+    });
+    
+    // Prepare headers
+    const headers = {
+        'Content-Type': 'application/json'
+    };
+    if (AUTH_ENABLED && JWT_TOKEN) {
+        headers['Authorization'] = `Bearer ${JWT_TOKEN}`;
+    }
+    
+    // Make a test request to check if schema exists
+    const testResponse = http.post(apiUrl, testEvent, { headers: headers, timeout: '30s' });
+    
+    // Check response
+    if (testResponse.status === 0) {
+        // Network/connection error
+        console.error(`[SCHEMA CHECK FAILED] Cannot connect to API: ${apiUrl}`);
+        console.error(`Error: ${testResponse.error || 'Connection failed'}`);
+        throw new Error(`Cannot connect to API: ${apiUrl}. Please check the API URL and network connectivity.`);
+    }
+    
+    const responseBody = testResponse.body || '';
+    const responseText = responseBody.toString().toLowerCase();
+    
+    // Check for database schema errors
+    if (testResponse.status >= 500 || 
+        responseText.includes('relation') && responseText.includes('does not exist') ||
+        responseText.includes('business_events') && responseText.includes('not exist') ||
+        responseText.includes('table') && responseText.includes('not exist') ||
+        responseText.includes('relation "business_events" does not exist')) {
+        
+        console.error('='.repeat(70));
+        console.error('[SCHEMA CHECK FAILED] Database schema is missing!');
+        console.error('='.repeat(70));
+        console.error(`API URL: ${apiUrl}`);
+        console.error(`Response Status: ${testResponse.status}`);
+        console.error(`Response Body: ${responseBody}`);
+        console.error('');
+        console.error('ERROR: The business_events table does not exist in the database.');
+        console.error('');
+        console.error('SOLUTION: Initialize the database schema before running tests:');
+        console.error('  cd /Users/rickzakharov/dev/github/api-performance-multi-lang');
+        console.error('  python3 scripts/init-aurora-schema.py');
+        console.error('');
+        console.error('Or run: terraform apply (if using Terraform-managed infrastructure)');
+        console.error('='.repeat(70));
+        
+        throw new Error('Database schema check failed: business_events table does not exist. Please initialize the schema before running tests.');
+    }
+    
+    // If we get a 200/201/400 (validation error), schema exists
+    if (testResponse.status === 200 || testResponse.status === 201) {
+        console.log('✓ Database schema check passed (test event created successfully)');
+    } else if (testResponse.status === 400) {
+        // 400 might be validation error, but schema exists
+        console.log('✓ Database schema check passed (API responded, schema exists)');
+    } else {
+        console.log(`✓ Database schema check passed (API responded with status ${testResponse.status})`);
+    }
+    console.log('');
+    
+    // ============================================================================
+    // Generate Test Data
+    // ============================================================================
     const timestamp = new Date().toISOString().split('T')[0].replace(/-/g, '');
     const carIds = [];
     const loanIds = [];
@@ -332,8 +444,39 @@ export default function (data) {
         headers: headers,
     };
     
+    // Record request start time for timing metrics
+    const requestStartTime = Date.now();
+    
     // Send POST request
     const res = http.post(apiUrl, payload, params);
+    
+    // Record request end time and calculate durations
+    const requestEndTime = Date.now();
+    const requestDurationMs = requestEndTime - requestStartTime;
+    
+    // Extract timing metrics from response
+    const timings = res.timings || {};
+    const duration = timings.duration || requestDurationMs;
+    const ttfb = timings.time_to_first_byte || (timings.waiting || 0);
+    const connection = timings.connecting || 0;
+    const dns = timings.dns_lookup || 0;
+    
+    // Record timing metrics
+    requestDuration.add(duration);
+    timeToFirstByte.add(ttfb);
+    connectionTime.add(connection);
+    dnsTime.add(dns);
+    
+    // Record per-event-type timing
+    if (eventType === "CarCreated") {
+        carEventDuration.add(duration);
+    } else if (eventType === "LoanCreated") {
+        loanEventDuration.add(duration);
+    } else if (eventType === "LoanPaymentSubmitted") {
+        paymentEventDuration.add(duration);
+    } else if (eventType === "CarServiceDone") {
+        serviceEventDuration.add(duration);
+    }
     
     // Check response (use longer timeout for Lambda APIs)
     const isLambda = apiUrl.includes('execute-api') || apiUrl.includes('amazonaws.com');
@@ -383,6 +526,14 @@ export default function (data) {
     sleep(0.1);
 }
 
+export function teardown(data) {
+    // Record total test duration
+    if (testStartTime) {
+        const totalDuration = Date.now() - testStartTime;
+        totalTestDuration.add(totalDuration);
+    }
+}
+
 export function handleSummary(data) {
     const totalRequests = data.metrics.http_reqs.values.count;
     const totalErrors = data.metrics.errors.values.count;
@@ -393,11 +544,41 @@ export function handleSummary(data) {
     const paymentSent = data.metrics.payment_events_sent ? data.metrics.payment_events_sent.values.count : 0;
     const serviceSent = data.metrics.service_events_sent ? data.metrics.service_events_sent.values.count : 0;
     
+    // Overall HTTP metrics
     const rate = data.metrics.http_req_duration?.values?.rate || 0;
     const avg = data.metrics.http_req_duration?.values?.avg || 0;
     const min = data.metrics.http_req_duration?.values?.min || 0;
     const max = data.metrics.http_req_duration?.values?.max || 0;
     const p95 = data.metrics.http_req_duration?.values?.['p(95)'] || 0;
+    const p99 = data.metrics.http_req_duration?.values?.['p(99)'] || 0;
+    
+    // Custom timing metrics
+    const reqDurationAvg = data.metrics.request_duration?.values?.avg || avg;
+    const reqDurationMin = data.metrics.request_duration?.values?.min || min;
+    const reqDurationMax = data.metrics.request_duration?.values?.max || max;
+    const reqDurationP95 = data.metrics.request_duration?.values?.['p(95)'] || p95;
+    const reqDurationP99 = data.metrics.request_duration?.values?.['p(99)'] || p99;
+    
+    const ttfbAvg = data.metrics.ttfb?.values?.avg || 0;
+    const ttfbP95 = data.metrics.ttfb?.values?.['p(95)'] || 0;
+    const ttfbP99 = data.metrics.ttfb?.values?.['p(99)'] || 0;
+    
+    const connAvg = data.metrics.connection_time?.values?.avg || 0;
+    const dnsAvg = data.metrics.dns_time?.values?.avg || 0;
+    
+    // Per-event-type timing
+    const carAvg = data.metrics.car_event_duration?.values?.avg || 0;
+    const carP95 = data.metrics.car_event_duration?.values?.['p(95)'] || 0;
+    const loanAvg = data.metrics.loan_event_duration?.values?.avg || 0;
+    const loanP95 = data.metrics.loan_event_duration?.values?.['p(95)'] || 0;
+    const paymentAvg = data.metrics.payment_event_duration?.values?.avg || 0;
+    const paymentP95 = data.metrics.payment_event_duration?.values?.['p(95)'] || 0;
+    const serviceAvg = data.metrics.service_event_duration?.values?.avg || 0;
+    const serviceP95 = data.metrics.service_event_duration?.values?.['p(95)'] || 0;
+    
+    // Test duration
+    const testDuration = data.state.testRunDurationMs || 0;
+    const testDurationSec = (testDuration / 1000).toFixed(2);
     
     // Build event summary string
     const eventsSummary = `${EVENTS_PER_TYPE} Car Created + ${EVENTS_PER_TYPE} Loan Created + ${EVENTS_PER_TYPE} Loan Payment Submitted + ${EVENTS_PER_TYPE} Car Service Done`;
@@ -419,18 +600,43 @@ export function handleSummary(data) {
     Event Types: ${NUM_EVENT_TYPES}
     Parallelism: ${VUS_PER_EVENT_TYPE} VUs per event type (${TOTAL_VUS} total VUs)
     Events per VU: ${EVENTS_PER_VU} per event type
+    Test Duration: ${testDurationSec}s
     ========================================
 
 HTTP Requests:
   Total: ${totalRequests}
   Rate: ${rate.toFixed(2)} req/s
-Response Time:
+  Error Rate: ${errorRate}%
+  Errors: ${totalErrors}
+
+Overall Response Time:
   Avg: ${avg.toFixed(2)}ms
   Min: ${min.toFixed(2)}ms
   Max: ${max.toFixed(2)}ms
   P95: ${p95.toFixed(2)}ms
-Error Rate: ${errorRate}%
-Errors: ${totalErrors}
+  P99: ${p99.toFixed(2)}ms
+
+Detailed Timing Metrics:
+  Request Duration:
+    Avg: ${reqDurationAvg.toFixed(2)}ms
+    Min: ${reqDurationMin.toFixed(2)}ms
+    Max: ${reqDurationMax.toFixed(2)}ms
+    P95: ${reqDurationP95.toFixed(2)}ms
+    P99: ${reqDurationP99.toFixed(2)}ms
+  Time to First Byte (TTFB):
+    Avg: ${ttfbAvg.toFixed(2)}ms
+    P95: ${ttfbP95.toFixed(2)}ms
+    P99: ${ttfbP99.toFixed(2)}ms
+  Connection Time:
+    Avg: ${connAvg.toFixed(2)}ms
+  DNS Lookup Time:
+    Avg: ${dnsAvg.toFixed(2)}ms
+
+Per-Event-Type Timing (Avg / P95):
+  Car Created: ${carAvg.toFixed(2)}ms / ${carP95.toFixed(2)}ms
+  Loan Created: ${loanAvg.toFixed(2)}ms / ${loanP95.toFixed(2)}ms
+  Loan Payment: ${paymentAvg.toFixed(2)}ms / ${paymentP95.toFixed(2)}ms
+  Car Service: ${serviceAvg.toFixed(2)}ms / ${serviceP95.toFixed(2)}ms
 
 Events by Type:
 ${eventsByType}

@@ -85,14 +85,17 @@ resource "aws_lambda_function" "this" {
   s3_key    = var.s3_key
 
   environment {
-    variables = {
-      LOG_LEVEL         = var.log_level
-      DATABASE_URL      = var.database_url
-      AURORA_ENDPOINT   = var.aurora_endpoint
-      DATABASE_NAME     = var.database_name
-      DATABASE_USER     = var.database_user
-      DATABASE_PASSWORD = var.database_password
-    }
+    variables = merge(
+      {
+        LOG_LEVEL         = var.log_level
+        DATABASE_URL      = var.database_url
+        AURORA_ENDPOINT   = var.aurora_endpoint
+        DATABASE_NAME     = var.database_name
+        DATABASE_USER     = var.database_user
+        DATABASE_PASSWORD = var.database_password
+      },
+      var.additional_environment_variables
+    )
   }
 
   vpc_config {

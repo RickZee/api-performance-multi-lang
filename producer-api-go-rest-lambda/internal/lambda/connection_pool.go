@@ -27,8 +27,8 @@ func GetConnectionPool(databaseURL string, logger *zap.Logger) (*pgxpool.Pool, e
 		}
 
 		// Lambda-optimized pool settings
-		// Smaller max connections for serverless (Aurora Serverless can handle bursts)
-		config.MaxConns = 5
+		// Reduced pool size - RDS Proxy handles connection pooling
+		config.MaxConns = 2
 		config.MinConns = 1
 		// Longer idle timeout since Lambda containers are reused
 		config.MaxConnIdleTime = 0 // Keep connections alive as long as possible

@@ -10,7 +10,9 @@ resource "null_resource" "schema_init" {
 
   triggers = {
     cluster_endpoint = aws_rds_cluster.this.endpoint
-    schema_hash      = filemd5("${path.module}/../../../data/schema.sql")
+    # Note: schema_hash trigger removed to prevent unnecessary re-initialization
+    # The schema is idempotent (uses IF NOT EXISTS), so re-running is safe but unnecessary
+    # Manual schema updates can be done via: python3 scripts/init-aurora-schema.py
     database_name    = var.database_name
   }
 
