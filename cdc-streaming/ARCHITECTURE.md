@@ -37,9 +37,9 @@ These examples are used throughout the system for:
 ┌─────────────────────────────────────────────────────────────────────────┐
 │                         PostgreSQL Database                             │
 │  ┌──────────────────────────────────────────────────────────────────┐   │
-│  │ business_events table                                           │   │
-│  │ - id, event_name, event_type, created_date, saved_date         │   │
-│  │ - event_data (JSONB) - full event structure                    │   │
+│  │ business_events table                                            │   │
+│  │ - id, event_name, event_type, created_date, saved_date           │   │
+│  │ - event_data (JSONB) - full event structure                      │   │
 │  └──────────────────────────────────────────────────────────────────┘   │
 └──────────────────────────────┬──────────────────────────────────────────┘
                                │
@@ -48,13 +48,13 @@ These examples are used throughout the system for:
                                ▼
 ┌─────────────────────────────────────────────────────────────────────────┐
 │                 Kafka Connect (Source Connector)                        │
-│  ┌──────────────────────────────────────────────────────────────────┐  │
-│  │ Confluent Managed PostgresCdcSource OR Debezium Connector        │  │
-│  │ - Extracts flat columns (id, event_name, event_type, etc.)      │  │
-│  │ - Includes event_data as JSON string                             │  │
-│  │ - Adds CDC metadata (__op, __table, __ts_ms)                    │  │
-│  │ - Uses ExtractNewRecordState transform                           │  │
-│  └──────────────────────────────────────────────────────────────────┘  │
+│  ┌──────────────────────────────────────────────────────────────────┐   │
+│  │ Confluent Managed PostgresCdcSource OR Debezium Connector        │   │
+│  │ - Extracts flat columns (id, event_name, event_type, etc.)       │   │
+│  │ - Includes event_data as JSON string                             │   │
+│  │ - Adds CDC metadata (__op, __table, __ts_ms)                     │   │
+│  │ - Uses ExtractNewRecordState transform                           │   │
+│  └──────────────────────────────────────────────────────────────────┘   │
 └──────────────────────────────┬──────────────────────────────────────────┘
                                │
                                │ JSON Serialized Events
@@ -70,9 +70,9 @@ These examples are used throughout the system for:
                                ▼
 ┌─────────────────────────────────────────────────────────────────────────┐
 │                    Kafka: raw-business-events                           │
-│  Format: JSON                                                          │
-│  Structure: id, event_name, event_type, created_date, saved_date,    │
-│            event_data (JSON string), __op, __table, __ts_ms           │
+│  Format: JSON                                                           │
+│  Structure: id, event_name, event_type, created_date, saved_date,       │
+│            event_data (JSON string), __op, __table, __ts_ms             │
 └──────────────────────────────┬──────────────────────────────────────────┘
                                │
                                │ Stream Processing
@@ -81,7 +81,7 @@ These examples are used throughout the system for:
 │                    Confluent Flink                                     │
 │                                                                        │
 │  Flink SQL Jobs:                                                       │
-│  - Filter by event_type, __op (operation type)                        │
+│  - Filter by event_type, __op (operation type)                         │
 │  - Route to consumer-specific topics                                   │
 │  - Preserves flat structure + event_data                               │
 └──────────────────────────────┬─────────────────────────────────────────┘
@@ -90,14 +90,14 @@ These examples are used throughout the system for:
                                ▼
 ┌─────────────────────────────────────────────────────────────────────────┐
 │                    Consumer-Specific Kafka Topics                       │
-│  ┌──────────────────────────┐  ┌──────────────────────────┐         │
-│  │filtered-loan-created-     │  │filtered-service-events    │         │
-│  │events                      │  └──────────────────────────┘         │
-│  └──────────────────────────┘  ┌──────────────────────────┐            │
-│  ┌──────────────────────────┐  │filtered-car-created-  │            │
-│  │filtered-loan-payment-     │  │events                   │            │
-│  │submitted-events           │  └──────────────────────────┘            │
-│  └──────────────────────────┘                                          │
+│  ┌──────────────────────────┐    ┌──────────────────────────┐           │
+│  │filtered-loan-created-    │    │filtered-service-events   │           │
+│  │events                    │    └──────────────────────────┘           │
+│  └──────────────────────────┘    ┌──────────────────────────┐           │
+│  ┌──────────────────────────┐    │filtered-car-created-     │           │
+│  │filtered-loan-payment-    │    │events                    │           │
+│  │submitted-events          │    └──────────────────────────┘           │
+│  └──────────────────────────┘                                           │
 └──────────────────────────────┬──────────────────────────────────────────┘
                                │
                                │ Consume Events
@@ -108,22 +108,22 @@ These examples are used throughout the system for:
 │  │ Loan Consumer    │  │Loan Payment      │  │Service Consumer  │       │
 │  │ - Topic:         │  │Consumer          │  │ - Topic:         │       │
 │  │   filtered-loan- │  │ - Topic:         │  │   filtered-      │       │
-│  │   created-events  │  │   filtered-loan-  │  │   service-events │       │
-│  │ - Parses flat    │  │   payment-        │  │ - Parses flat    │       │
+│  │   created-events │  │   filtered-loan- │  │   service-events │       │
+│  │ - Parses flat    │  │   payment-       │  │ - Parses flat    │       │
 │  │   structure +    │  │   submitted-     │  │   structure +    │       │
-│  │   event_data     │  │   events          │  │   event_data     │       │
+│  │   event_data     │  │   events         │  │   event_data     │       │
 │  │   JSON string    │  │ - Parses flat    │  │   JSON string    │       │
 │  └──────────────────┘  │   structure +    │  └──────────────────┘       │
 │  ┌──────────────────┐  │   event_data     │  ┌──────────────────┐       │
-│  │ Car Consumer     │  │   JSON string    │  │ All consumers   │       │
+│  │ Car Consumer     │  │   JSON string    │  │ All consumers    │       │
 │  │ - Topic:         │  └──────────────────┘  │ connect to       │       │
-│  │   filtered-car-  │                       │ Confluent Cloud   │       │
-│  │   created-events  │                       │ with SASL_SSL      │       │
-│  │ - Parses flat    │                       │ authentication    │       │
-│  │   structure +    │                       └──────────────────┘       │
-│  │   event_data     │                                                      │
-│  │   JSON string    │                                                      │
-│  └──────────────────┘                                                      │
+│  │   filtered-car-  │                        │ Confluent Cloud  │       │
+│  │   created-events │                        │  with SASL_SSL   │       │
+│  │ - Parses flat    │                        │ authentication   │       │
+│  │   structure +    │                        └──────────────────┘       │
+│  │   event_data     │                                                   │
+│  │   JSON string    │                                                   │
+│  └──────────────────┘                                                   │
 └─────────────────────────────────────────────────────────────────────────┘
 ```
 
