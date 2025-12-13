@@ -3,9 +3,11 @@ package service
 import (
 	"context"
 	"fmt"
+	"producer-api-go-grpc/internal/models"
 	"producer-api-go-grpc/internal/repository"
 	"producer-api-go-grpc/proto"
 
+	"github.com/jackc/pgx/v5/pgxpool"
 	"go.uber.org/zap"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
@@ -18,9 +20,13 @@ type EventServiceImpl struct {
 	logger                 *zap.Logger
 }
 
-func NewEventServiceImpl(repo *repository.CarEntityRepository, logger *zap.Logger) *EventServiceImpl {
+func NewEventServiceImpl(
+	businessEventRepo *repository.BusinessEventRepository,
+	pool *pgxpool.Pool,
+	logger *zap.Logger,
+) *EventServiceImpl {
 	return &EventServiceImpl{
-		eventProcessingService: NewEventProcessingService(repo, logger),
+		eventProcessingService: NewEventProcessingService(businessEventRepo, pool, logger),
 		logger:                 logger,
 	}
 }
@@ -51,31 +57,32 @@ func (s *EventServiceImpl) ProcessEvent(ctx context.Context, req *proto.EventReq
 		return nil, status.Error(codes.InvalidArgument, "Invalid event: entities list cannot be empty")
 	}
 
-	// Process each entity update
+	// Validate each entity
 	for _, entityUpdate := range req.EventBody.Entities {
-		// Validate entity_type and entity_id are not empty
 		if entityUpdate.EntityType == "" {
 			return nil, status.Error(codes.InvalidArgument, "Invalid entity: entityType cannot be empty")
 		}
 		if entityUpdate.EntityId == "" {
 			return nil, status.Error(codes.InvalidArgument, "Invalid entity: entityId cannot be empty")
 		}
+	}
 
-		// Convert map[string]string to map[string]string (already correct type)
-		updatedAttributes := make(map[string]string)
-		for k, v := range entityUpdate.UpdatedAttributes {
-			updatedAttributes[k] = v
+	// Convert protobuf to internal model
+	event, err := models.ConvertFromProto(req)
+	if err != nil {
+		return nil, status.Error(codes.InvalidArgument, fmt.Sprintf("Failed to convert request: %v", err))
+	}
+
+	// Process event
+	if err := s.eventProcessingService.ProcessEvent(ctx, event); err != nil {
+		// Check if it's a duplicate event error
+		if dupErr, ok := err.(*repository.DuplicateEventError); ok {
+			s.logger.Warn(fmt.Sprintf("%s Duplicate event ID: %s", constants.APIName(), dupErr.EventID))
+			return nil, status.Error(codes.AlreadyExists, fmt.Sprintf("Event with ID '%s' already exists", dupErr.EventID))
 		}
 
-		if err := s.eventProcessingService.ProcessEntityUpdate(
-			ctx,
-			entityUpdate.EntityType,
-			entityUpdate.EntityId,
-			updatedAttributes,
-		); err != nil {
-			s.logger.Error(fmt.Sprintf("%s Error processing entity update", constants.APIName()), zap.Error(err))
-			return nil, status.Error(codes.Internal, fmt.Sprintf("Failed to process entity: %v", err))
-		}
+		s.logger.Error(fmt.Sprintf("%s Error processing event", constants.APIName()), zap.Error(err))
+		return nil, status.Error(codes.Internal, fmt.Sprintf("Failed to process event: %v", err))
 	}
 
 	return &proto.EventResponse{
@@ -92,4 +99,3 @@ func (s *EventServiceImpl) HealthCheck(ctx context.Context, req *proto.HealthReq
 		Message: "Producer gRPC API is healthy",
 	}, nil
 }
-

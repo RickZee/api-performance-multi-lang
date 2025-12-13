@@ -44,8 +44,8 @@ func init() {
 	}
 
 	// Initialize repository and service
-	repo := repository.NewCarEntityRepository(pool)
-	eventService = service.NewEventProcessingService(repo, logger)
+	businessEventRepo := repository.NewBusinessEventRepository(pool)
+	eventService = service.NewEventProcessingService(businessEventRepo, pool, logger)
 
 	logger.Info(fmt.Sprintf("%s Lambda handler initialized", constants.APIName()))
 }
@@ -133,6 +133,17 @@ func handleProcessEvent(ctx context.Context, request events.APIGatewayV2HTTPRequ
 
 	// Process event
 	if err := eventService.ProcessEvent(ctx, &event); err != nil {
+		// Check if it's a duplicate event error
+		if dupErr, ok := err.(*repository.DuplicateEventError); ok {
+			logger.Warn(fmt.Sprintf("%s Duplicate event ID: %s", constants.APIName(), dupErr.EventID))
+			return createResponse(409, map[string]interface{}{
+				"error":   "Conflict",
+				"message": dupErr.Message,
+				"eventId": dupErr.EventID,
+				"status":  409,
+			}), nil
+		}
+
 		logger.Error(fmt.Sprintf("%s Error processing event", constants.APIName()), zap.Error(err))
 		appErr := errors.NewInternalError(err)
 		return createResponse(appErr.StatusCode, map[string]interface{}{
@@ -197,7 +208,12 @@ func handleBulkEvents(ctx context.Context, request events.APIGatewayV2HTTPReques
 		}
 
 		if err := eventService.ProcessEvent(ctx, &event); err != nil {
-			logger.Error(fmt.Sprintf("%s Error processing event in bulk", constants.APIName()), zap.Error(err))
+			// Check if it's a duplicate event error
+			if dupErr, ok := err.(*repository.DuplicateEventError); ok {
+				logger.Warn(fmt.Sprintf("%s Duplicate event ID in bulk: %s", constants.APIName(), dupErr.EventID))
+			} else {
+				logger.Error(fmt.Sprintf("%s Error processing event in bulk", constants.APIName()), zap.Error(err))
+			}
 			failedCount++
 			continue
 		}

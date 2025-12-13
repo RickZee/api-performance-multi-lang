@@ -1,0 +1,26 @@
+{
+  "name": "dsql-cdc-source",
+  "config": {
+    "connector.class": "io.debezium.connector.dsql.DsqlConnector",
+    "tasks.max": "1",
+    "dsql.endpoint.primary": "${DSQL_PRIMARY_ENDPOINT}",
+    "dsql.endpoint.secondary": "${DSQL_SECONDARY_ENDPOINT}",
+    "dsql.port": "5432",
+    "dsql.region": "us-east-1",
+    "dsql.iam.username": "admin",
+    "dsql.database.name": "mortgage_db",
+    "dsql.tables": "event_headers",
+    "dsql.poll.interval.ms": "1000",
+    "dsql.batch.size": "1000",
+    "dsql.pool.max.size": "10",
+    "dsql.pool.min.idle": "1",
+    "dsql.pool.connection.timeout.ms": "30000",
+    "topic.prefix": "dsql-cdc",
+    "output.data.format": "JSON",
+    "transforms": "route",
+    "transforms.route.type": "io.confluent.connect.cloud.transforms.TopicRegexRouter",
+    "transforms.route.regex": "dsql-cdc\\.public\\.event_headers",
+    "transforms.route.replacement": "raw-event-headers"
+  }
+}
+

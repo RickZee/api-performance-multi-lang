@@ -96,7 +96,7 @@ data "archive_file" "aurora_auto_stop_zip" {
   type        = "zip"
   output_path = "${path.module}/aurora_auto_stop.zip"
   source {
-    content = <<-EOF
+    content  = <<-EOF
 import boto3
 import os
 from datetime import datetime, timedelta
@@ -218,8 +218,8 @@ resource "aws_lambda_function" "aurora_auto_stop" {
     variables = {
       AURORA_CLUSTER_ID = var.aurora_cluster_id
       # AWS_REGION is automatically provided by Lambda runtime, no need to set it
-      API_GATEWAY_ID    = var.api_gateway_id
-      INACTIVITY_HOURS  = var.inactivity_hours
+      API_GATEWAY_ID   = var.api_gateway_id
+      INACTIVITY_HOURS = var.inactivity_hours
     }
   }
 

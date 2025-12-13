@@ -36,6 +36,9 @@ public class GrpcServerConfig {
                 
                 // Maximum inbound metadata size (default: 8KB)
                 nettyServerBuilder.maxInboundMetadataSize(8 * 1024);
+                
+                // Note: Deadline enforcement is handled at the service level via reactive timeout
+                // The client sets the deadline, and the server enforces it through the reactive chain timeout
             }
         };
     }

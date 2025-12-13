@@ -3,6 +3,7 @@ package com.example.controller;
 import com.example.constants.ApiConstants;
 import com.example.dto.Event;
 import com.example.dto.SimpleEvent;
+import com.example.repository.DuplicateEventError;
 import com.example.service.EventProcessingService;
 import com.example.service.SimpleEventProcessingService;
 import lombok.RequiredArgsConstructor;
@@ -40,6 +41,11 @@ public class EventController {
         return eventProcessingService.processEvent(event)
                 .then(Mono.just(ResponseEntity.ok("Event processed successfully")))
                 .doOnError(error -> log.warn("{} Error in reactive chain: {} - {}", ApiConstants.API_NAME, error.getClass().getName(), error.getMessage()))
+                .onErrorResume(DuplicateEventError.class, ex -> {
+                    log.warn("{} Duplicate event ID: {}", ApiConstants.API_NAME, ex.getEventId());
+                    return Mono.just(ResponseEntity.status(HttpStatus.CONFLICT)
+                            .body("Conflict: " + ex.getMessage()));
+                })
                 .onErrorResume(IllegalArgumentException.class, ex -> {
                     log.warn("{} Caught IllegalArgumentException: {}", ApiConstants.API_NAME, ex.getMessage());
                     return Mono.just(ResponseEntity.status(HttpStatus.UNPROCESSABLE_ENTITY)

@@ -55,6 +55,27 @@ log_level    = "info"
 # Note: For production, prefer AWS PrivateLink (Option 2) over public access
 # See: terraform/PUBLIC_ACCESS_SETUP.md for complete setup guide
 
+# Aurora DSQL Configuration (Alternative to regular Aurora)
+# ==========================================================
+# Aurora DSQL uses IAM authentication instead of password-based authentication
+# This provides better security with temporary credentials
+#
+# enable_aurora_dsql = true
+# aurora_dsql_endpoint = "your-dsql-cluster.cluster-xxxxx.us-east-1.rds.amazonaws.com"
+# aurora_dsql_port = 5432  # Default PostgreSQL port
+# iam_database_user = "your-iam-db-user"  # IAM database user (not regular DB user)
+# aurora_dsql_cluster_resource_id = "cluster-xxxxx"  # Cluster resource ID for IAM permissions
+#
+# Prerequisites:
+# 1. Create an Aurora DSQL cluster (outside of this Terraform configuration)
+# 2. Create an IAM database user in the DSQL cluster
+# 3. Grant necessary database permissions to the IAM user
+# 4. The Lambda function will automatically get IAM permissions for rds-db:connect
+#
+# Note: When enable_aurora_dsql is true, the Lambda will use IAM authentication
+#       instead of password-based authentication. The DSQL endpoint and IAM user
+#       must be configured for this to work.
+
 # Lambda configuration
 # lambda_memory_size = 512
 # lambda_timeout     = 30

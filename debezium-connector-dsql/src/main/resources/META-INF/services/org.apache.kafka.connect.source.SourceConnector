@@ -1,0 +1,2 @@
+io.debezium.connector.dsql.DsqlConnector
+

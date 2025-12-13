@@ -8,7 +8,7 @@ import reactor.core.publisher.Mono;
 @Repository
 public interface CarEntityRepository extends ReactiveCrudRepository<CarEntity, String> {
     
-    Mono<CarEntity> findByEntityTypeAndId(String entityType, String id);
+    Mono<CarEntity> findByEntityTypeAndEntityId(String entityType, String entityId);
     
-    Mono<Boolean> existsByEntityTypeAndId(String entityType, String id);
+    Mono<Boolean> existsByEntityTypeAndEntityId(String entityType, String entityId);
 }

@@ -693,3 +693,52 @@ Events follow a standardized structure with an event header and an entities arra
 - **Loan**: Financial loan information
 - **LoanPayment**: Payment transaction records
 - **ServiceRecord**: Vehicle service history
+
+## Metadata Service (Schema Validation)
+
+A standalone microservice that provides centralized schema validation for event ingestion APIs. The service pulls JSON schemas from a git repository, validates events against versioned schemas, and implements backward compatibility rules for non-breaking changes.
+
+### Architecture
+
+```mermaid
+flowchart TB
+    subgraph GitRepo["Git Repository"]
+        Schemas["schemas/<br/>v1/<br/>v2/<br/>..."]
+    end
+    
+    subgraph MetadataService["Metadata Service"]
+        GitSync[Git Sync Service<br/>Periodic Pull]
+        SchemaCache[Schema Cache<br/>In-Memory + Disk]
+        Validator[Schema Validator<br/>JSON Schema Draft 2020-12]
+        CompatChecker[Backward Compatibility<br/>Checker]
+        API[HTTP/gRPC API]
+    end
+    
+    subgraph ProducerAPIs["Producer APIs"]
+        GoAPI[Go REST/gRPC]
+        PythonAPI[Python REST]
+        RustAPI[Rust REST/gRPC]
+        JavaAPI[Java REST/gRPC]
+    end
+    
+    GitRepo -->|Pull & Clone| GitSync
+    GitSync -->|Store| SchemaCache
+    SchemaCache -->|Load| Validator
+    Validator -->|Check| CompatChecker
+    API -->|Validate Request| Validator
+    
+    GoAPI -->|HTTP/gRPC Call| API
+    PythonAPI -->|HTTP/gRPC Call| API
+    RustAPI -->|HTTP/gRPC Call| API
+    JavaAPI -->|HTTP/gRPC Call| API
+```
+
+### Features
+
+- **Git-based Schema Management**: Pulls latest schemas from versioned git repository structure (`schemas/v1/`, `schemas/v2/`, etc.)
+- **JSON Schema Validation**: Validates events against JSON Schema Draft 2020-12 with `$ref` resolution
+- **Backward Compatibility**: Supports multiple schema versions simultaneously with automatic compatibility checking
+- **Centralized Validation**: All producer APIs call the metadata service for consistent validation
+- **Non-blocking Updates**: Background git sync with in-memory caching for fast validation
+
+For detailed implementation plan, see the metadata service architecture documentation.

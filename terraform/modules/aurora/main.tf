@@ -58,11 +58,11 @@ resource "aws_security_group" "aurora" {
   tags = merge(
     var.tags,
     {
-      Name                                    = "${var.project_name}-aurora-sg"
-      PubliclyAccessible                      = tostring(var.publicly_accessible)
-      ConfluentCloudRestricted                = tostring(local.use_restricted_access)
-      "ManagedBy"                            = "Terraform"
-      "Purpose"                              = "Aurora PostgreSQL for CDC streaming"
+      Name                     = "${var.project_name}-aurora-sg"
+      PubliclyAccessible       = tostring(var.publicly_accessible)
+      ConfluentCloudRestricted = tostring(local.use_restricted_access)
+      "ManagedBy"              = "Terraform"
+      "Purpose"                = "Aurora PostgreSQL for CDC streaming"
     }
   )
 }
@@ -87,13 +87,15 @@ resource "aws_rds_cluster_parameter_group" "this" {
   description = "Parameter group for Aurora PostgreSQL with logical replication"
 
   parameter {
-    name  = "rds.logical_replication"
-    value = "1"
+    name         = "rds.logical_replication"
+    value        = "1"
+    apply_method = "pending-reboot"
   }
 
   parameter {
-    name  = "shared_preload_libraries"
-    value = "pg_stat_statements"
+    name         = "shared_preload_libraries"
+    value        = "pg_stat_statements"
+    apply_method = "pending-reboot"
   }
 
   parameter {

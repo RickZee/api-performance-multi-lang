@@ -3,17 +3,23 @@ package com.example.service;
 import com.example.constants.ApiConstants;
 import com.example.dto.Event;
 import com.example.dto.EntityUpdate;
-import com.example.entity.CarEntity;
-import com.example.repository.CarEntityRepository;
+import com.example.repository.BusinessEventRepository;
+import com.example.repository.DuplicateEventError;
+import com.example.repository.EntityRepository;
+import com.example.repository.EntityRepositoryFactory;
+import com.example.repository.EventHeaderRepository;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.r2dbc.core.DatabaseClient;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
 
 import java.time.OffsetDateTime;
+import java.util.HashMap;
+import java.util.Map;
 import java.util.concurrent.atomic.AtomicLong;
 
 @Service
@@ -21,11 +27,14 @@ import java.util.concurrent.atomic.AtomicLong;
 @Slf4j
 public class EventProcessingService {
     
-    private final CarEntityRepository carEntityRepository;
-    private final ObjectMapper objectMapper;
+    private final BusinessEventRepository businessEventRepository;
+    private final EventHeaderRepository eventHeaderRepository;
+    private final EntityRepositoryFactory entityRepositoryFactory;
     private final DatabaseClient databaseClient;
+    private final ObjectMapper objectMapper;
     private final AtomicLong persistedEventCount = new AtomicLong(0);
 
+    @Transactional
     public Mono<Void> processEvent(Event event) {
         // Validate event structure
         if (event == null) {
@@ -58,77 +67,226 @@ public class EventProcessingService {
         
         log.info("{} Processing event: {}", ApiConstants.API_NAME, eventName);
         
-        return Flux.fromIterable(entities)
-                .flatMap(this::processEntityCreation)
-                .then();
+        // Generate event ID if not provided
+        final String eventId = event.getEventHeader().getUuid() != null && !event.getEventHeader().getUuid().trim().isEmpty()
+                ? event.getEventHeader().getUuid()
+                : "event-" + OffsetDateTime.now().toString();
+        
+        // Process event - all operations will be in a transaction due to @Transactional
+        return saveBusinessEvent(event, eventId)
+                .then(saveEventHeader(event, eventId))
+                .then(Flux.fromIterable(entities)
+                        .flatMap(entityUpdate -> processEntityUpdate(entityUpdate, eventId))
+                        .then())
+                .doOnSuccess(v -> {
+                    logPersistedEventCount();
+                    log.info("{} Successfully processed event in transaction: {}", ApiConstants.API_NAME, eventId);
+                })
+                .doOnError(error -> {
+                    log.error("{} Error processing event in transaction: {}", ApiConstants.API_NAME, error.getMessage(), error);
+                })
+                .onErrorMap(DuplicateEventError.class, e -> e);
     }
 
-    private Mono<CarEntity> processEntityCreation(EntityUpdate entityUpdate) {
-        log.info("{} Processing entity creation for type: {} and id: {}", ApiConstants.API_NAME, entityUpdate.getEntityType(), entityUpdate.getEntityId());
+    private Mono<Void> saveBusinessEvent(Event event, String eventId) {
+        String eventName = event.getEventHeader().getEventName();
+        String eventType = event.getEventHeader().getEventType();
+        OffsetDateTime createdDate = event.getEventHeader().getCreatedDate();
+        OffsetDateTime savedDate = event.getEventHeader().getSavedDate();
         
-        return carEntityRepository.existsByEntityTypeAndId(entityUpdate.getEntityType(), entityUpdate.getEntityId())
+        // Use current time if dates are not provided
+        OffsetDateTime now = OffsetDateTime.now();
+        if (createdDate == null) {
+            createdDate = now;
+        }
+        if (savedDate == null) {
+            savedDate = now;
+        }
+        
+        // Convert event to map for JSONB storage
+        try {
+            String eventJson = objectMapper.writeValueAsString(event);
+            @SuppressWarnings("unchecked")
+            Map<String, Object> eventData = objectMapper.readValue(eventJson, Map.class);
+            
+            return businessEventRepository.create(
+                    eventId, eventName, eventType, createdDate, savedDate, eventData, null
+            )
+            .doOnSuccess(v -> log.info("{} Successfully saved business event: {}", ApiConstants.API_NAME, eventId))
+            .onErrorMap(DuplicateEventError.class, e -> e);
+        } catch (Exception e) {
+            log.error("{} Error serializing event", ApiConstants.API_NAME, e);
+            return Mono.error(new RuntimeException("Failed to serialize event", e));
+        }
+    }
+
+    private Mono<Void> saveEventHeader(Event event, String eventId) {
+        String eventName = event.getEventHeader().getEventName();
+        String eventType = event.getEventHeader().getEventType();
+        OffsetDateTime createdDate = event.getEventHeader().getCreatedDate();
+        OffsetDateTime savedDate = event.getEventHeader().getSavedDate();
+        
+        // Use current time if dates are not provided
+        OffsetDateTime now = OffsetDateTime.now();
+        if (createdDate == null) {
+            createdDate = now;
+        }
+        if (savedDate == null) {
+            savedDate = now;
+        }
+        
+        // Convert eventHeader to map for JSONB storage
+        try {
+            String headerJson = objectMapper.writeValueAsString(event.getEventHeader());
+            @SuppressWarnings("unchecked")
+            Map<String, Object> headerData = objectMapper.readValue(headerJson, Map.class);
+            
+            return eventHeaderRepository.create(
+                    eventId, eventName, eventType, createdDate, savedDate, headerData, null
+            )
+            .doOnSuccess(v -> log.info("{} Successfully saved event header: {}", ApiConstants.API_NAME, eventId))
+            .onErrorMap(DuplicateEventError.class, e -> e);
+        } catch (Exception e) {
+            log.error("{} Error serializing event header", ApiConstants.API_NAME, e);
+            return Mono.error(new RuntimeException("Failed to serialize event header", e));
+        }
+    }
+
+    private Mono<Void> processEntityUpdate(EntityUpdate entityUpdate, String eventId) {
+        log.info("{} Processing entity for type: {} and id: {}",
+                ApiConstants.API_NAME, entityUpdate.getEntityType(), entityUpdate.getEntityId());
+        
+        EntityRepository entityRepo = entityRepositoryFactory.getRepository(entityUpdate.getEntityType());
+        if (entityRepo == null) {
+            log.warn("{} Skipping entity with unknown type: {}",
+                    ApiConstants.API_NAME, entityUpdate.getEntityType());
+            return Mono.empty();
+        }
+        
+        return entityRepo.existsByEntityId(entityUpdate.getEntityId(), null)
                 .flatMap(exists -> {
                     if (exists) {
-                        log.warn("{} Entity already exists, skipping creation: {}", ApiConstants.API_NAME, entityUpdate.getEntityId());
-                        // Try to read the existing entity, but handle conversion errors gracefully
-                        // (e.g., H2 database compatibility issues with OffsetDateTime)
-                        return carEntityRepository.findByEntityTypeAndId(entityUpdate.getEntityType(), entityUpdate.getEntityId())
-                                .doOnNext(existingEntity -> {
-                                    log.info("{} Returning existing entity: {}", ApiConstants.API_NAME, existingEntity.getId());
-                                    logPersistedEventCount();
-                                })
-                                .onErrorResume(error -> {
-                                    log.warn("{} Could not read existing entity (likely due to database compatibility): {}, continuing anyway", ApiConstants.API_NAME, error.getMessage());
-                                    // Return a placeholder entity to indicate success
-                                    logPersistedEventCount();
-                                    return Mono.just(new CarEntity(
-                                            entityUpdate.getEntityId(),
-                                            entityUpdate.getEntityType(),
-                                            null, null, null));
-                                });
+                        log.warn("{} Entity already exists, updating: {}",
+                                ApiConstants.API_NAME, entityUpdate.getEntityId());
+                        return updateExistingEntity(entityRepo, entityUpdate, eventId);
                     } else {
-                        log.info("{} Entity does not exist, creating new: {}", ApiConstants.API_NAME, entityUpdate.getEntityId());
-                        return createNewEntity(entityUpdate)
-                                .doOnNext(newEntity -> {
-                                    log.info("{} Created new entity: {}", ApiConstants.API_NAME, newEntity.getId());
-                                    logPersistedEventCount();
-                                });
+                        log.info("{} Entity does not exist, creating new: {}",
+                                ApiConstants.API_NAME, entityUpdate.getEntityId());
+                        return createNewEntity(entityRepo, entityUpdate, eventId);
                     }
                 });
     }
-    
+
+    private Mono<Void> createNewEntity(EntityRepository entityRepo, EntityUpdate entityUpdate, String eventId) {
+        String entityId = entityUpdate.getEntityId();
+        String entityType = entityUpdate.getEntityType();
+        OffsetDateTime now = OffsetDateTime.now();
+        
+        // Extract entity data from updatedAttributes
+        Map<String, Object> updatedAttrs = entityUpdate.getUpdatedAttributes();
+        if (updatedAttrs == null) {
+            updatedAttrs = new HashMap<>();
+        }
+        
+        // Make a copy to avoid modifying the original
+        Map<String, Object> entityData = new HashMap<>(updatedAttrs);
+        
+        // Remove entityHeader from entity_data if it exists (nested structure)
+        Object entityHeaderObj = entityData.remove("entityHeader");
+        if (entityHeaderObj == null) {
+            entityHeaderObj = entityData.remove("entity_header");
+        }
+        
+        // Extract createdAt and updatedAt from entityHeader if present, otherwise from entity_data, otherwise use now
+        OffsetDateTime createdAt = now;
+        OffsetDateTime updatedAt = now;
+        
+        if (entityHeaderObj instanceof Map) {
+            @SuppressWarnings("unchecked")
+            Map<String, Object> entityHeader = (Map<String, Object>) entityHeaderObj;
+            createdAt = parseDateTime(entityHeader.get("createdAt"), entityHeader.get("created_at"), now);
+            updatedAt = parseDateTime(entityHeader.get("updatedAt"), entityHeader.get("updated_at"), now);
+        }
+        
+        // Try to get from entity_data if not found in entityHeader
+        if (createdAt.equals(now)) {
+            Object ca = entityData.remove("createdAt");
+            if (ca == null) {
+                ca = entityData.remove("created_at");
+            }
+            createdAt = parseDateTime(ca, null, now);
+        }
+        if (updatedAt.equals(now)) {
+            Object ua = entityData.remove("updatedAt");
+            if (ua == null) {
+                ua = entityData.remove("updated_at");
+            }
+            updatedAt = parseDateTime(ua, null, now);
+        }
+        
+        return entityRepo.create(entityId, entityType, createdAt, updatedAt, entityData, eventId, null)
+                .doOnSuccess(v -> log.info("{} Successfully created entity: {}", ApiConstants.API_NAME, entityId));
+    }
+
+    private Mono<Void> updateExistingEntity(EntityRepository entityRepo, EntityUpdate entityUpdate, String eventId) {
+        String entityId = entityUpdate.getEntityId();
+        OffsetDateTime updatedAt = OffsetDateTime.now();
+        
+        // Extract entity data from updatedAttributes
+        Map<String, Object> updatedAttrs = entityUpdate.getUpdatedAttributes();
+        if (updatedAttrs == null) {
+            updatedAttrs = new HashMap<>();
+        }
+        
+        // Make a copy to avoid modifying the original
+        Map<String, Object> entityData = new HashMap<>(updatedAttrs);
+        
+        // Remove entityHeader from entity_data if it exists
+        entityData.remove("entityHeader");
+        entityData.remove("entity_header");
+        
+        // Remove entityHeader fields that might be at top level
+        entityData.remove("createdAt");
+        entityData.remove("created_at");
+        entityData.remove("updatedAt");
+        entityData.remove("updated_at");
+        
+        return entityRepo.update(entityId, updatedAt, entityData, eventId, null)
+                .doOnSuccess(v -> log.info("{} Successfully updated entity: {}", ApiConstants.API_NAME, entityId));
+    }
+
+    private OffsetDateTime parseDateTime(Object value1, Object value2, OffsetDateTime defaultValue) {
+        if (value1 != null) {
+            try {
+                if (value1 instanceof OffsetDateTime) {
+                    return (OffsetDateTime) value1;
+                }
+                if (value1 instanceof String) {
+                    return OffsetDateTime.parse((String) value1);
+                }
+            } catch (Exception e) {
+                // Ignore parsing errors
+            }
+        }
+        if (value2 != null) {
+            try {
+                if (value2 instanceof OffsetDateTime) {
+                    return (OffsetDateTime) value2;
+                }
+                if (value2 instanceof String) {
+                    return OffsetDateTime.parse((String) value2);
+                }
+            } catch (Exception e) {
+                // Ignore parsing errors
+            }
+        }
+        return defaultValue;
+    }
+
     private void logPersistedEventCount() {
         long count = persistedEventCount.incrementAndGet();
         if (count % 10 == 0) {
             log.info("{} *** Persisted events count: {} ***", ApiConstants.API_NAME, count);
-        }
-    }
-
-
-    private Mono<CarEntity> createNewEntity(EntityUpdate entityUpdate) {
-        try {
-            String entityId = entityUpdate.getEntityId();
-            String entityType = entityUpdate.getEntityType();
-            OffsetDateTime now = OffsetDateTime.now();
-            Object data = entityUpdate.getUpdatedAttributes();
-            String dataJson = objectMapper.writeValueAsString(data);
-            
-            log.info("{} Creating new entity with ID: {}", ApiConstants.API_NAME, entityId);
-            
-            return databaseClient.sql("INSERT INTO car_entities (id, entity_type, created_at, updated_at, data) VALUES (:id, :entityType, :createdAt, :updatedAt, :data)")
-                    .bind("id", entityId)
-                    .bind("entityType", entityType)
-                    .bind("createdAt", now)
-                    .bind("updatedAt", now)
-                    .bind("data", dataJson)
-                    .fetch()
-                    .rowsUpdated()
-                    .then(Mono.just(new CarEntity(entityId, entityType, now, now, dataJson)))
-                    .doOnNext(savedEntity -> log.info("{} Successfully created entity: {}", ApiConstants.API_NAME, savedEntity.getId()))
-                    .doOnError(error -> log.error("{} Failed to create entity: {}", ApiConstants.API_NAME, error.getMessage()));
-        } catch (Exception e) {
-            log.error("{} Error creating new entity", ApiConstants.API_NAME, e);
-            return Mono.error(new RuntimeException("Error creating new entity", e));
         }
     }
 }

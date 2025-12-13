@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"log"
 	"net/http"
-	"os"
 	"producer-api-go/internal/config"
 	"producer-api-go/internal/constants"
 	"producer-api-go/internal/handlers"
@@ -54,16 +53,9 @@ func main() {
 
 	logger.Info(fmt.Sprintf("%s Connected to database", constants.APIName()))
 
-	// Run migrations
-	if err := runMigrations(cfg.DatabaseURL, logger); err != nil {
-		logger.Fatal("Failed to run migrations", zap.Error(err))
-	}
-
-	logger.Info(fmt.Sprintf("%s Database migrations completed", constants.APIName()))
-
 	// Initialize repository and service
-	repo := repository.NewCarEntityRepository(pool)
-	eventService := service.NewEventProcessingService(repo, logger)
+	businessEventRepo := repository.NewBusinessEventRepository(pool)
+	eventService := service.NewEventProcessingService(businessEventRepo, pool, logger)
 
 	// Initialize handlers
 	eventHandler := handlers.NewEventHandler(eventService, logger)
@@ -100,32 +92,6 @@ func main() {
 	if err := http.ListenAndServe(addr, router); err != nil {
 		logger.Fatal("Failed to start server", zap.Error(err))
 	}
-}
-
-func runMigrations(databaseURL string, logger *zap.Logger) error {
-	// Read migration file
-	migrationSQL, err := os.ReadFile("migrations/001_initial_schema.sql")
-	if err != nil {
-		return fmt.Errorf("failed to read migration file: %w", err)
-	}
-
-	// Connect to database
-	pool, err := pgxpool.New(context.Background(), databaseURL)
-	if err != nil {
-		return fmt.Errorf("failed to connect to database: %w", err)
-	}
-	defer pool.Close()
-
-	// Execute migration
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-	defer cancel()
-
-	_, err = pool.Exec(ctx, string(migrationSQL))
-	if err != nil {
-		return fmt.Errorf("failed to execute migration: %w", err)
-	}
-
-	return nil
 }
 
 func ginLogger(logger *zap.Logger) gin.HandlerFunc {

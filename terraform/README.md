@@ -10,6 +10,8 @@ The Terraform setup includes:
 - **S3 Bucket**: Versioned S3 bucket for Lambda deployment packages
 - **VPC Support**: Optional VPC configuration with security groups
 - **Aurora PostgreSQL**: Aurora cluster with logical replication enabled
+- **Aurora DSQL**: Optional Aurora DSQL cluster with IAM authentication (see [DSQL_SETUP.md](DSQL_SETUP.md))
+- **EC2 Test Runner**: Optional EC2 instance for testing DSQL connector from within VPC (see [DSQL_TEST_RUNNER.md](DSQL_TEST_RUNNER.md))
 - **Schema Initialization**: Automatic database schema initialization from `data/schema.sql`
 
 This setup works alongside the existing SAM templates, providing an alternative deployment method.
@@ -157,6 +159,13 @@ terraform output
 ```
 
 The outputs include:
+- **API URLs**: HTTP API Gateway endpoints for Lambda functions
+- **Aurora Endpoints**: Database connection endpoints
+- **Aurora DSQL Endpoints**: DSQL cluster connection information (if enabled)
+  - `aurora_dsql_endpoint`: VPC endpoint DNS (for connections from within VPC)
+  - `aurora_dsql_host`: DSQL host format (alternative hostname)
+  - `aurora_dsql_cluster_resource_id`: Cluster resource ID for IAM permissions
+- **Test Runner**: EC2 instance information for DSQL testing (if enabled)
 - `python_rest_api_url`: API Gateway endpoint for Python REST Lambda
 - `s3_bucket_name`: S3 bucket name for Lambda deployments
 - Other resource identifiers

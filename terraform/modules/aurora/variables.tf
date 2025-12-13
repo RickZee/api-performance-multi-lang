@@ -93,7 +93,7 @@ variable "allowed_cidr_blocks" {
   EOT
   type        = list(string)
   default     = ["0.0.0.0/0"]
-  
+
   validation {
     condition = alltrue([
       for cidr in var.allowed_cidr_blocks : can(regex("^([0-9]{1,3}\\.){3}[0-9]{1,3}/[0-9]{1,2}$", cidr))
@@ -127,7 +127,7 @@ variable "confluent_cloud_cidrs" {
   EOT
   type        = list(string)
   default     = []
-  
+
   validation {
     condition = alltrue([
       for cidr in var.confluent_cloud_cidrs : can(regex("^([0-9]{1,3}\\.){3}[0-9]{1,3}/[0-9]{1,2}$", cidr))

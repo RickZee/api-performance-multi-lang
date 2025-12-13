@@ -63,6 +63,37 @@ resource "aws_iam_role_policy" "lambda_vpc" {
   })
 }
 
+# IAM policy for Aurora DSQL database authentication (if DSQL is enabled)
+# Note: If cluster_resource_id is empty, we'll use a wildcard pattern that will be updated after cluster creation
+resource "aws_iam_role_policy" "lambda_dsql_auth" {
+  count = var.enable_aurora_dsql && var.iam_database_user != "" ? 1 : 0
+  name  = "${var.function_name}-dsql-auth-policy"
+  role  = aws_iam_role.lambda_execution.id
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect = "Allow"
+        Action = [
+          "rds-db:connect"
+        ]
+        # Use specific resource ID if provided, otherwise use wildcard (will be updated after cluster creation)
+        Resource = var.aurora_dsql_cluster_resource_id != "" ? "arn:aws:rds-db:${data.aws_region.current.name}:${data.aws_caller_identity.current.account_id}:dbuser:${var.aurora_dsql_cluster_resource_id}/${var.iam_database_user}" : "arn:aws:rds-db:${data.aws_region.current.name}:${data.aws_caller_identity.current.account_id}:dbuser:*/${var.iam_database_user}"
+      }
+    ]
+  })
+
+  lifecycle {
+    # Allow policy to be updated when cluster_resource_id becomes available
+    create_before_destroy = true
+  }
+}
+
+# Data sources for IAM policy
+data "aws_region" "current" {}
+data "aws_caller_identity" "current" {}
+
 # CloudWatch Log Group
 resource "aws_cloudwatch_log_group" "lambda" {
   name              = "/aws/lambda/${var.function_name}"
@@ -87,12 +118,17 @@ resource "aws_lambda_function" "this" {
   environment {
     variables = merge(
       {
-        LOG_LEVEL         = var.log_level
-        DATABASE_URL      = var.database_url
-        AURORA_ENDPOINT   = var.aurora_endpoint
-        DATABASE_NAME     = var.database_name
-        DATABASE_USER     = var.database_user
-        DATABASE_PASSWORD = var.database_password
+        LOG_LEVEL                       = var.log_level
+        DATABASE_URL                    = var.database_url
+        AURORA_ENDPOINT                 = var.aurora_endpoint
+        DATABASE_NAME                   = var.database_name
+        DATABASE_USER                   = var.database_user
+        DATABASE_PASSWORD               = var.database_password
+        AURORA_DSQL_ENDPOINT            = var.enable_aurora_dsql ? var.aurora_dsql_endpoint : ""
+        AURORA_DSQL_PORT                = var.enable_aurora_dsql ? tostring(var.aurora_dsql_port) : ""
+        IAM_USERNAME                    = var.enable_aurora_dsql ? var.iam_database_user : ""
+        AURORA_DSQL_CLUSTER_RESOURCE_ID = var.enable_aurora_dsql ? var.aurora_dsql_cluster_resource_id : ""
+        DSQL_HOST                       = var.enable_aurora_dsql ? var.dsql_host : ""
       },
       var.additional_environment_variables
     )

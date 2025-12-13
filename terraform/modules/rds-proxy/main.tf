@@ -134,16 +134,16 @@ resource "aws_db_proxy_default_target_group" "this" {
   connection_pool_config {
     max_connections_percent      = var.max_connections_percent
     max_idle_connections_percent = var.max_idle_connections_percent
-    connection_borrow_timeout     = var.connection_borrow_timeout
+    connection_borrow_timeout    = var.connection_borrow_timeout
     session_pinning_filters      = []
   }
 }
 
 # RDS Proxy Target (Aurora Cluster)
 resource "aws_db_proxy_target" "aurora_cluster" {
-  db_proxy_name          = aws_db_proxy.this.name
-  target_group_name      = "default"
-  db_cluster_identifier  = var.aurora_cluster_id
+  db_proxy_name         = aws_db_proxy.this.name
+  target_group_name     = "default"
+  db_cluster_identifier = var.aurora_cluster_id
 }
 
 # CloudWatch Log Group for RDS Proxy

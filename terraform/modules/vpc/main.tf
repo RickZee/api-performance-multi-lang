@@ -8,9 +8,9 @@ data "aws_availability_zones" "available" {
 
 # VPC
 resource "aws_vpc" "this" {
-  cidr_block           = var.vpc_cidr
-  enable_dns_hostnames = true
-  enable_dns_support   = true
+  cidr_block                       = var.vpc_cidr
+  enable_dns_hostnames             = true
+  enable_dns_support               = true
   assign_generated_ipv6_cidr_block = var.enable_ipv6
 
   tags = merge(
@@ -41,7 +41,7 @@ resource "aws_subnet" "public" {
   cidr_block              = var.public_subnet_cidrs[count.index]
   availability_zone       = data.aws_availability_zones.available.names[count.index]
   map_public_ip_on_launch = true
-  
+
   # Assign IPv6 CIDR block if IPv6 is enabled
   ipv6_cidr_block                 = var.enable_ipv6 ? cidrsubnet(aws_vpc.this.ipv6_cidr_block, 8, count.index) : null
   assign_ipv6_address_on_creation = var.enable_ipv6
@@ -62,7 +62,7 @@ resource "aws_subnet" "private" {
   vpc_id            = aws_vpc.this.id
   cidr_block        = var.private_subnet_cidrs[count.index]
   availability_zone = data.aws_availability_zones.available.names[count.index]
-  
+
   # Assign IPv6 CIDR block if IPv6 is enabled
   # Use offset of 10+ to avoid conflicts with public subnets
   ipv6_cidr_block                 = var.enable_ipv6 ? cidrsubnet(aws_vpc.this.ipv6_cidr_block, 8, count.index + 10) : null

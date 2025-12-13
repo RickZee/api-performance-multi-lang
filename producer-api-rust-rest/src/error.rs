@@ -20,6 +20,9 @@ pub enum AppError {
     #[error("Entity not found: {0}")]
     NotFound(String),
 
+    #[error("Conflict: {0}")]
+    Conflict(String),
+
     #[error("Internal server error: {0}")]
     Internal(#[from] anyhow::Error),
 }
@@ -42,6 +45,10 @@ impl IntoResponse for AppError {
             AppError::NotFound(msg) => {
                 tracing::warn!("Not found: {}", msg);
                 (StatusCode::NOT_FOUND, msg)
+            }
+            AppError::Conflict(msg) => {
+                tracing::warn!("Conflict: {}", msg);
+                (StatusCode::CONFLICT, msg)
             }
             AppError::Internal(e) => {
                 tracing::error!("Internal error: {}", e);

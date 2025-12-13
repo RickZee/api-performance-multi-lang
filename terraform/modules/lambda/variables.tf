@@ -129,3 +129,39 @@ variable "additional_environment_variables" {
   default     = {}
 }
 
+variable "aurora_dsql_endpoint" {
+  description = "Aurora DSQL cluster endpoint"
+  type        = string
+  default     = ""
+}
+
+variable "aurora_dsql_port" {
+  description = "Aurora DSQL cluster port"
+  type        = number
+  default     = 5432
+}
+
+variable "iam_database_user" {
+  description = "IAM database username for Aurora DSQL"
+  type        = string
+  default     = ""
+}
+
+variable "enable_aurora_dsql" {
+  description = "Whether to enable Aurora DSQL configuration"
+  type        = bool
+  default     = false
+}
+
+variable "aurora_dsql_cluster_resource_id" {
+  description = "Aurora DSQL cluster resource ID for IAM permissions (format: cluster-xxxxx)"
+  type        = string
+  default     = ""
+}
+
+variable "dsql_host" {
+  description = "Aurora DSQL host for connection (format: <cluster-id>.<service-suffix>.<region>.on.aws)"
+  type        = string
+  default     = ""
+}
+

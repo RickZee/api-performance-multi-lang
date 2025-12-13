@@ -33,12 +33,12 @@ resource "aws_security_group" "confluent_privatelink" {
 
 # VPC Endpoint for Confluent Cloud
 resource "aws_vpc_endpoint" "confluent" {
-  vpc_id              = var.vpc_id
-  service_name        = var.confluent_service_name
-  vpc_endpoint_type   = "Interface"
-  subnet_ids          = var.subnet_ids
-  security_group_ids  = [aws_security_group.confluent_privatelink.id]
-  
+  vpc_id             = var.vpc_id
+  service_name       = var.confluent_service_name
+  vpc_endpoint_type  = "Interface"
+  subnet_ids         = var.subnet_ids
+  security_group_ids = [aws_security_group.confluent_privatelink.id]
+
   private_dns_enabled = true
 
   tags = merge(

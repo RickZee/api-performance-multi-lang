@@ -1,0 +1,35 @@
+{
+  "name": "dsql-cdc-source-event-headers",
+  "config": {
+    "connector.class": "io.debezium.connector.dsql.DsqlConnector",
+    "name": "dsql-cdc-source-event-headers",
+    "kafka.auth.mode": "SASL_SSL",
+    "kafka.api.key": "${KAFKA_API_KEY}",
+    "kafka.api.secret": "${KAFKA_API_SECRET}",
+    "output.data.format": "JSON",
+    
+    "dsql.endpoint.primary": "${DSQL_ENDPOINT_PRIMARY}",
+    "dsql.endpoint.secondary": "${DSQL_ENDPOINT_SECONDARY:-}",
+    "dsql.port": "${DSQL_PORT:-5432}",
+    "dsql.region": "${DSQL_REGION:-us-east-1}",
+    "dsql.iam.username": "${DSQL_IAM_USERNAME}",
+    "dsql.database.name": "${DSQL_DATABASE_NAME}",
+    "dsql.cluster.resource.id": "${DSQL_CLUSTER_RESOURCE_ID}",
+    "dsql.tables": "${DSQL_TABLES:-event_headers}",
+    "dsql.poll.interval.ms": "${DSQL_POLL_INTERVAL_MS:-1000}",
+    "dsql.batch.size": "${DSQL_BATCH_SIZE:-1000}",
+    
+    "database.server.name": "${DB_SERVER_NAME:-dsql-cdc}",
+    "topic.prefix": "${TOPIC_PREFIX:-dsql-cdc}",
+    "tasks.max": "1",
+    
+    "transforms": "route",
+    "transforms.route.type": "org.apache.kafka.connect.transforms.RegexRouter",
+    "transforms.route.regex": "${TOPIC_PREFIX:-dsql-cdc}\\.event_headers",
+    "transforms.route.replacement": "raw-event-headers",
+    
+    "errors.tolerance": "all",
+    "errors.log.enable": "true",
+    "errors.log.include.messages": "true"
+  }
+}
