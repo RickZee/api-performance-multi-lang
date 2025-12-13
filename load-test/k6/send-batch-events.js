@@ -639,10 +639,11 @@ export function handleSummary(data) {
     const totalErrors = data.metrics?.errors?.values?.count || 0;
     const errorRate = totalRequests > 0 ? ((totalErrors / totalRequests) * 100).toFixed(2) : 0;
     
-    const carSent = data.metrics?.car_events_sent?.values?.count || 0;
-    const loanSent = data.metrics?.loan_events_sent?.values?.count || 0;
-    const paymentSent = data.metrics?.payment_events_sent?.values?.count || 0;
-    const serviceSent = data.metrics?.service_events_sent?.values?.count || 0;
+    // Rate metrics use 'passes' for successful events (when add(true) was called)
+    const carSent = data.metrics?.car_events_sent?.values?.passes || 0;
+    const loanSent = data.metrics?.loan_events_sent?.values?.passes || 0;
+    const paymentSent = data.metrics?.payment_events_sent?.values?.passes || 0;
+    const serviceSent = data.metrics?.service_events_sent?.values?.passes || 0;
     
     // Overall HTTP metrics
     const rate = data.metrics?.http_req_duration?.values?.rate || 0;

@@ -1,9 +1,9 @@
 {
-  "_comment": "✅ PostgreSQL CDC Source V2 (Debezium) - Recommended connector per 'Newest Fix' in archive/fix-flink.md. This connector properly supports ExtractNewRecordState transform and provides full CDC metadata (__op, __table, __ts_ms, __deleted).",
-  "name": "postgres-cdc-source-v2-debezium-business-events",
+  "_comment": "✅ PostgreSQL CDC Source V2 (Debezium) - Recommended connector per 'Newest Fix' in archive/fix-flink.md. This connector properly supports ExtractNewRecordState transform and provides full CDC metadata (__op, __table, __ts_ms, __deleted). Streams from event_headers table.",
+  "name": "postgres-cdc-source-v2-debezium-event-headers",
   "config": {
     "connector.class": "PostgresCdcSourceV2",
-    "name": "postgres-cdc-source-v2-debezium-business-events",
+    "name": "postgres-cdc-source-v2-debezium-event-headers",
     "kafka.api.key": "${KAFKA_API_KEY}",
     "kafka.api.secret": "${KAFKA_API_SECRET}",
     "output.data.format": "JSON",
@@ -14,9 +14,9 @@
     "database.dbname": "${DB_NAME}",
     "database.server.name": "${DB_SERVER_NAME:-aurora-postgres-cdc}",
     "database.sslmode": "${DB_SSLMODE:-require}",
-    "table.include.list": "${TABLE_INCLUDE_LIST:-public.business_events}",
+    "table.include.list": "${TABLE_INCLUDE_LIST:-public.event_headers}",
     "plugin.name": "pgoutput",
-    "slot.name": "${SLOT_NAME:-business_events_v2_debezium_slot}",
+    "slot.name": "${SLOT_NAME:-event_headers_v2_debezium_slot}",
     "snapshot.mode": "initial",
     "output.data.key.format": "JSON",
     "output.data.value.format": "JSON",
@@ -29,7 +29,7 @@
     "transforms.unwrap.add.fields.prefix": "__",
     "transforms.unwrap.delete.handling.mode": "rewrite",
     "transforms.route.type": "io.confluent.connect.cloud.transforms.TopicRegexRouter",
-    "transforms.route.regex": "${TOPIC_PREFIX:-aurora-postgres-cdc}\\.public\\.business_events",
-    "transforms.route.replacement": "raw-business-events"
+    "transforms.route.regex": "${TOPIC_PREFIX:-aurora-postgres-cdc}\\.public\\.event_headers",
+    "transforms.route.replacement": "raw-event-headers"
   }
 }

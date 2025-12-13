@@ -69,22 +69,25 @@ def process_event(event_value):
         cdc_op = event_value.get('__op', 'Unknown')
         cdc_table = event_value.get('__table', 'Unknown')
         
-        # Parse event_data JSON string to access nested structure
-        event_data_str = event_value.get('event_data', '{}')
+        # Parse header_data JSON string to access event header structure
+        # Note: header_data contains only eventHeader, not entities (which are in event_data at root level)
+        header_data_str = event_value.get('header_data', '{}')
         try:
-            event_data = json.loads(event_data_str) if isinstance(event_data_str, str) else event_data_str
+            header_data = json.loads(header_data_str) if isinstance(header_data_str, str) else header_data_str
         except json.JSONDecodeError as e:
-            logger.error(f"Failed to parse event_data JSON: {e}")
-            event_data = {}
+            logger.error(f"Failed to parse header_data JSON: {e}")
+            header_data = {}
         
-        # Extract nested structure
-        event_header = event_data.get('eventHeader', {})
-        event_body = event_data.get('eventBody', {})
-        entities = event_body.get('entities', [])
+        # Extract header fields from header_data
+        header_uuid = header_data.get('uuid', event_id)
+        header_event_name = header_data.get('eventName', event_name)
+        header_event_type = header_data.get('eventType', event_type)
+        header_created_date = header_data.get('createdDate', created_date)
+        header_saved_date = header_data.get('savedDate', saved_date)
         
         # Print event information
         logger.info("=" * 80)
-        logger.info(f"Loan Payment Event Received")
+        logger.info(f"Loan Payment Event Header Received")
         logger.info(f"  Event ID: {event_id}")
         logger.info(f"  Event Name: {event_name}")
         logger.info(f"  Event Type: {event_type}")
@@ -92,24 +95,14 @@ def process_event(event_value):
         logger.info(f"  Saved Date: {saved_date}")
         logger.info(f"  CDC Operation: {cdc_op}")
         logger.info(f"  CDC Table: {cdc_table}")
-        
-        # Process entities
-        for entity in entities:
-            entity_type = entity.get('entityType', 'Unknown')
-            entity_id = entity.get('entityId', 'Unknown')
-            updated_attrs = entity.get('updatedAttributes', {})
-            
-            logger.info(f"  Entity Type: {entity_type}, Entity ID: {entity_id}")
-            
-            # Process loan payment-specific attributes
-            if entity_type == 'LoanPayment':
-                payment_data = updated_attrs.get('loanPayment', {})
-                if payment_data:
-                    logger.info(f"    Payment Amount: {payment_data.get('amount', 'N/A')}")
-                    logger.info(f"    Payment Date: {payment_data.get('paymentDate', 'N/A')}")
-                    logger.info(f"    Loan ID: {payment_data.get('loanId', 'N/A')}")
-                    logger.info(f"    Status: {payment_data.get('status', 'N/A')}")
-        
+        logger.info(f"  Header Data:")
+        logger.info(f"    UUID: {header_uuid}")
+        logger.info(f"    Event Name: {header_event_name}")
+        logger.info(f"    Event Type: {header_event_type}")
+        logger.info(f"    Created Date: {header_created_date}")
+        logger.info(f"    Saved Date: {header_saved_date}")
+        logger.info(f"  Note: Entity information is not available in event_headers stream.")
+        logger.info(f"        Query database using event_id to retrieve associated entities.")
         logger.info("=" * 80)
         
     except Exception as e:

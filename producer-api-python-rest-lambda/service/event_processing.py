@@ -1,5 +1,7 @@
 """Event processing service."""
 
+import asyncio
+import asyncpg
 import json
 import logging
 from datetime import datetime
@@ -7,7 +9,7 @@ from typing import Optional
 
 from constants import API_NAME
 from models.event import Event, EntityUpdate
-from repository import BusinessEventRepository, EntityRepository, get_connection_pool
+from repository import BusinessEventRepository, EntityRepository, EventHeaderRepository, get_connection_pool
 
 logger = logging.getLogger(__name__)
 
@@ -26,6 +28,7 @@ class EventProcessingService:
     def __init__(self, business_event_repo: BusinessEventRepository, pool):
         """Initialize service with repositories."""
         self.business_event_repo = business_event_repo
+        self.event_header_repo = EventHeaderRepository(pool)
         self.pool = pool
         self._persisted_event_count = 0
     
@@ -44,19 +47,79 @@ class EventProcessingService:
         return EntityRepository(self.pool, table_name)
     
     async def process_event(self, event: Event) -> None:
-        """Process a single event."""
+        """Process a single event within a transaction.
+        
+        All database operations (business_events, event_headers, entities) are executed
+        atomically within a single transaction. If any operation fails, all changes are rolled back.
+        """
         logger.info(f"{API_NAME} Processing event: {event.event_header.event_name}")
         
-        # 1. Save entire event to business_events table
-        await self.save_business_event(event)
+        event_id = event.event_header.uuid or f"event-{datetime.utcnow().isoformat()}"
         
-        # 2. Extract and save entities to their respective tables
-        for entity_update in event.event_body.entities:
-            await self.process_entity_update(entity_update)
+        # #region agent log
+        import json
+        try:
+            current_loop = asyncio.get_running_loop()
+            loop_id = id(current_loop)
+            # Try to get pool's loop if possible
+            pool_loop_id = None
+            try:
+                # asyncpg pools have a _loop attribute
+                if hasattr(self.pool, '_loop'):
+                    pool_loop_id = id(self.pool._loop)
+            except:
+                pass
+            with open('/Users/rickzakharov/dev/github/api-performance-multi-lang/.cursor/debug.log', 'a') as f:
+                f.write(json.dumps({"sessionId":"debug-session","runId":"run1","hypothesisId":"A,D","location":"event_processing.py:59","message":"BEFORE pool.acquire","data":{"current_loop_id":loop_id,"pool_loop_id":pool_loop_id,"pool_id":id(self.pool),"event_id":event_id,"loops_match":pool_loop_id == loop_id if pool_loop_id else None},"timestamp":int(__import__('time').time()*1000)})+'\n')
+        except Exception as e:
+            try:
+                with open('/Users/rickzakharov/dev/github/api-performance-multi-lang/.cursor/debug.log', 'a') as f:
+                    f.write(json.dumps({"sessionId":"debug-session","runId":"run1","hypothesisId":"ERROR","location":"event_processing.py:59","message":"Instrumentation error","data":{"error":str(e)},"timestamp":int(__import__('time').time()*1000)})+'\n')
+            except: pass
+        # #endregion
         
-        self._log_persisted_event_count()
+        # Wrap all operations in a single transaction
+        # Verify we're in the correct event loop before acquiring
+        current_loop = asyncio.get_running_loop()
+        logger.info(f"{API_NAME} process_event - current loop: {id(current_loop)}")
+        
+        if hasattr(self.pool, '_loop'):
+            pool_loop = self.pool._loop
+            pool_loop_id = id(pool_loop)
+            current_loop_id = id(current_loop)
+            logger.info(f"{API_NAME} process_event - pool loop: {pool_loop_id}, current loop: {current_loop_id}")
+            
+            if pool_loop is not current_loop:
+                error_msg = f"CRITICAL: Event loop mismatch! Pool created in loop {pool_loop_id} but used in loop {current_loop_id}"
+                logger.error(f"{API_NAME} {error_msg}")
+                raise RuntimeError(error_msg)
+            else:
+                logger.info(f"{API_NAME} Event loop verified - matches: {current_loop_id}")
+        else:
+            logger.warning(f"{API_NAME} Pool does not have _loop attribute - cannot verify loop match")
+        
+        logger.info(f"{API_NAME} About to acquire connection from pool...")
+        async with self.pool.acquire() as conn:
+            async with conn.transaction():
+                try:
+                    # 1. Save entire event to business_events table
+                    await self.save_business_event(event, conn=conn)
+                    
+                    # 2. Save event header to event_headers table
+                    await self.save_event_header(event, event_id, conn=conn)
+                    
+                    # 3. Extract and save entities to their respective tables
+                    for entity_update in event.event_body.entities:
+                        await self.process_entity_update(entity_update, event_id, conn=conn)
+                    
+                    self._log_persisted_event_count()
+                    logger.info(f"{API_NAME} Successfully processed event in transaction: {event_id}")
+                except Exception as e:
+                    logger.error(f"{API_NAME} Error processing event in transaction: {e}", exc_info=True)
+                    # Transaction will automatically rollback on exception
+                    raise
     
-    async def save_business_event(self, event: Event) -> None:
+    async def save_business_event(self, event: Event, conn: Optional[asyncpg.Connection] = None) -> None:
         """Save the entire event to business_events table."""
         event_id = event.event_header.uuid or f"event-{datetime.utcnow().isoformat()}"
         event_name = event.event_header.event_name
@@ -74,10 +137,33 @@ class EventProcessingService:
             created_date=created_date,
             saved_date=saved_date,
             event_data=event_data,
+            conn=conn,
         )
         logger.info(f"{API_NAME} Successfully saved business event: {event_id}")
     
-    async def process_entity_update(self, entity_update: EntityUpdate) -> None:
+    async def save_event_header(self, event: Event, event_id: str, conn: Optional[asyncpg.Connection] = None) -> None:
+        """Save the event header to event_headers table."""
+        event_name = event.event_header.event_name
+        event_type = event.event_header.event_type
+        created_date = event.event_header.created_date or datetime.utcnow()
+        saved_date = event.event_header.saved_date or datetime.utcnow()
+        
+        # Convert eventHeader to dict for JSONB storage
+        header_data = event.event_header.model_dump(mode='json')
+        
+        await self.event_header_repo.create(
+            event_id=event_id,
+            event_name=event_name,
+            event_type=event_type,
+            created_date=created_date,
+            saved_date=saved_date,
+            header_data=header_data,
+            conn=conn,
+        )
+        logger.info(f"{API_NAME} Successfully saved event header: {event_id}")
+    
+    async def process_entity_update(self, entity_update: EntityUpdate, event_id: str,
+                                   conn: Optional[asyncpg.Connection] = None) -> None:
         """Process a single entity update."""
         logger.info(
             f"{API_NAME} Processing entity creation for type: {entity_update.entity_type} "
@@ -91,21 +177,22 @@ class EventProcessingService:
             )
             return
         
-        exists = await entity_repo.exists_by_entity_id(entity_update.entity_id)
+        exists = await entity_repo.exists_by_entity_id(entity_update.entity_id, conn=conn)
         
         if exists:
             logger.warning(
                 f"{API_NAME} Entity already exists, updating: {entity_update.entity_id}"
             )
-            await self.update_existing_entity(entity_repo, entity_update)
+            await self.update_existing_entity(entity_repo, entity_update, event_id, conn=conn)
         else:
             logger.info(
                 f"{API_NAME} Entity does not exist, creating new: {entity_update.entity_id}"
             )
-            await self.create_new_entity(entity_repo, entity_update)
+            await self.create_new_entity(entity_repo, entity_update, event_id, conn=conn)
     
     async def create_new_entity(
-        self, entity_repo: EntityRepository, entity_update: EntityUpdate
+        self, entity_repo: EntityRepository, entity_update: EntityUpdate,
+        event_id: str, conn: Optional[asyncpg.Connection] = None
     ) -> None:
         """Create a new entity."""
         entity_id = entity_update.entity_id
@@ -138,6 +225,8 @@ class EventProcessingService:
             created_at=created_at,
             updated_at=updated_at,
             entity_data=entity_data,
+            event_id=event_id,
+            conn=conn,
         )
         logger.info(f"{API_NAME} Successfully created entity: {entity_id}")
     
@@ -158,7 +247,8 @@ class EventProcessingService:
                 return datetime.utcnow()
     
     async def update_existing_entity(
-        self, entity_repo: EntityRepository, entity_update: EntityUpdate
+        self, entity_repo: EntityRepository, entity_update: EntityUpdate,
+        event_id: str, conn: Optional[asyncpg.Connection] = None
     ) -> None:
         """Update an existing entity."""
         entity_id = entity_update.entity_id
@@ -183,5 +273,7 @@ class EventProcessingService:
             entity_id=entity_id,
             updated_at=updated_at,
             entity_data=entity_data,
+            event_id=event_id,
+            conn=conn,
         )
         logger.info(f"{API_NAME} Successfully updated entity: {entity_id}")

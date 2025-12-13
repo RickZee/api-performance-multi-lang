@@ -28,6 +28,10 @@ logger = logging.getLogger(__name__)
 # Global service instance (reused across invocations)
 _service: EventProcessingService | None = None
 _config = None
+
+# Module-level dedicated event loop for Lambda handler
+# This ensures we always use the same loop for asyncpg pool creation/usage
+_lambda_loop: Optional[asyncio.AbstractEventLoop] = None
 _lambda_client = None
 
 
@@ -408,34 +412,51 @@ async def _handle_bulk_events(event_body: str) -> Dict[str, Any]:
     )
 
 
+# Module-level dedicated event loop for Lambda handler
+# This ensures we always use the same loop for asyncpg pool creation/usage
+_lambda_loop: Optional[asyncio.AbstractEventLoop] = None
+
+
 def handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
-    """Main Lambda handler for API Gateway HTTP API v2."""
-    # Lambda Python runtime provides an event loop
-    # Use get_event_loop() which returns the running loop or creates one
+    """
+    Main Lambda handler for API Gateway HTTP API v2.
+    
+    Uses a deterministic single event loop strategy to ensure asyncpg pools
+    are always created and used in the same loop context.
+    """
+    global _lambda_loop
+    
+    # Check if we're already in a running loop (shouldn't happen in real Lambda/SAM)
     try:
-        loop = asyncio.get_running_loop()
+        running_loop = asyncio.get_running_loop()
+        # This is unexpected for Lambda - fail fast with clear error
+        logger.error(
+            f"{API_NAME} CRITICAL: handler() called from within a running event loop. "
+            f"Loop ID: {id(running_loop)}. This indicates a test harness or async caller issue. "
+            f"For async callers, use _async_handler() directly instead of handler()."
+        )
+        raise RuntimeError(
+            "Lambda handler cannot be called from within a running event loop. "
+            "Use _async_handler() directly for async contexts, or fix the test harness."
+        )
     except RuntimeError:
-        # No running loop, get or create one
-        try:
-            loop = asyncio.get_event_loop()
-        except RuntimeError:
-            loop = asyncio.new_event_loop()
-            asyncio.set_event_loop(loop)
+        # No running loop - this is the expected case for Lambda/SAM
+        pass
     
-    # If loop is closed, create a new one
-    if loop.is_closed():
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
-    
-    # Run the async handler
-    if loop.is_running():
-        # If loop is already running, we need to use a different approach
-        import concurrent.futures
-        with concurrent.futures.ThreadPoolExecutor() as executor:
-            future = executor.submit(asyncio.run, _async_handler(event, context))
-            return future.result()
+    # Get or create the module-level dedicated loop
+    if _lambda_loop is None or _lambda_loop.is_closed():
+        _lambda_loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(_lambda_loop)
+        logger.info(f"{API_NAME} Created new dedicated event loop: {id(_lambda_loop)}")
     else:
-        return loop.run_until_complete(_async_handler(event, context))
+        logger.debug(f"{API_NAME} Reusing existing event loop: {id(_lambda_loop)}")
+    
+    # Run the async handler in the dedicated loop
+    try:
+        return _lambda_loop.run_until_complete(_async_handler(event, context))
+    except Exception as e:
+        logger.error(f"{API_NAME} Error in handler: {e}", exc_info=True)
+        raise
 
 
 async def _async_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:

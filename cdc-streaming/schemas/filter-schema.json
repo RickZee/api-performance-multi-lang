@@ -45,7 +45,7 @@
                 "field": {
                   "type": "string",
                   "pattern": "^[a-zA-Z0-9_.\\[\\]]+$",
-                  "description": "Field path in the event structure (e.g., eventHeader.eventName, eventBody.entities[0].entityType)"
+                  "description": "Field path in the event structure (e.g., eventHeader.eventName, entities[0].entityHeader.entityType, entities[0].id)"
                 },
                 "operator": {
                   "type": "string",

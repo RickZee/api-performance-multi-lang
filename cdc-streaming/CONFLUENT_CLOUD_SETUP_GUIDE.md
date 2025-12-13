@@ -224,13 +224,13 @@ export KAFKA_API_SECRET="<api-secret>"
 # Set cluster context
 confluent kafka cluster use <cluster-id>
 
-# Create raw-business-events topic (only topic that needs manual creation)
-confluent kafka topic create raw-business-events \
+# Create raw-event-headers topic (only topic that needs manual creation)
+confluent kafka topic create raw-event-headers \
   --partitions 6 \
   --config retention.ms=604800000
 
 # Note: Filtered topics are automatically created by Flink when it writes to them.
-# Only raw-business-events needs manual creation before deploying the CDC connector.
+# Only raw-event-headers needs manual creation before deploying the CDC connector.
 ```
 
 ### Step 2: Verify Topics
@@ -240,10 +240,10 @@ confluent kafka topic create raw-business-events \
 confluent kafka topic list
 
 # Describe topic
-confluent kafka topic describe raw-business-events
+confluent kafka topic describe raw-event-headers
 
 # Check topic configuration
-confluent kafka topic describe raw-business-events \
+confluent kafka topic describe raw-event-headers \
   --output json | jq '.config'
 ```
 
@@ -251,15 +251,15 @@ confluent kafka topic describe raw-business-events \
 
 ```bash
 # Set retention policy
-confluent kafka topic update raw-business-events \
+confluent kafka topic update raw-event-headers \
   --config retention.ms=604800000  # 7 days
 
 # Set compression
-confluent kafka topic update raw-business-events \
+confluent kafka topic update raw-event-headers \
   --config compression.type=snappy
 
 # Set min.insync.replicas for durability
-confluent kafka topic update raw-business-events \
+confluent kafka topic update raw-event-headers \
   --config min.insync.replicas=2
 ```
 
@@ -306,7 +306,7 @@ export SCHEMA_REGISTRY_API_SECRET="<api-secret>"
 ```bash
 # Register raw event schema
 curl -X POST \
-  "${SCHEMA_REGISTRY_URL}/subjects/raw-business-events-value/versions" \
+  "${SCHEMA_REGISTRY_URL}/subjects/raw-event-headers-value/versions" \
   -H "Content-Type: application/vnd.schemaregistry.v1+json" \
   -u "${SCHEMA_REGISTRY_API_KEY}:${SCHEMA_REGISTRY_API_SECRET}" \
   -d @- << EOF
@@ -332,7 +332,7 @@ EOF
 ```bash
 # Register schema
 confluent schema-registry schema create \
-  --subject raw-business-events-value \
+  --subject raw-event-headers-value \
   --schema schemas/raw-event.avsc \
   --type AVRO
 ```
@@ -341,7 +341,7 @@ confluent schema-registry schema create \
 
 ```bash
 # Set backward compatibility (allows adding fields)
-confluent schema-registry subject update raw-business-events-value --compatibility backward
+confluent schema-registry subject update raw-event-headers-value --compatibility backward
 confluent schema-registry subject update filtered-loan-events-value --compatibility backward
 confluent schema-registry subject update filtered-service-events-value --compatibility backward
 ```
@@ -419,7 +419,7 @@ export FLINK_REST_ENDPOINT="https://flink.us-east-1.aws.confluent.cloud"
 **Confluent Cloud for Apache Flink** is a fully managed, cloud-native Flink service. Flink jobs are deployed as **SQL statements** (not JAR files) and automatically scale based on workload.
 
 **How Flink Works in This Pipeline**:
-- **Consumes from Kafka**: Reads events from `raw-business-events` topic
+- **Consumes from Kafka**: Reads events from `raw-event-headers` topic
 - **Applies Filtering**: Filters using relational columns (`event_type`, `__op`) via SQL WHERE clauses
 - **Writes to Kafka**: Writes filtered events to consumer-specific topics:
   - `filtered-loan-created-events`
@@ -427,7 +427,7 @@ export FLINK_REST_ENDPOINT="https://flink.us-east-1.aws.confluent.cloud"
   - `filtered-service-events`
   - `filtered-car-created-events`
 - **Auto-Topic Creation**: Filtered topics are automatically created by Flink when it first writes to them
-- **Preserves Structure**: Maintains relational structure + `event_data` JSONB field for consumers
+- **Preserves Structure**: Maintains relational structure + `header_data` JSONB field for consumers
 - **Fault Tolerance**: Automatic checkpoints ensure exactly-once semantics
 
 **Flink SQL File**: Use `business-events-routing-confluent-cloud.sql` with PostgresCdcSourceV2 connector. See [Flink SQL Configuration](#flink-sql-configuration) section for complete SQL examples and deployment details.
@@ -770,7 +770,7 @@ WHERE __op IN ('c', 'u');
    - **Use With**: PostgresCdcSourceV2 connector (includes ExtractNewRecordState transform)
    - **Source Table**: Expects `__op`, `__table`, `__ts_ms` fields from connector
    - **Filtering**: Can filter by `__op` field (e.g., `WHERE event_type = 'LoanCreated' AND __op = 'c'`)
-   - **Compatible Connector**: `postgres-cdc-source-v2-debezium-business-events-confluent-cloud.json`
+   - **Compatible Connector**: `postgres-cdc-source-v2-debezium-event-headers-confluent-cloud.json`
 
 **Note**: The `business-events-routing-confluent-cloud-no-op.sql` file exists for compatibility with connectors that do not include ExtractNewRecordState transform, but it is not recommended. Always use the recommended PostgresCdcSourceV2 connector with `business-events-routing-confluent-cloud.sql`.
 
@@ -780,13 +780,13 @@ WHERE __op IN ('c', 'u');
 -- ============================================================================
 -- Step 1: Create Source Table
 -- ============================================================================
-CREATE TABLE `raw-business-events` (
+CREATE TABLE `raw-event-headers` (
     `id` STRING,
     `event_name` STRING,
     `event_type` STRING,
     `created_date` STRING,
     `saved_date` STRING,
-    `event_data` STRING,
+    `header_data` STRING,
     `__op` STRING,
     `__table` STRING,
     `__ts_ms` BIGINT
@@ -806,7 +806,7 @@ CREATE TABLE `filtered-loan-created-events` (
     `event_type` STRING,
     `created_date` STRING,
     `saved_date` STRING,
-    `event_data` STRING,
+    `header_data` STRING,
     `__op` STRING,
     `__table` STRING
 ) WITH (
@@ -825,16 +825,16 @@ SELECT
     `event_type`,
     `created_date`,
     `saved_date`,
-    `event_data`,
+    `header_data`,
     `__op`,
     `__table`
-FROM `raw-business-events`
+FROM `raw-event-headers`
 WHERE `event_type` = 'LoanCreated' AND `__op` = 'c';
 
 -- Additional filters for other event types:
 INSERT INTO `filtered-loan-payment-submitted-events`
-SELECT CAST(`id` AS BYTES) AS `key`, `id`, `event_name`, `event_type`, `created_date`, `saved_date`, `event_data`, `__op`, `__table`
-FROM `raw-business-events`
+SELECT CAST(`id` AS BYTES) AS `key`, `id`, `event_name`, `event_type`, `created_date`, `saved_date`, `header_data`, `__op`, `__table`
+FROM `raw-event-headers`
 WHERE `event_type` = 'LoanPaymentSubmitted' AND `__op` = 'c';
 
 INSERT INTO `filtered-car-created-events`

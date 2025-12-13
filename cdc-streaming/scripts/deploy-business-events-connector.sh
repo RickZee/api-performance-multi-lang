@@ -1,5 +1,5 @@
 #!/bin/bash
-# Deploy Confluent Cloud Managed PostgreSQL CDC Connector for business_events table
+# Deploy Confluent Cloud Managed PostgreSQL CDC Connector for event_headers table
 # Based on archive/cdc-streaming/scripts/deploy-confluent-postgres-cdc-connector.sh
 
 set -e
@@ -8,7 +8,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 cd "$PROJECT_ROOT"
 
-CONNECTOR_CONFIG="$SCRIPT_DIR/../connectors/postgres-cdc-source-business-events-confluent-cloud.json"
+CONNECTOR_CONFIG="$SCRIPT_DIR/../connectors/postgres-cdc-source-event-headers-confluent-cloud.json"
 
 # Colors
 GREEN='\033[0;32m'
@@ -19,7 +19,7 @@ CYAN='\033[0;36m'
 NC='\033[0m'
 
 echo -e "${BLUE}========================================${NC}"
-echo -e "${BLUE}Deploy Business Events CDC Connector${NC}"
+echo -e "${BLUE}Deploy Event Headers CDC Connector${NC}"
 echo -e "${BLUE}========================================${NC}"
 echo ""
 
@@ -115,14 +115,14 @@ if [ ${#MISSING_VARS[@]} -gt 0 ]; then
     echo "  export DB_USERNAME='postgres'"
     echo "  export DB_PASSWORD='password'"
     echo "  export DB_NAME='car_entities'"
-    echo "  export TABLE_INCLUDE_LIST='public.business_events'"
+    echo "  export TABLE_INCLUDE_LIST='public.event_headers'"
     exit 1
 fi
 
 # Set defaults
-export TABLE_INCLUDE_LIST="${TABLE_INCLUDE_LIST:-public.business_events}"
+export TABLE_INCLUDE_LIST="${TABLE_INCLUDE_LIST:-public.event_headers}"
 export TOPIC_PREFIX="${TOPIC_PREFIX:-aurora-cdc}"
-export SLOT_NAME="${SLOT_NAME:-business_events_cdc_slot}"
+export SLOT_NAME="${SLOT_NAME:-event_headers_cdc_slot}"
 export DB_SERVER_NAME="${DB_SERVER_NAME:-aurora-postgres-cdc}"
 export DB_PORT="${DB_PORT:-5432}"
 

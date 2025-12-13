@@ -1,5 +1,5 @@
 {
-  "name": "postgres-debezium-business-events-confluent-cloud",
+  "name": "postgres-debezium-event-headers-confluent-cloud",
   "config": {
     "connector.class": "io.debezium.connector.postgresql.PostgresConnector",
     "tasks.max": "1",
@@ -12,11 +12,11 @@
     "database.server.name": "${DB_SERVER_NAME:-aurora-postgres-cdc}",
     
     "topic.prefix": "${TOPIC_PREFIX:-aurora-cdc}",
-    "table.include.list": "${TABLE_INCLUDE_LIST:-public.business_events}",
+    "table.include.list": "${TABLE_INCLUDE_LIST:-public.event_headers}",
     
     "plugin.name": "pgoutput",
-    "slot.name": "${SLOT_NAME:-business_events_debezium_slot}",
-    "publication.name": "${PUBLICATION_NAME:-business_events_debezium_publication}",
+    "slot.name": "${SLOT_NAME:-event_headers_debezium_slot}",
+    "publication.name": "${PUBLICATION_NAME:-event_headers_debezium_publication}",
     "publication.autocreate.mode": "filtered",
     
     "key.converter": "org.apache.kafka.connect.json.JsonConverter",
@@ -36,8 +36,8 @@
     "transforms.unwrap.add.fields": "op,table,ts_ms",
     "transforms.unwrap.add.fields.prefix": "__",
     "transforms.route.type": "org.apache.kafka.connect.transforms.RegexRouter",
-    "transforms.route.regex": "${TOPIC_PREFIX:-aurora-cdc}.public.business_events",
-    "transforms.route.replacement": "raw-business-events",
+    "transforms.route.regex": "${TOPIC_PREFIX:-aurora-cdc}.public.event_headers",
+    "transforms.route.replacement": "raw-event-headers",
     
     "snapshot.mode": "initial",
     "tombstones.on.delete": "true",

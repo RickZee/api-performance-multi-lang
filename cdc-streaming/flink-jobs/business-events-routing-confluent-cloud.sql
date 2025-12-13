@@ -1,32 +1,32 @@
--- Flink SQL Statements for Business Events Filtering and Routing (Confluent Cloud)
--- Processes 4 types of filtered business events:
+-- Flink SQL Statements for Event Headers Filtering and Routing (Confluent Cloud)
+-- Processes 4 types of filtered event headers:
 -- 1. Car Created (CarCreated)
 -- 2. Loan Created (LoanCreated)
 -- 3. Loan Payment Submitted (LoanPaymentSubmitted)
 -- 4. Service Events (CarServiceDone)
 --
--- Source: business_events table from Aurora PostgreSQL
+-- Source: event_headers table from Aurora PostgreSQL
 -- Target: Filtered Kafka topics for each event type
 --
 -- DEPLOYMENT NOTE: Deploy statements in order:
--- 1. Source table (raw-business-events)
+-- 1. Source table (raw-event-headers)
 -- 2. Sink tables (filtered-*-events)
 -- 3. INSERT statements (one per filter)
 
 -- ============================================================================
 -- Step 1: Create Source Table
 -- ============================================================================
--- Source Table: Raw Business Events from Kafka (Debezium CDC format)
+-- Source Table: Raw Event Headers from Kafka (Debezium CDC format)
 -- Note: Table name must match topic name exactly in Confluent Cloud
--- This table reads from the Debezium CDC output for business_events table
--- The event_data column contains the full JSON event structure
-CREATE TABLE `raw-business-events` (
+-- This table reads from the Debezium CDC output for event_headers table
+-- The header_data column contains the event header JSON structure
+CREATE TABLE `raw-event-headers` (
     `id` STRING,
     `event_name` STRING,
     `event_type` STRING,
     `created_date` STRING,
     `saved_date` STRING,
-    `event_data` STRING,
+    `header_data` STRING,
     `__op` STRING,
     `__table` STRING,
     `__ts_ms` BIGINT
@@ -48,7 +48,7 @@ CREATE TABLE `filtered-car-created-events` (
     `event_type` STRING,
     `created_date` STRING,
     `saved_date` STRING,
-    `event_data` STRING,
+    `header_data` STRING,
     `__op` STRING,
     `__table` STRING
 ) WITH (
@@ -64,7 +64,7 @@ CREATE TABLE `filtered-loan-created-events` (
     `event_type` STRING,
     `created_date` STRING,
     `saved_date` STRING,
-    `event_data` STRING,
+    `header_data` STRING,
     `__op` STRING,
     `__table` STRING
 ) WITH (
@@ -80,7 +80,7 @@ CREATE TABLE `filtered-loan-payment-submitted-events` (
     `event_type` STRING,
     `created_date` STRING,
     `saved_date` STRING,
-    `event_data` STRING,
+    `header_data` STRING,
     `__op` STRING,
     `__table` STRING
 ) WITH (
@@ -96,7 +96,7 @@ CREATE TABLE `filtered-service-events` (
     `event_type` STRING,
     `created_date` STRING,
     `saved_date` STRING,
-    `event_data` STRING,
+    `header_data` STRING,
     `__op` STRING,
     `__table` STRING
 ) WITH (
@@ -118,10 +118,10 @@ SELECT
     `event_type`,
     `created_date`,
     `saved_date`,
-    `event_data`,
+    `header_data`,
     `__op`,
     `__table`
-FROM `raw-business-events`
+FROM `raw-event-headers`
 WHERE `event_type` = 'CarCreated' AND `__op` = 'c';
 
 -- INSERT Statement: Loan Created Events Filter
@@ -134,10 +134,10 @@ SELECT
     `event_type`,
     `created_date`,
     `saved_date`,
-    `event_data`,
+    `header_data`,
     `__op`,
     `__table`
-FROM `raw-business-events`
+FROM `raw-event-headers`
 WHERE `event_type` = 'LoanCreated' AND `__op` = 'c';
 
 -- INSERT Statement: Loan Payment Submitted Events Filter
@@ -150,10 +150,10 @@ SELECT
     `event_type`,
     `created_date`,
     `saved_date`,
-    `event_data`,
+    `header_data`,
     `__op`,
     `__table`
-FROM `raw-business-events`
+FROM `raw-event-headers`
 WHERE `event_type` = 'LoanPaymentSubmitted' AND `__op` = 'c';
 
 -- INSERT Statement: Service Events Filter
@@ -166,8 +166,8 @@ SELECT
     `event_type`,
     `created_date`,
     `saved_date`,
-    `event_data`,
+    `header_data`,
     `__op`,
     `__table`
-FROM `raw-business-events`
+FROM `raw-event-headers`
 WHERE `event_type` = 'CarServiceDone' AND `__op` = 'c';

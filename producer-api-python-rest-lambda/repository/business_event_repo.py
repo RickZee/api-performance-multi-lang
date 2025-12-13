@@ -96,54 +96,92 @@ class BusinessEventRepository:
     
     async def create(self, event_id: str, event_name: str, event_type: Optional[str],
                      created_date: Optional[datetime], saved_date: Optional[datetime],
-                     event_data: dict) -> None:
+                     event_data: dict, conn: Optional[asyncpg.Connection] = None) -> None:
         """Create a new business event with retry logic.
+        
+        Args:
+            event_id: Event ID
+            event_name: Event name
+            event_type: Event type
+            created_date: Created date
+            saved_date: Saved date
+            event_data: Full event JSON as dict
+            conn: Optional database connection (for transactions). If not provided, acquires from pool.
         
         Raises:
             DuplicateEventError: If an event with the same ID already exists (409 Conflict)
         """
         async def _do_create():
-            async with self.pool.acquire() as conn:
-                try:
-                    # Diagnostic: Check current database and schema
-                    current_db = await conn.fetchval('SELECT current_database();')
-                    current_schema = await conn.fetchval('SELECT current_schema();')
-                    table_exists = await conn.fetchval("""
-                        SELECT EXISTS (
-                            SELECT FROM information_schema.tables 
-                            WHERE table_schema = $1
-                            AND table_name = 'business_events'
-                        );
-                    """, current_schema)
-                    
-                    logger.info(f"Database context - DB: {current_db}, Schema: {current_schema}, business_events exists: {table_exists}")
-                    
-                    if not table_exists:
-                        # List available tables for debugging
-                        tables = await conn.fetch("""
-                            SELECT tablename 
-                            FROM pg_tables 
-                            WHERE schemaname = $1
-                            ORDER BY tablename;
-                        """, current_schema)
-                        table_list = [t['tablename'] for t in tables]
-                        logger.warning(f"business_events table not found in schema '{current_schema}'. Available tables: {table_list}")
-                    
-                    await conn.execute(
-                        """
-                        INSERT INTO business_events (id, event_name, event_type, created_date, saved_date, event_data)
-                        VALUES ($1, $2, $3, $4, $5, $6)
-                        """,
-                        event_id,
-                        event_name,
-                        event_type,
-                        created_date,
-                        saved_date,
-                        json.dumps(event_data),
-                    )
-                except asyncpg.UniqueViolationError as e:
-                    # Raise custom exception for duplicate key violations
-                    logger.warning(f"Duplicate event ID detected: {event_id}")
-                    raise DuplicateEventError(event_id, f"Event with ID '{event_id}' already exists") from e
+            if conn:
+                # Use provided connection directly (transaction managed externally)
+                # Skip diagnostics when in transaction for performance
+                await self._insert_business_event(conn, event_id, event_name, event_type,
+                                                 created_date, saved_date, event_data,
+                                                 skip_diagnostics=True)
+            else:
+                # Acquire connection from pool
+                async with self.pool.acquire() as connection:
+                    await self._insert_business_event(connection, event_id, event_name, event_type,
+                                                     created_date, saved_date, event_data,
+                                                     skip_diagnostics=False)
         
         await self._retry_with_backoff(_do_create)
+    
+    async def _insert_business_event(self, conn: asyncpg.Connection, event_id: str, event_name: str,
+                                    event_type: Optional[str], created_date: Optional[datetime],
+                                    saved_date: Optional[datetime], event_data: dict,
+                                    skip_diagnostics: bool = False) -> None:
+        """Insert business event into database.
+        
+        Args:
+            conn: Database connection
+            event_id: Event ID
+            event_name: Event name
+            event_type: Event type
+            created_date: Created date
+            saved_date: Saved date
+            event_data: Event data as dict
+            skip_diagnostics: If True, skip diagnostic queries (useful when in transaction)
+        """
+        try:
+            # Diagnostic: Check current database and schema (skip when in transaction for performance)
+            if not skip_diagnostics:
+                current_db = await conn.fetchval('SELECT current_database();')
+                current_schema = await conn.fetchval('SELECT current_schema();')
+                table_exists = await conn.fetchval("""
+                    SELECT EXISTS (
+                        SELECT FROM information_schema.tables 
+                        WHERE table_schema = $1
+                        AND table_name = 'business_events'
+                    );
+                """, current_schema)
+                
+                logger.info(f"Database context - DB: {current_db}, Schema: {current_schema}, business_events exists: {table_exists}")
+                
+                if not table_exists:
+                    # List available tables for debugging
+                    tables = await conn.fetch("""
+                        SELECT tablename 
+                        FROM pg_tables 
+                        WHERE schemaname = $1
+                        ORDER BY tablename;
+                    """, current_schema)
+                    table_list = [t['tablename'] for t in tables]
+                    logger.warning(f"business_events table not found in schema '{current_schema}'. Available tables: {table_list}")
+            
+            await conn.execute(
+                """
+                INSERT INTO business_events (id, event_name, event_type, created_date, saved_date, event_data)
+                VALUES ($1, $2, $3, $4, $5, $6)
+                """,
+                event_id,
+                event_name,
+                event_type,
+                created_date,
+                saved_date,
+                json.dumps(event_data),
+            )
+        except asyncpg.UniqueViolationError as e:
+            # Raise custom exception for duplicate key violations
+            logger.warning(f"Duplicate event ID detected: {event_id}")
+            raise DuplicateEventError(event_id, f"Event with ID '{event_id}' already exists") from e

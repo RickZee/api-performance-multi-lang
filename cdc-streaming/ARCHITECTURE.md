@@ -37,28 +37,28 @@ These examples are used throughout the system for:
 ┌─────────────────────────────────────────────────────────────────────────┐
 │                         PostgreSQL Database                             │
 │  ┌──────────────────────────────────────────────────────────────────┐   │
-│  │ business_events table                                            │   │
-│  │ - id, event_name, event_type, created_date, saved_date           │   │
-│  │ - event_data (JSONB) - full event structure                      │   │
+│  │ event_headers table                                             │   │
+│  │ - id, event_name, event_type, created_date, saved_date          │   │
+│  │ - header_data (JSONB) - event header structure                  │   │
 │  └──────────────────────────────────────────────────────────────────┘   │
 └──────────────────────────────┬──────────────────────────────────────────┘
                                │
                                │ CDC Capture (Logical Replication)
-                               │ Captures relational columns + event_data JSONB
+                               │ Captures relational columns + header_data JSONB
                                ▼
 ┌─────────────────────────────────────────────────────────────────────────┐
 │                 Kafka Connect (Source Connector)                        │
 │  ┌──────────────────────────────────────────────────────────────────┐   │
 │  │ Confluent Managed PostgresCdcSource OR Debezium Connector        │   │
 │  │ - Extracts relational columns (id, event_name, event_type, etc.) │   │
-│  │ - Includes event_data as JSON string                             │   │
+│  │ - Includes header_data as JSON string                           │   │
 │  │ - Adds CDC metadata (__op, __table, __ts_ms)                     │   │
 │  │ - Uses ExtractNewRecordState transform                           │   │
 │  └──────────────────────────────────────────────────────────────────┘   │
 └──────────────────────────────┬──────────────────────────────────────────┘
                                │
                                │ JSON Serialized Events
-                               │ (Relational structure with event_data JSONB)
+                               │ (Relational structure with header_data JSONB)
                                ▼
 ┌─────────────────────────────────────────────────────────────────────────┐
 │                        Schema Registry                                  │
@@ -69,10 +69,10 @@ These examples are used throughout the system for:
                                │ JSON Events
                                ▼
 ┌─────────────────────────────────────────────────────────────────────────┐
-│                    Kafka: raw-business-events                           │
+│                    Kafka: raw-event-headers                             │
 │  Format: JSON                                                           │
 │  Structure: id, event_name, event_type, created_date, saved_date,       │
-│            event_data (JSON string), __op, __table, __ts_ms             │
+│            header_data (JSON string), __op, __table, __ts_ms            │
 └──────────────────────────────┬──────────────────────────────────────────┘
                                │
                                │ Stream Processing
@@ -83,7 +83,7 @@ These examples are used throughout the system for:
 │  Flink SQL Jobs:                                                       │
 │  - Filter by event_type, __op (operation type)                         │
 │  - Route to consumer-specific topics                                   │
-│  - Preserves relational structure + event_data                         │
+│  - Preserves relational structure + header_data                        │
 └──────────────────────────────┬─────────────────────────────────────────┘
                                │
                                │ Filtered & Routed Events (JSON)
@@ -111,17 +111,17 @@ These examples are used throughout the system for:
 │  │   created-events │  │   filtered-loan- │  │   service-events │       │
 │  │ - Parses relational │   payment-       │  │ - Parses relational      │
 │  │   structure +    │  │   submitted-     │  │   structure +    │       │
-│  │   event_data     │  │   events         │  │   event_data     │       │
+│  │   header_data    │  │   events         │  │   header_data    │       │
 │  │   JSON string    │  │ - Parses relational │   JSON string    │       │
 │  └──────────────────┘  │   structure +    │  └──────────────────┘       │
-│  ┌──────────────────┐  │   event_data     │  ┌──────────────────┐       │
+│  ┌──────────────────┐  │   header_data    │  ┌──────────────────┐       │
 │  │ Car Consumer     │  │   JSON string    │  │ All consumers    │       │
 │  │ - Topic:         │  └──────────────────┘  │ connect to       │       │
 │  │   filtered-car-  │                        │ Confluent Cloud  │       │
 │  │   created-events │                        │  with SASL_SSL   │       │
 │  │ - Parses relational                       │ authentication   │       │
 │  │   structure +    │                        └──────────────────┘       │
-│  │   event_data     │                                                   │
+│  │   header_data    │                                                   │
 │  │   JSON string    │                                                   │
 │  └──────────────────┘                                                   │
 └─────────────────────────────────────────────────────────────────────────┘
@@ -137,7 +137,7 @@ The architecture uses a **hybrid data model** that combines the benefits of both
 **Database Layer (PostgreSQL)**:
 
 ```sql
-CREATE TABLE business_events (
+CREATE TABLE event_headers (
     -- Relational columns for efficient filtering and querying
     id VARCHAR(255) PRIMARY KEY,
     event_name VARCHAR(255) NOT NULL,
@@ -145,46 +145,54 @@ CREATE TABLE business_events (
     created_date TIMESTAMP WITH TIME ZONE,
     saved_date TIMESTAMP WITH TIME ZONE,
     
-    -- JSONB column for full event structure
-    event_data JSONB NOT NULL  -- Contains: {eventHeader: {...}, eventBody: {...}}
+    -- JSONB column for event header structure
+    header_data JSONB NOT NULL,  -- Contains: {uuid, eventName, eventType, createdDate, savedDate}
+    
+    -- Foreign key to business_events
+    CONSTRAINT fk_event_headers_business_events 
+        FOREIGN KEY (id) REFERENCES business_events(id) 
+        ON DELETE CASCADE
 );
 ```
 
 **Benefits of This Approach**:
 
 1. **Efficient Filtering**: Relational columns (`event_type`, `event_name`) enable fast filtering in Flink SQL without JSON parsing
-2. **Full Data Preservation**: JSONB `event_data` column preserves complete nested event structure
+2. **Header Data Preservation**: JSONB `header_data` column preserves event header structure
 3. **Index Support**: PostgreSQL can index relational columns for fast queries
-4. **Flexibility**: Consumers can access both relational metadata and nested entity data
+4. **Flexibility**: Consumers can access both relational metadata and header data
 5. **CDC Compatibility**: CDC connectors can efficiently capture both column values and JSONB content
+6. **Note**: Only header information is streamed. Entity information must be queried from the database separately if needed.
 
 **Data Flow Through the System**:
 
-1. **Producer APIs** → Insert events with:
+1. **Producer APIs** → Insert event headers with:
    - Relational columns extracted from `eventHeader`
-   - Full event JSON stored in `event_data` JSONB column
+   - Event header JSON stored in `header_data` JSONB column
+   - Note: Only header information is streamed (not entities)
 
 2. **CDC Connector** → Captures:
    - Relational column values as separate fields
-   - `event_data` JSONB as JSON string
+   - `header_data` JSONB as JSON string
    - Adds CDC metadata (`__op`, `__table`, `__ts_ms`)
 
 3. **Kafka Topics** → Store events as JSON with:
    - Relational structure: `id`, `event_name`, `event_type`, `created_date`, `saved_date`
-   - `event_data`: JSON string containing full nested structure
+   - `header_data`: JSON string containing event header structure
    - CDC metadata: `__op`, `__table`, `__ts_ms`
 
 4. **Flink SQL** → Filters using:
    - Relational columns (`event_type`, `__op`) for efficient filtering
-   - Preserves `event_data` JSON string for consumers
+   - Preserves `header_data` JSON string for consumers
 
 5. **Consumers** → Process events by:
    - Using relational columns for routing/metadata
-   - Parsing `event_data` JSON string to access nested structure
+   - Parsing `header_data` JSON string to access header structure
+   - Note: Entity information is not available in the stream. Query database using `event_id` to retrieve associated entities if needed.
 
 **Example Event Structure**:
 
-**In Database (business_events table)**:
+**In Database (event_headers table)**:
 
 ```sql
 id: "event-123"
@@ -192,27 +200,47 @@ event_name: "LoanCreated"
 event_type: "LoanCreated"
 created_date: "2024-01-15T10:30:00Z"
 saved_date: "2024-01-15T10:30:05Z"
-event_data: {
+header_data: {
+  "uuid": "event-123",
+  "eventName": "Loan Created",
+  "eventType": "LoanCreated",
+  "createdDate": "2024-01-15T10:30:00Z",
+  "savedDate": "2024-01-15T10:30:05Z"
+}
+```
+
+**In Database (business_events table - event_data field)**:
+
+```json
+{
   "eventHeader": {
     "uuid": "event-123",
-    "eventName": "LoanCreated",
-    "createdDate": 1705312200000,
-    "savedDate": 1705312205000,
-    "eventType": "LoanCreated"
+    "eventName": "Loan Created",
+    "eventType": "LoanCreated",
+    "createdDate": "2024-01-15T10:30:00Z",
+    "savedDate": "2024-01-15T10:30:05Z"
   },
-  "eventBody": {
-    "entities": [{
-      "entityType": "Loan",
-      "entityId": "loan-456",
-      "updatedAttributes": {
-        "loan": {
-          "loanAmount": 50000,
-          "balance": 50000,
-          "status": "active"
-        }
-      }
-    }]
-  }
+  "entities": [
+    {
+      "entityHeader": {
+        "entityId": "loan-456",
+        "entityType": "Loan",
+        "createdAt": "2024-01-15T10:30:00Z",
+        "updatedAt": "2024-01-15T10:30:00Z"
+      },
+      "id": "loan-456",
+      "carId": "car-123",
+      "financialInstitution": "First National Bank",
+      "loanAmount": 50000.00,
+      "balance": 50000.00,
+      "status": "active",
+      "interestRate": 0.045,
+      "termMonths": 60,
+      "startDate": "2024-01-15T10:30:00Z",
+      "monthlyPayment": 932.16,
+      "lastPaidDate": "2024-01-15T10:30:00Z"
+    }
+  ]
 }
 ```
 
@@ -229,9 +257,9 @@ The event structure in Kafka depends on the connector configuration:
   "event_type": "LoanCreated",
   "created_date": "2024-01-15T10:30:00Z",
   "saved_date": "2024-01-15T10:30:05Z",
-  "event_data": "{\"eventHeader\":{...},\"eventBody\":{...}}",
+  "header_data": "{\"uuid\":\"event-123\",\"eventName\":\"LoanCreated\",\"eventType\":\"LoanCreated\",\"createdDate\":1705312200000,\"savedDate\":1705312205000}",
   "__op": "c",
-  "__table": "business_events",
+  "__table": "event_headers",
   "__ts_ms": 1705312205000
 }
 ```
@@ -240,20 +268,21 @@ The event structure in Kafka depends on the connector configuration:
 
 ### 1. PostgreSQL Database (Source)
 
-**Purpose**: The source of truth for business events stored in the `business_events` table
+**Purpose**: The source of truth for event headers stored in the `event_headers` table
 
 **Database Schema**:
 
-The `business_events` table schema is defined in the [Data Model Architecture](#data-model-architecture) section. It uses a hybrid approach combining relational columns for efficient filtering and a JSONB column for full event data.
+The `event_headers` table schema is defined in the [Data Model Architecture](#data-model-architecture) section. It uses a hybrid approach combining relational columns for efficient filtering and a JSONB column for header data. The table has a foreign key relationship to `business_events` table.
 
 **How It Works**:
 
-- Producer APIs insert events into `business_events` table with both relational columns and full JSONB data
+- Producer APIs insert event headers into `event_headers` table with both relational columns and header JSONB data
 - PostgreSQL Write-Ahead Log (WAL) records all changes
 - Logical replication slots enable CDC capture without impacting database performance
-- CDC connector captures both relational column values and the `event_data` JSONB content
+- CDC connector captures both relational column values and the `header_data` JSONB content
 - Relational columns enable efficient filtering in Flink SQL
-- JSONB column preserves full event structure for consumers
+- JSONB column preserves event header structure for consumers
+- Note: Only header information is streamed. Entity information is stored separately and can be queried from the database if needed.
 
 **Configuration**:
 
@@ -264,7 +293,7 @@ ALTER SYSTEM SET max_replication_slots = 10;
 ALTER SYSTEM SET max_wal_senders = 10;
 
 -- Create replication slot (done by connector)
-SELECT pg_create_logical_replication_slot('business_events_cdc_slot', 'pgoutput');
+SELECT pg_create_logical_replication_slot('event_headers_cdc_slot', 'pgoutput');
 ```
 
 **Back-End Infrastructure**:
@@ -273,7 +302,7 @@ For details on RDS Proxy, Aurora Auto-Start/Stop, and Lambda functions, see [BAC
 
 ### 2. CDC Source Connector
 
-**Purpose**: Captures database changes from `business_events` table and streams them to Kafka
+**Purpose**: Captures database changes from `event_headers` table and streams them to Kafka
 
 **Connector Configuration**:
 
@@ -292,11 +321,11 @@ For details on RDS Proxy, Aurora Auto-Start/Stop, and Lambda functions, see [BAC
 - Connects to PostgreSQL replication slot (created automatically)
 - Reads WAL changes via logical replication
 - Captures relational column values (`id`, `event_name`, `event_type`, `created_date`, `saved_date`)
-- Captures `event_data` JSONB column as JSON string
+- Captures `header_data` JSONB column as JSON string
 - **PostgresCdcSourceV2** applies **ExtractNewRecordState** transform to unwrap Debezium envelope:
   - Extracts actual record data (not before/after structure)
   - Adds CDC metadata: `__op` (operation: 'c'=create, 'u'=update, 'd'=delete), `__table`, `__ts_ms`
-- Applies **RegexRouter** transform to route to `raw-business-events` topic
+- Applies **RegexRouter** transform to route to `raw-event-headers` topic
 - Publishes events to Kafka in **JSON format** (not Avro)
 - Maintains offset tracking for exactly-once semantics
 
@@ -308,13 +337,13 @@ The connector output structure matches the event structure in Kafka as defined i
 
 - **Format**: JSON (using `JsonConverter` with `schemas.enable=false`)
 - **Transform**: `ExtractNewRecordState` to unwrap Debezium envelope
-- **Transform**: `TopicRegexRouter` (`io.confluent.connect.cloud.transforms.TopicRegexRouter`) to route to `raw-business-events` topic
-- **Table**: `public.business_events`
+- **Transform**: `TopicRegexRouter` (`io.confluent.connect.cloud.transforms.TopicRegexRouter`) to route to `raw-event-headers` topic
+- **Table**: `public.event_headers`
 - **Replication Slot**: Created automatically by connector
 
 **Configuration File**:
 
-- `connectors/postgres-cdc-source-v2-debezium-business-events-confluent-cloud.json` - Recommended connector configuration
+- `connectors/postgres-cdc-source-v2-debezium-event-headers-confluent-cloud.json` - Recommended connector configuration
 
 ### 3. Kafka Broker
 
@@ -406,7 +435,7 @@ The system includes 4 dockerized consumers, one for each filtered topic:
 Consumers **do NOT connect to Flink**. Instead, they connect directly to **Kafka** (local or Confluent Cloud) and subscribe to the filtered topics that Flink writes to. Here's the complete flow:
 
 1. **Flink SQL Jobs Write to Kafka Topics**:
-   - Flink SQL jobs consume from `raw-business-events` topic
+   - Flink SQL jobs consume from `raw-event-headers` topic
    - After filtering and transformation, Flink writes filtered events to consumer-specific Kafka topics:
      - `filtered-loan-created-events`
      - `filtered-loan-payment-submitted-events`
@@ -414,7 +443,7 @@ Consumers **do NOT connect to Flink**. Instead, they connect directly to **Kafka
      - `filtered-car-created-events`
    - These topics are **created in Kafka** automatically by Flink when it first writes to them
    - Flink acts as a **producer** to these filtered topics
-   - Events maintain the relational structure: `id`, `event_name`, `event_type`, `created_date`, `saved_date`, `event_data` (JSON string), `__op`, `__table`
+   - Events maintain the relational structure: `id`, `event_name`, `event_type`, `created_date`, `saved_date`, `header_data` (JSON string), `__op`, `__table`
 
 2. **Consumers Connect to Kafka**:
    - Consumer applications connect to Kafka brokers using `bootstrap.servers`
@@ -502,8 +531,7 @@ Consumers receive events in the relational structure format defined in the [Data
    # Parse nested structure from event_data
    event_data = json.loads(message['event_data'])
    event_header = event_data['eventHeader']
-   event_body = event_data['eventBody']
-   entities = event_body['entities']
+   entities = event_data['entities']
    ```
 
 3. **Process Entities**: Access nested entity data from the parsed `event_data`
@@ -514,7 +542,8 @@ See `consumers/loan-consumer/consumer.py` for a complete implementation example.
 
 - All consumers parse the **relational structure** first (id, event_name, event_type, etc.)
 - The `event_data` field is a **JSON string** that must be parsed with `json.loads()`
-- After parsing `event_data`, consumers can access the nested structure (eventHeader, eventBody, entities)
+- After parsing `event_data`, consumers can access the nested structure (eventHeader, entities)
+- Each entity in the entities array contains an entityHeader and direct properties
 - Each consumer processes entity-specific attributes based on the entity type
 
 **Topic Creation**:
@@ -552,8 +581,8 @@ Each consumer prints events to stdout with detailed information including:
 
 - Relational structure fields (id, event_name, event_type, created_date, saved_date)
 - CDC metadata (`__op`, `__table`)
-- Parsed nested structure from event_data (eventHeader, eventBody, entities)
-- Entity-specific attributes based on entity type
+- Parsed nested structure from event_data (eventHeader, entities)
+- Entity-specific attributes based on entity type (from entityHeader and direct properties)
 
 ## Fundamentals Section
 

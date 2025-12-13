@@ -18,15 +18,15 @@ Monitor topics via Confluent Cloud CLI:
 
 ```bash
 # Consume messages via CLI
-confluent kafka topic consume raw-business-events --from-beginning
+confluent kafka topic consume raw-event-headers --from-beginning
 confluent kafka topic consume filtered-loan-created-events --from-beginning
 
 # View topic details and metrics
-confluent kafka topic describe raw-business-events
+confluent kafka topic describe raw-event-headers
 confluent kafka topic describe filtered-loan-created-events
 
 # View topic metrics (message count, throughput, etc.)
-confluent kafka topic describe raw-business-events --output json | jq '.metrics'
+confluent kafka topic describe raw-event-headers --output json | jq '.metrics'
 ```
 
 **Via Confluent Cloud Console:**

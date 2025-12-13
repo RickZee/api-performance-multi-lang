@@ -321,7 +321,7 @@ When a payload size is specified, the base event structure is expanded with nest
 
 **Payload Structure:**
 
-Each payload contains an event header (UUID, event name, timestamps) and an event body with a single entity containing attributes. For larger payload sizes, the `updatedAttributes` field is expanded with nested structures to reach the target size.
+Each payload contains an event header (UUID, event name, timestamps) and an entities array at the root level. Each entity includes an entityHeader and direct properties. For larger payload sizes, entity properties are expanded with nested structures to reach the target size.
 
 **Event Types:** Four event types are randomly selected during test execution: `CarCreated`, `LoanCreated`, `LoanPaymentSubmitted`, and `ServiceDone`.
 
@@ -652,29 +652,31 @@ This logic is consistent across all producer API implementations.
 
 ### Event Structure
 
-Events follow a standardized structure with header and body sections:
+Events follow a standardized structure with an event header and an entities array:
 
 ```json
 {
   "eventHeader": {
     "uuid": "550e8400-e29b-41d4-a716-446655440000",
-    "eventName": "LoanPaymentSubmitted",
+    "eventName": "Loan Payment Submitted",
+    "eventType": "LoanPaymentSubmitted",
     "createdDate": "2024-01-15T10:30:00Z",
-    "savedDate": "2024-01-15T10:30:05Z",
-    "eventType": "LoanPaymentSubmitted"
+    "savedDate": "2024-01-15T10:30:05Z"
   },
-  "eventBody": {
-    "entities": [
-      {
-        "entityType": "Loan",
-        "entityId": "loan-12345",
-        "updatedAttributes": {
-          "balance": 24439.75,
-          "lastPaidDate": "2024-01-15T10:30:00Z"
-        }
-      }
-    ]
-  }
+  "entities": [
+    {
+      "entityHeader": {
+        "entityId": "PAYMENT-2024-001",
+        "entityType": "LoanPayment",
+        "createdAt": "2024-01-15T10:30:00Z",
+        "updatedAt": "2024-01-15T10:30:00Z"
+      },
+      "id": "PAYMENT-2024-001",
+      "loanId": "loan-12345",
+      "amount": 932.16,
+      "paymentDate": "2024-01-15T10:30:00Z"
+    }
+  ]
 }
 ```
 

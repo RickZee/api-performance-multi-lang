@@ -66,7 +66,7 @@ The system automatically:
    confluent flink statement list --compute-pool <compute-pool-id>
    
    # Verify topics have messages
-   confluent kafka topic consume raw-business-events --max-messages 5
+   confluent kafka topic consume raw-event-headers --max-messages 5
    ```
 
 3. **Monitor in Confluent Cloud Console**
@@ -98,13 +98,13 @@ The system automatically:
 ### Filter Configuration
 
 Filtering rules are defined in Flink SQL files:
-- `flink-jobs/business-events-routing-confluent-cloud.sql` - Main routing job
+- `flink-jobs/business-events-routing-confluent-cloud.sql` - Main routing job (streams from event_headers)
 - Edit SQL files to modify filtering rules
 
 ### Connector Configuration
 
 Connector configuration files:
-- `connectors/postgres-cdc-source-v2-debezium-business-events-confluent-cloud.json` - Recommended connector
+- `connectors/postgres-cdc-source-v2-debezium-event-headers-confluent-cloud.json` - Recommended connector
 
 For detailed configuration, see [ARCHITECTURE.md](ARCHITECTURE.md).
 
@@ -112,7 +112,8 @@ For detailed configuration, see [ARCHITECTURE.md](ARCHITECTURE.md).
 
 The system uses a **hybrid data model** combining:
 - **Relational columns** for efficient filtering (`id`, `event_type`, `event_name`)
-- **JSONB column** (`event_data`) for full nested event structure
+- **JSONB column** (`header_data`) for event header structure
+- **Note**: Only header information is streamed. Entity information must be queried from the database separately if needed.
 
 **Example Event Structure:**
 
