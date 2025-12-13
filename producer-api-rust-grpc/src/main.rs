@@ -1,13 +1,14 @@
 mod config;
 mod constants;
 mod error;
+mod models;
 mod repository;
 mod service;
 
 use anyhow::Context;
 use config::Config;
 use constants::API_NAME;
-use repository::CarEntityRepository;
+use repository::BusinessEventRepository;
 use service::event_service::create_service;
 use sqlx::postgres::PgPoolOptions;
 use std::net::SocketAddr;
@@ -46,17 +47,9 @@ async fn main() -> anyhow::Result<()> {
 
     tracing::info!("{} Connected to database", API_NAME);
 
-    // Run migrations
-    sqlx::migrate!("./migrations")
-        .run(&pool)
-        .await
-        .context("Failed to run migrations")?;
-
-    tracing::info!("{} Database migrations completed", API_NAME);
-
     // Initialize repository and service
-    let repository = CarEntityRepository::new(pool);
-    let event_service = create_service(repository);
+    let business_event_repo = BusinessEventRepository::new(pool.clone());
+    let event_service = create_service(business_event_repo, pool);
 
     // Start gRPC server
     let addr = SocketAddr::from(([0, 0, 0, 0], config.server_port));

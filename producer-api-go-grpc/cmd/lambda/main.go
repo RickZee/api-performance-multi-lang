@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"os"
 	"producer-api-go-grpc/internal/config"
 	"producer-api-go-grpc/internal/constants"
 	"producer-api-go-grpc/internal/lambda"
@@ -44,11 +43,6 @@ func init() {
 	pool, err := lambda.GetConnectionPool(cfg.DatabaseURL, logger)
 	if err != nil {
 		logger.Fatal("Failed to initialize connection pool", zap.Error(err))
-	}
-
-	// Run migrations (if needed)
-	if err := runMigrations(cfg.DatabaseURL, logger); err != nil {
-		logger.Warn("Failed to run migrations", zap.Error(err))
 	}
 
 	// Initialize repository and service
@@ -233,48 +227,4 @@ func createErrorResponseFromError(err error, contentType string) events.APIGatew
 	return createErrorResponse(st.Code(), st.Message(), contentType)
 }
 
-func runMigrations(databaseURL string, logger *zap.Logger) error {
-	// Read migration file
-	migrationSQL, err := os.ReadFile("migrations/001_initial_schema.sql")
-	if err != nil {
-		// In Lambda, migrations might be in a different location
-		// Try alternative paths
-		paths := []string{
-			"migrations/001_initial_schema.sql",
-			"/var/task/migrations/001_initial_schema.sql",
-			"./migrations/001_initial_schema.sql",
-		}
-		for _, path := range paths {
-			if migrationSQL, err = os.ReadFile(path); err == nil {
-				break
-			}
-		}
-		if err != nil {
-			return fmt.Errorf("failed to read migration file: %w", err)
-		}
-	}
-
-	// Execute migration using connection pool
-	pool, err := lambda.GetConnectionPool(databaseURL, logger)
-	if err != nil {
-		return fmt.Errorf("failed to get connection pool: %w", err)
-	}
-
-	// Split SQL by semicolons and execute each statement
-	statements := strings.Split(string(migrationSQL), ";")
-	for _, stmt := range statements {
-		stmt = strings.TrimSpace(stmt)
-		if stmt == "" || strings.HasPrefix(stmt, "--") {
-			continue
-		}
-		if _, err := pool.Exec(context.Background(), stmt); err != nil {
-			// Ignore "already exists" errors
-			if !strings.Contains(err.Error(), "already exists") {
-				return fmt.Errorf("failed to execute migration: %w", err)
-			}
-		}
-	}
-
-	return nil
-}
 

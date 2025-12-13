@@ -1,0 +1,91 @@
+plugins {
+    id 'java'
+    id 'java-library'
+}
+
+group = 'io.debezium.connector'
+version = '1.0.0'
+description = 'Debezium Connector for Amazon Aurora DSQL'
+
+java {
+    sourceCompatibility = '17'
+    targetCompatibility = '17'
+}
+
+repositories {
+    mavenCentral()
+}
+
+dependencies {
+    // Kafka Connect API
+    implementation 'org.apache.kafka:connect-api:3.6.0'
+    
+    // PostgreSQL JDBC Driver (for DSQL compatibility)
+    implementation 'org.postgresql:postgresql:42.7.1'
+    
+    // Connection Pooling
+    implementation 'com.zaxxer:HikariCP:5.1.0'
+    
+    // AWS SDK for IAM token generation
+    implementation 'software.amazon.awssdk:rds:2.25.0'
+    implementation 'software.amazon.awssdk:sts:2.25.0'
+    implementation 'software.amazon.awssdk:core:2.25.0'
+    
+    // JSON processing
+    implementation 'com.fasterxml.jackson.core:jackson-databind:2.16.0'
+    implementation 'com.fasterxml.jackson.datatype:jackson-datatype-jsr310:2.16.0'
+    
+    // Logging
+    implementation 'org.slf4j:slf4j-api:2.0.9'
+    
+    // Testing
+    testImplementation 'org.junit.jupiter:junit-jupiter:5.10.1'
+    testImplementation 'org.mockito:mockito-core:5.8.0'
+    testImplementation 'org.mockito:mockito-junit-jupiter:5.8.0'
+    testImplementation 'org.testcontainers:postgresql:1.19.3'
+    testImplementation 'org.testcontainers:kafka:1.19.3'
+    testImplementation 'org.testcontainers:junit-jupiter:1.19.3'
+    testImplementation 'org.assertj:assertj-core:3.24.2'
+}
+
+tasks.named('test') {
+    useJUnitPlatform()
+    testLogging {
+        events "passed", "skipped", "failed"
+        exceptionFormat "full"
+    }
+}
+
+// Create a fat JAR for deployment
+jar {
+    archiveBaseName = 'debezium-connector-dsql'
+    archiveVersion = project.version
+    
+    from {
+        configurations.runtimeClasspath.collect { it.isDirectory() ? it : zipTree(it) }
+    }
+    
+    duplicatesStrategy = DuplicatesStrategy.EXCLUDE
+    
+    manifest {
+        attributes(
+            'Implementation-Title': project.name,
+            'Implementation-Version': project.version,
+            'Implementation-Vendor': 'Debezium Community'
+        )
+    }
+}
+
+// Task to create connector package
+task connectorPackage(type: Zip) {
+    dependsOn jar
+    archiveBaseName = 'debezium-connector-dsql-package'
+    archiveVersion = project.version
+    
+    from jar.archiveFile
+    from 'config'
+    from 'README.md'
+    
+    into 'debezium-connector-dsql'
+}
+

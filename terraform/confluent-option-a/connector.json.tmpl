@@ -1,0 +1,33 @@
+{
+  "name": "${CONNECTOR_NAME}",
+  "config": {
+    "connector.class": "io.debezium.connector.dsql.DsqlConnector",
+    "tasks.max": "1",
+
+    "dsql.endpoint.primary": "${DSQL_ENDPOINT_PRIMARY}",
+    "dsql.port": "5432",
+    "dsql.region": "us-east-1",
+    "dsql.iam.username": "${DSQL_IAM_USERNAME}",
+    "dsql.database.name": "${DSQL_DATABASE_NAME}",
+    "dsql.tables": "${DSQL_TABLE}",
+    "dsql.poll.interval.ms": "1000",
+    "dsql.batch.size": "1000",
+    "topic.prefix": "${TOPIC_PREFIX}",
+
+    "key.converter": "org.apache.kafka.connect.json.JsonConverter",
+    "key.converter.schemas.enable": "false",
+    "value.converter": "org.apache.kafka.connect.json.JsonConverter",
+    "value.converter.schemas.enable": "false",
+
+    "errors.tolerance": "all",
+    "errors.log.enable": "true",
+    "errors.log.include.messages": "true",
+
+    "transforms": "route",
+    "transforms.route.type": "org.apache.kafka.connect.transforms.RegexRouter",
+    "transforms.route.regex": "${TOPIC_PREFIX}\\.public\\.${DSQL_TABLE}",
+    "transforms.route.replacement": "${ROUTED_TOPIC}"
+  }
+}
+
+

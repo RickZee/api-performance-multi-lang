@@ -76,6 +76,75 @@ variable "enable_aurora" {
   default     = true
 }
 
+variable "enable_aurora_dsql_cluster" {
+  description = "Whether to create Aurora DSQL cluster (separate from regular Aurora)"
+  type        = bool
+  default     = false
+}
+
+# Note: Aurora DSQL is serverless and uses ACU (Aurora Capacity Units) instead of instance classes
+# DEPRECATED: aurora_dsql_instance_class is no longer used for DSQL (serverless uses ACU)
+variable "aurora_dsql_instance_class" {
+  description = "[DEPRECATED] Aurora DSQL is serverless and uses ACU instead. Use aurora_dsql_min_capacity and aurora_dsql_max_capacity instead."
+  type        = string
+  default     = null
+}
+
+variable "aurora_dsql_min_capacity" {
+  description = "Minimum Aurora Capacity Units (ACU) for DSQL serverless scaling. Default: 1 ACU (minimum for serverless)"
+  type        = number
+  default     = 1
+}
+
+variable "aurora_dsql_max_capacity" {
+  description = "Maximum Aurora Capacity Units (ACU) for DSQL serverless scaling. Default: 2 ACU (sufficient for dev)"
+  type        = number
+  default     = 2
+}
+
+variable "aurora_dsql_auto_pause" {
+  description = "Whether to automatically pause DSQL database after inactivity (cost optimization for dev). Default: true"
+  type        = bool
+  default     = true
+}
+
+variable "aurora_dsql_seconds_until_auto_pause" {
+  description = "Time in seconds before DSQL database automatically pauses (only used if auto_pause is true). Default: 300 (5 minutes)"
+  type        = number
+  default     = 300
+}
+
+variable "aurora_dsql_publicly_accessible" {
+  description = "Make Aurora DSQL cluster publicly accessible"
+  type        = bool
+  default     = true
+}
+
+variable "aurora_dsql_database_name" {
+  description = "Database name for Aurora DSQL cluster"
+  type        = string
+  default     = "car_entities"
+}
+
+variable "aurora_dsql_database_user" {
+  description = "Database master username for Aurora DSQL (for initial setup, IAM users created separately)"
+  type        = string
+  default     = "postgres"
+}
+
+variable "aurora_dsql_database_password" {
+  description = "Database master password for Aurora DSQL"
+  type        = string
+  default     = ""
+  sensitive   = true
+}
+
+variable "aurora_dsql_engine_version" {
+  description = "Aurora DSQL engine version"
+  type        = string
+  default     = "15.14"
+}
+
 variable "enable_vpc" {
   description = "Whether to enable VPC configuration (for existing VPC)"
   type        = bool
@@ -83,9 +152,9 @@ variable "enable_vpc" {
 }
 
 variable "aurora_instance_class" {
-  description = "Aurora instance class (cost-optimized default: db.t3.small)"
+  description = "Aurora instance class. Defaults: db.t3.small for dev, db.r5.large for test (can be overridden)"
   type        = string
-  default     = "db.t3.small"
+  default     = null
 }
 
 variable "aurora_publicly_accessible" {
@@ -165,6 +234,12 @@ variable "enable_python_lambda" {
   default     = false
 }
 
+variable "enable_python_lambda_dsql" {
+  description = "Enable Python Lambda function with DSQL support (separate from regular Python Lambda)"
+  type        = bool
+  default     = false
+}
+
 variable "enable_rds_proxy" {
   description = "Enable RDS Proxy for connection pooling (recommended for high Lambda parallelism)"
   type        = bool
@@ -202,28 +277,70 @@ variable "enable_terraform_state_backend" {
 }
 
 variable "backup_retention_period" {
-  description = "Aurora backup retention period in days. Defaults: 3 for dev/staging, 7 for prod (set via environment variable)"
+  description = "Aurora backup retention period in days. Defaults: 1 for dev, 3 for test (set via environment variable)"
   type        = number
   default     = null
 }
 
 variable "cloudwatch_logs_retention_days" {
-  description = "CloudWatch Logs retention period in days (cost-optimized default: 3)"
+  description = "CloudWatch Logs retention period in days. Defaults: 1 for dev, 3 for test (set via environment variable)"
   type        = number
-  default     = 3
+  default     = null
   validation {
-    condition     = contains([1, 3, 5, 7, 14, 30, 60, 90, 120, 150, 180, 365, 400, 545, 731, 1827, 3653], var.cloudwatch_logs_retention_days)
+    condition     = var.cloudwatch_logs_retention_days == null || contains([1, 3, 5, 7, 14, 30, 60, 90, 120, 150, 180, 365, 400, 545, 731, 1827, 3653], var.cloudwatch_logs_retention_days)
     error_message = "CloudWatch Logs retention must be one of the valid values: 1, 3, 5, 7, 14, 30, 60, 90, 120, 150, 180, 365, 400, 545, 731, 1827, 3653"
   }
 }
 
 variable "environment" {
-  description = "Environment name (dev, staging, prod) - used for cost optimization defaults"
+  description = "Environment name (dev, test) - 'dev' uses absolute minimum infrastructure, 'test' uses larger RDS instance (db.r5.large)"
   type        = string
-  default     = "dev"
+  default     = "test"
   validation {
-    condition     = contains(["dev", "staging", "prod"], var.environment)
-    error_message = "Environment must be one of: dev, staging, prod"
+    condition     = contains(["dev", "test"], var.environment)
+    error_message = "Environment must be one of: dev, test"
   }
+}
+
+variable "enable_aurora_dsql" {
+  description = "Whether to use Aurora DSQL with IAM authentication (alternative to regular Aurora)"
+  type        = bool
+  default     = false
+}
+
+variable "aurora_dsql_endpoint" {
+  description = "Aurora DSQL cluster endpoint (required if enable_aurora_dsql is true)"
+  type        = string
+  default     = ""
+}
+
+variable "aurora_dsql_port" {
+  description = "Aurora DSQL cluster port (default: 5432)"
+  type        = number
+  default     = 5432
+}
+
+variable "iam_database_user" {
+  description = "IAM database username for Aurora DSQL authentication (required if enable_aurora_dsql is true)"
+  type        = string
+  default     = ""
+}
+
+variable "aurora_dsql_cluster_resource_id" {
+  description = "Aurora DSQL cluster resource ID for IAM permissions (format: cluster-xxxxx, required if enable_aurora_dsql is true)"
+  type        = string
+  default     = ""
+}
+
+variable "enable_dsql_test_runner_ec2" {
+  description = "Whether to create an EC2 test runner instance for DSQL connector testing (SSM access only, in private subnet)"
+  type        = bool
+  default     = false
+}
+
+variable "dsql_test_runner_instance_type" {
+  description = "EC2 instance type for DSQL test runner"
+  type        = string
+  default     = "t3.small"
 }
 

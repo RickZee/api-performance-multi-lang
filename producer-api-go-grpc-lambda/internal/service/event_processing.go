@@ -6,24 +6,43 @@ import (
 	"fmt"
 	"producer-api-go-grpc-lambda/internal/models"
 	"producer-api-go-grpc-lambda/internal/repository"
+	"strconv"
 	"sync/atomic"
 	"time"
 
+	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgxpool"
 	"go.uber.org/zap"
 	"producer-api-go-grpc-lambda/internal/constants"
 )
 
-type EventProcessingService struct {
-	repository          *repository.CarEntityRepository
-	persistedEventCount *atomic.Uint64
-	logger              *zap.Logger
+// Entity type to table name mapping
+var entityTableMap = map[string]string{
+	"Car":           "car_entities",
+	"Loan":          "loan_entities",
+	"LoanPayment":   "loan_payment_entities",
+	"ServiceRecord": "service_record_entities",
 }
 
-func NewEventProcessingService(repo *repository.CarEntityRepository, logger *zap.Logger) *EventProcessingService {
+type EventProcessingService struct {
+	businessEventRepo  *repository.BusinessEventRepository
+	eventHeaderRepo    *repository.EventHeaderRepository
+	pool               *pgxpool.Pool
+	persistedEventCount *atomic.Uint64
+	logger             *zap.Logger
+}
+
+func NewEventProcessingService(
+	businessEventRepo *repository.BusinessEventRepository,
+	pool *pgxpool.Pool,
+	logger *zap.Logger,
+) *EventProcessingService {
 	return &EventProcessingService{
-		repository:          repo,
+		businessEventRepo:  businessEventRepo,
+		eventHeaderRepo:    repository.NewEventHeaderRepository(pool),
+		pool:               pool,
 		persistedEventCount: &atomic.Uint64{},
-		logger:              logger,
+		logger:             logger,
 	}
 }
 
@@ -34,91 +53,338 @@ func (s *EventProcessingService) logPersistedEventCount() {
 	}
 }
 
-func (s *EventProcessingService) ProcessEntityUpdate(ctx context.Context, entityType, entityID string, updatedAttributes map[string]string) error {
-	s.logger.Info(fmt.Sprintf("%s Processing entity creation", constants.APIName()),
-		zap.String("entity_type", entityType),
-		zap.String("entity_id", entityID),
-	)
+func (s *EventProcessingService) getEntityRepository(entityType string) *repository.EntityRepository {
+	tableName, ok := entityTableMap[entityType]
+	if !ok {
+		s.logger.Warn(fmt.Sprintf("%s Unknown entity type: %s", constants.APIName(), entityType))
+		return nil
+	}
+	return repository.NewEntityRepository(s.pool, tableName)
+}
 
-	exists, err := s.repository.ExistsByEntityTypeAndID(ctx, entityType, entityID)
+// ProcessEvent processes a single event within a transaction.
+// All database operations (business_events, event_headers, entities) are executed
+// atomically within a single transaction. If any operation fails, all changes are rolled back.
+func (s *EventProcessingService) ProcessEvent(ctx context.Context, event *models.Event) error {
+	s.logger.Info(fmt.Sprintf("%s Processing event: %s", constants.APIName(), event.EventHeader.EventName))
+
+	// Generate event ID if not provided
+	eventID := event.EventHeader.UUID
+	if eventID == nil || *eventID == "" {
+		id := fmt.Sprintf("event-%s", time.Now().UTC().Format(time.RFC3339Nano))
+		eventID = &id
+	}
+
+	// Begin transaction
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return fmt.Errorf("failed to begin transaction: %w", err)
+	}
+	defer tx.Rollback(ctx) // Rollback if not committed
+
+	// 1. Save entire event to business_events table
+	if err := s.saveBusinessEvent(ctx, event, *eventID, tx); err != nil {
+		return fmt.Errorf("failed to save business event: %w", err)
+	}
+
+	// 2. Save event header to event_headers table
+	if err := s.saveEventHeader(ctx, event, *eventID, tx); err != nil {
+		return fmt.Errorf("failed to save event header: %w", err)
+	}
+
+	// 3. Extract and save entities to their respective tables
+	for _, entityUpdate := range event.EventBody.Entities {
+		if err := s.processEntityUpdate(ctx, entityUpdate, *eventID, tx); err != nil {
+			return fmt.Errorf("failed to process entity update: %w", err)
+		}
+	}
+
+	// Commit transaction
+	if err := tx.Commit(ctx); err != nil {
+		return fmt.Errorf("failed to commit transaction: %w", err)
+	}
+
+	s.logPersistedEventCount()
+	s.logger.Info(fmt.Sprintf("%s Successfully processed event in transaction: %s", constants.APIName(), *eventID))
+	return nil
+}
+
+func (s *EventProcessingService) saveBusinessEvent(
+	ctx context.Context,
+	event *models.Event,
+	eventID string,
+	tx pgx.Tx,
+) error {
+	eventName := event.EventHeader.EventName
+	eventType := event.EventHeader.EventType
+	createdDate := event.EventHeader.CreatedDate
+	savedDate := event.EventHeader.SavedDate
+
+	// Use current time if dates are not provided
+	now := time.Now()
+	if createdDate == nil {
+		createdDate = &now
+	}
+	if savedDate == nil {
+		savedDate = &now
+	}
+
+	// Convert event to map for JSONB storage
+	eventJSON, err := json.Marshal(event)
+	if err != nil {
+		return fmt.Errorf("failed to marshal event: %w", err)
+	}
+
+	var eventData map[string]interface{}
+	if err := json.Unmarshal(eventJSON, &eventData); err != nil {
+		return fmt.Errorf("failed to unmarshal event data: %w", err)
+	}
+
+	err = s.businessEventRepo.Create(ctx, eventID, eventName, eventType, createdDate, savedDate, eventData, tx)
+	if err != nil {
+		return err
+	}
+
+	s.logger.Info(fmt.Sprintf("%s Successfully saved business event: %s", constants.APIName(), eventID))
+	return nil
+}
+
+func (s *EventProcessingService) saveEventHeader(
+	ctx context.Context,
+	event *models.Event,
+	eventID string,
+	tx pgx.Tx,
+) error {
+	eventName := event.EventHeader.EventName
+	eventType := event.EventHeader.EventType
+	createdDate := event.EventHeader.CreatedDate
+	savedDate := event.EventHeader.SavedDate
+
+	// Use current time if dates are not provided
+	now := time.Now()
+	if createdDate == nil {
+		createdDate = &now
+	}
+	if savedDate == nil {
+		savedDate = &now
+	}
+
+	// Convert eventHeader to map for JSONB storage
+	headerJSON, err := json.Marshal(event.EventHeader)
+	if err != nil {
+		return fmt.Errorf("failed to marshal event header: %w", err)
+	}
+
+	var headerData map[string]interface{}
+	if err := json.Unmarshal(headerJSON, &headerData); err != nil {
+		return fmt.Errorf("failed to unmarshal header data: %w", err)
+	}
+
+	err = s.eventHeaderRepo.Create(ctx, eventID, eventName, eventType, createdDate, savedDate, headerData, tx)
+	if err != nil {
+		return err
+	}
+
+	s.logger.Info(fmt.Sprintf("%s Successfully saved event header: %s", constants.APIName(), eventID))
+	return nil
+}
+
+func (s *EventProcessingService) processEntityUpdate(
+	ctx context.Context,
+	entityUpdate models.EntityUpdate,
+	eventID string,
+	tx pgx.Tx,
+) error {
+	s.logger.Info(fmt.Sprintf("%s Processing entity for type: %s and id: %s",
+		constants.APIName(), entityUpdate.EntityType, entityUpdate.EntityID))
+
+	entityRepo := s.getEntityRepository(entityUpdate.EntityType)
+	if entityRepo == nil {
+		s.logger.Warn(fmt.Sprintf("%s Skipping entity with unknown type: %s",
+			constants.APIName(), entityUpdate.EntityType))
+		return nil
+	}
+
+	exists, err := entityRepo.ExistsByEntityID(ctx, entityUpdate.EntityID, tx)
 	if err != nil {
 		return fmt.Errorf("failed to check if entity exists: %w", err)
 	}
 
 	if exists {
-		s.logger.Warn(fmt.Sprintf("%s Entity already exists, updating", constants.APIName()), zap.String("entity_id", entityID))
-		if err := s.UpdateExistingEntity(ctx, entityType, entityID, updatedAttributes); err != nil {
-			return fmt.Errorf("failed to update existing entity: %w", err)
-		}
-		s.logPersistedEventCount()
+		s.logger.Warn(fmt.Sprintf("%s Entity already exists, updating: %s",
+			constants.APIName(), entityUpdate.EntityID))
+		return s.updateExistingEntity(ctx, entityRepo, entityUpdate, eventID, tx)
 	} else {
-		s.logger.Info(fmt.Sprintf("%s Entity does not exist, creating new", constants.APIName()), zap.String("entity_id", entityID))
-		if err := s.CreateNewEntity(ctx, entityType, entityID, updatedAttributes); err != nil {
-			return fmt.Errorf("failed to create new entity: %w", err)
-		}
-		s.logPersistedEventCount()
+		s.logger.Info(fmt.Sprintf("%s Entity does not exist, creating new: %s",
+			constants.APIName(), entityUpdate.EntityID))
+		return s.createNewEntity(ctx, entityRepo, entityUpdate, eventID, tx)
 	}
-
-	return nil
 }
 
-func (s *EventProcessingService) CreateNewEntity(ctx context.Context, entityType, entityID string, updatedAttributes map[string]string) error {
-	// Convert map[string]string to JSON
-	dataJSON, err := json.Marshal(updatedAttributes)
-	if err != nil {
-		return fmt.Errorf("failed to serialize entity data: %w", err)
-	}
-
-	entity := models.NewCarEntity(
-		entityID,
-		entityType,
-		string(dataJSON),
-	)
-
-	if err := s.repository.Create(ctx, entity); err != nil {
-		return fmt.Errorf("failed to insert entity into database: %w", err)
-	}
-
-	s.logger.Info(fmt.Sprintf("%s Successfully created entity", constants.APIName()), zap.String("entity_id", entity.ID))
-	return nil
-}
-
-func (s *EventProcessingService) UpdateExistingEntity(ctx context.Context, entityType, entityID string, updatedAttributes map[string]string) error {
-	existingEntity, err := s.repository.FindByEntityTypeAndID(ctx, entityType, entityID)
-	if err != nil {
-		return fmt.Errorf("failed to find existing entity: %w", err)
-	}
-	if existingEntity == nil {
-		return fmt.Errorf("entity not found for update")
-	}
-
-	// Parse existing data
-	var existingData map[string]interface{}
-	if err := json.Unmarshal([]byte(existingEntity.Data), &existingData); err != nil {
-		return fmt.Errorf("failed to parse existing entity data: %w", err)
-	}
-
-	// Merge new attributes into existing data
-	for key, value := range updatedAttributes {
-		existingData[key] = value
-	}
-
-	// Serialize merged data
-	mergedData, err := json.Marshal(existingData)
-	if err != nil {
-		return fmt.Errorf("failed to serialize updated entity data: %w", err)
-	}
-
-	// Update entity
+func (s *EventProcessingService) createNewEntity(
+	ctx context.Context,
+	entityRepo *repository.EntityRepository,
+	entityUpdate models.EntityUpdate,
+	eventID string,
+	tx pgx.Tx,
+) error {
+	entityID := entityUpdate.EntityID
+	entityType := entityUpdate.EntityType
 	now := time.Now()
-	existingEntity.Data = string(mergedData)
-	existingEntity.UpdatedAt = &now
 
-	if err := s.repository.Update(ctx, existingEntity); err != nil {
-		return fmt.Errorf("failed to update entity in database: %w", err)
+	// Parse updatedAttributes to extract entity data
+	var updatedAttrs map[string]interface{}
+	if err := json.Unmarshal(entityUpdate.UpdatedAttributes, &updatedAttrs); err != nil {
+		return fmt.Errorf("failed to parse updated attributes: %w", err)
 	}
 
-	s.logger.Info(fmt.Sprintf("%s Successfully updated entity", constants.APIName()), zap.String("entity_id", existingEntity.ID))
+	// Make a copy to avoid modifying the original
+	entityData := make(map[string]interface{})
+	for k, v := range updatedAttrs {
+		entityData[k] = v
+	}
+
+	// Remove entityHeader from entity_data if it exists (nested structure)
+	var entityHeader map[string]interface{}
+	if header, ok := entityData["entityHeader"].(map[string]interface{}); ok {
+		entityHeader = header
+		delete(entityData, "entityHeader")
+	} else if header, ok := entityData["entity_header"].(map[string]interface{}); ok {
+		entityHeader = header
+		delete(entityData, "entity_header")
+	}
+
+	// Extract createdAt and updatedAt from entityHeader if present, otherwise from entity_data, otherwise use now
+	var createdAt, updatedAt *time.Time
+	if entityHeader != nil {
+		if ca, ok := entityHeader["createdAt"].(string); ok {
+			if parsed, err := s.parseDateTime(ca); err == nil {
+				createdAt = &parsed
+			}
+		} else if ca, ok := entityHeader["created_at"].(string); ok {
+			if parsed, err := s.parseDateTime(ca); err == nil {
+				createdAt = &parsed
+			}
+		}
+		if ua, ok := entityHeader["updatedAt"].(string); ok {
+			if parsed, err := s.parseDateTime(ua); err == nil {
+				updatedAt = &parsed
+			}
+		} else if ua, ok := entityHeader["updated_at"].(string); ok {
+			if parsed, err := s.parseDateTime(ua); err == nil {
+				updatedAt = &parsed
+			}
+		}
+	}
+
+	// Try to get from entity_data if not found in entityHeader
+	if createdAt == nil {
+		if ca, ok := entityData["createdAt"].(string); ok {
+			if parsed, err := s.parseDateTime(ca); err == nil {
+				createdAt = &parsed
+			}
+			delete(entityData, "createdAt")
+		} else if ca, ok := entityData["created_at"].(string); ok {
+			if parsed, err := s.parseDateTime(ca); err == nil {
+				createdAt = &parsed
+			}
+			delete(entityData, "created_at")
+		}
+	}
+	if updatedAt == nil {
+		if ua, ok := entityData["updatedAt"].(string); ok {
+			if parsed, err := s.parseDateTime(ua); err == nil {
+				updatedAt = &parsed
+			}
+			delete(entityData, "updatedAt")
+		} else if ua, ok := entityData["updated_at"].(string); ok {
+			if parsed, err := s.parseDateTime(ua); err == nil {
+				updatedAt = &parsed
+			}
+			delete(entityData, "updated_at")
+		}
+	}
+
+	// Use now if still not set
+	if createdAt == nil {
+		createdAt = &now
+	}
+	if updatedAt == nil {
+		updatedAt = &now
+	}
+
+	err := entityRepo.Create(ctx, entityID, entityType, createdAt, updatedAt, entityData, &eventID, tx)
+	if err != nil {
+		return fmt.Errorf("failed to create entity: %w", err)
+	}
+
+	s.logger.Info(fmt.Sprintf("%s Successfully created entity: %s", constants.APIName(), entityID))
 	return nil
 }
 
+func (s *EventProcessingService) updateExistingEntity(
+	ctx context.Context,
+	entityRepo *repository.EntityRepository,
+	entityUpdate models.EntityUpdate,
+	eventID string,
+	tx pgx.Tx,
+) error {
+	entityID := entityUpdate.EntityID
+	updatedAt := time.Now()
+
+	// Parse updatedAttributes to extract entity data
+	var updatedAttrs map[string]interface{}
+	if err := json.Unmarshal(entityUpdate.UpdatedAttributes, &updatedAttrs); err != nil {
+		return fmt.Errorf("failed to parse updated attributes: %w", err)
+	}
+
+	// Make a copy to avoid modifying the original
+	entityData := make(map[string]interface{})
+	for k, v := range updatedAttrs {
+		entityData[k] = v
+	}
+
+	// Remove entityHeader from entity_data if it exists
+	delete(entityData, "entityHeader")
+	delete(entityData, "entity_header")
+
+	// Remove entityHeader fields that might be at top level
+	delete(entityData, "createdAt")
+	delete(entityData, "created_at")
+	delete(entityData, "updatedAt")
+	delete(entityData, "updated_at")
+
+	err := entityRepo.Update(ctx, entityID, updatedAt, entityData, &eventID, tx)
+	if err != nil {
+		return fmt.Errorf("failed to update entity: %w", err)
+	}
+
+	s.logger.Info(fmt.Sprintf("%s Successfully updated entity: %s", constants.APIName(), entityID))
+	return nil
+}
+
+func (s *EventProcessingService) parseDateTime(dtStr string) (time.Time, error) {
+	// Try ISO 8601 formats
+	formats := []string{
+		time.RFC3339,
+		time.RFC3339Nano,
+		"2006-01-02T15:04:05Z",
+		"2006-01-02T15:04:05.000Z",
+		"2006-01-02T15:04:05Z07:00",
+	}
+
+	for _, format := range formats {
+		if t, err := time.Parse(format, dtStr); err == nil {
+			return t, nil
+		}
+	}
+
+	// Try parsing as Unix timestamp (milliseconds)
+	if ms, err := strconv.ParseInt(dtStr, 10, 64); err == nil {
+		secs := ms / 1000
+		nsecs := (ms % 1000) * 1000000
+		return time.Unix(secs, nsecs), nil
+	}
+
+	return time.Now(), fmt.Errorf("unable to parse datetime string: %s", dtStr)
+}

@@ -1,0 +1,145 @@
+# EC2 Test Runner Module
+# Creates an EC2 instance for testing DSQL connector from inside the VPC
+# Uses SSM Session Manager for access (no inbound ports)
+
+data "aws_caller_identity" "current" {}
+data "aws_region" "current" {}
+
+# Get latest Amazon Linux 2023 AMI
+data "aws_ami" "amazon_linux_2023" {
+  most_recent = true
+  owners      = ["amazon"]
+
+  filter {
+    name   = "name"
+    values = ["al2023-ami-*-x86_64"]
+  }
+
+  filter {
+    name   = "virtualization-type"
+    values = ["hvm"]
+  }
+}
+
+# IAM Role for EC2 instance
+resource "aws_iam_role" "test_runner" {
+  name = "${var.project_name}-dsql-test-runner-role"
+
+  assume_role_policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Action = "sts:AssumeRole"
+        Effect = "Allow"
+        Principal = {
+          Service = "ec2.amazonaws.com"
+        }
+      }
+    ]
+  })
+
+  tags = var.tags
+}
+
+# Attach AWS managed policy for SSM
+resource "aws_iam_role_policy_attachment" "ssm_managed_instance_core" {
+  role       = aws_iam_role.test_runner.name
+  policy_arn = "arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore"
+}
+
+# IAM policy for DSQL database authentication
+resource "aws_iam_role_policy" "dsql_auth" {
+  name = "${var.project_name}-dsql-test-runner-dsql-auth"
+  role = aws_iam_role.test_runner.id
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect = "Allow"
+        Action = [
+          "rds-db:connect"
+        ]
+        Resource = "arn:aws:rds-db:${var.aws_region}:${data.aws_caller_identity.current.account_id}:dbuser:${var.aurora_dsql_cluster_resource_id}/${var.iam_database_user}"
+      }
+    ]
+  })
+}
+
+# IAM Instance Profile
+resource "aws_iam_instance_profile" "test_runner" {
+  name = "${var.project_name}-dsql-test-runner-profile"
+  role = aws_iam_role.test_runner.name
+
+  tags = var.tags
+}
+
+# Security Group for EC2 instance
+resource "aws_security_group" "test_runner" {
+  name        = "${var.project_name}-dsql-test-runner-sg"
+  description = "Security group for DSQL test runner EC2 instance"
+  vpc_id      = var.vpc_id
+
+  # No ingress rules - access via SSM only
+
+  egress {
+    description = "Allow outbound to DSQL (PostgreSQL port)"
+    from_port   = 5432
+    to_port     = 5432
+    protocol    = "tcp"
+    cidr_blocks = [var.vpc_cidr_block]
+  }
+
+  egress {
+    description = "Allow HTTPS outbound (for SSM, package installs, etc.)"
+    from_port   = 443
+    to_port     = 443
+    protocol    = "tcp"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+
+  egress {
+    description = "Allow HTTP outbound (for package installs)"
+    from_port   = 80
+    to_port     = 80
+    protocol    = "tcp"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+
+  tags = merge(
+    var.tags,
+    {
+      Name = "${var.project_name}-dsql-test-runner-sg"
+    }
+  )
+}
+
+# EC2 Instance
+resource "aws_instance" "test_runner" {
+  ami           = data.aws_ami.amazon_linux_2023.id
+  instance_type = var.instance_type
+  subnet_id     = var.private_subnet_id
+
+  iam_instance_profile   = aws_iam_instance_profile.test_runner.name
+  vpc_security_group_ids = [aws_security_group.test_runner.id]
+
+  # User data to install basic tools
+  user_data = <<-EOF
+    #!/bin/bash
+    # Install Java 17, PostgreSQL client, Git, and AWS CLI
+    dnf update -y
+    dnf install -y java-17-amazon-corretto-headless postgresql15 git unzip
+    curl "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "awscliv2.zip"
+    unzip awscliv2.zip
+    ./aws/install
+    rm -rf aws awscliv2.zip
+  EOF
+
+  tags = merge(
+    var.tags,
+    {
+      Name = "${var.project_name}-dsql-test-runner"
+    }
+  )
+}
+

@@ -11,7 +11,7 @@ use axum::Router;
 use config::Config;
 use constants::API_NAME;
 use handlers::{event, health};
-use repository::CarEntityRepository;
+use repository::BusinessEventRepository;
 use service::EventProcessingService;
 use sqlx::postgres::PgPoolOptions;
 use std::net::SocketAddr;
@@ -46,17 +46,9 @@ async fn main() -> anyhow::Result<()> {
 
     tracing::info!("{} Connected to database", API_NAME);
 
-    // Run migrations
-    sqlx::migrate!("./migrations")
-        .run(&pool)
-        .await
-        .context("Failed to run migrations")?;
-
-    tracing::info!("{} Database migrations completed", API_NAME);
-
     // Initialize repository and service
-    let repository = CarEntityRepository::new(pool);
-    let service = EventProcessingService::new(repository);
+    let business_event_repo = BusinessEventRepository::new(pool.clone());
+    let service = EventProcessingService::new(business_event_repo, pool);
 
     // Build application router
     let app = Router::new()

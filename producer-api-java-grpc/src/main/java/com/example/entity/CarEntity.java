@@ -16,8 +16,8 @@ import java.time.OffsetDateTime;
 public class CarEntity {
 
     @Id
-    @Column("id")
-    private String id;
+    @Column("entity_id")
+    private String entityId;
 
     @Column("entity_type")
     private String entityType;
@@ -28,6 +28,9 @@ public class CarEntity {
     @Column("updated_at")
     private OffsetDateTime updatedAt;
 
-    @Column("data")
-    private String data; // Store as JSON string for R2DBC
+    @Column("entity_data")
+    private String entityData; // Store as JSON string for R2DBC
+    
+    @Column("event_id")
+    private String eventId;
 }

@@ -1,7 +1,12 @@
 use crate::error::AppError;
+use crate::models::{EntityUpdate, Event, EventBody, EventHeader};
+use crate::repository::DuplicateEventError;
 use crate::service::EventProcessingService;
-use crate::repository::CarEntityRepository;
-use std::collections::HashMap;
+use crate::repository::BusinessEventRepository;
+use crate::constants::API_NAME;
+use chrono::{DateTime, Utc};
+use serde_json::Value;
+use sqlx::PgPool;
 use tonic::{Request, Response, Status};
 
 pub mod proto {
@@ -13,15 +18,13 @@ use proto::{
     EventRequest, EventResponse, HealthRequest, HealthResponse,
 };
 
-use crate::constants::API_NAME;
-
 pub struct EventServiceImpl {
     event_processing_service: EventProcessingService,
 }
 
 impl EventServiceImpl {
-    pub fn new(repository: CarEntityRepository) -> Self {
-        let event_processing_service = EventProcessingService::new(repository);
+    pub fn new(business_event_repo: BusinessEventRepository, pool: PgPool) -> Self {
+        let event_processing_service = EventProcessingService::new(business_event_repo, pool);
         Self {
             event_processing_service,
         }
@@ -42,51 +45,47 @@ impl EventService for EventServiceImpl {
         tracing::info!("{} Received gRPC event: {}", API_NAME, event_name);
 
         // Validate request
-        let event_header = req.event_header.ok_or_else(|| {
+        let event_header_proto = req.event_header.ok_or_else(|| {
             Status::from(AppError::Validation("Invalid event: missing eventHeader".to_string()))
         })?;
 
         // Validate event_name is not empty
-        if event_header.event_name.is_empty() {
+        if event_header_proto.event_name.is_empty() {
             return Err(Status::invalid_argument("Invalid event: eventName cannot be empty"));
         }
 
-        let event_body = req.event_body.ok_or_else(|| {
+        let event_body_proto = req.event_body.ok_or_else(|| {
             Status::from(AppError::Validation("Invalid event: missing eventBody".to_string()))
         })?;
 
         // Validate entities list is not empty
-        if event_body.entities.is_empty() {
+        if event_body_proto.entities.is_empty() {
             return Err(Status::invalid_argument("Invalid event: entities list cannot be empty"));
         }
 
-        // Process each entity update
-        for entity_update in event_body.entities {
-            // Validate entity_type and entity_id are not empty
-            if entity_update.entity_type.is_empty() {
-                return Err(Status::invalid_argument("Invalid entity: entityType cannot be empty"));
-            }
-            if entity_update.entity_id.is_empty() {
-                return Err(Status::invalid_argument("Invalid entity: entityId cannot be empty"));
-            }
+        // Convert protobuf EventRequest to internal Event model
+        let event = convert_proto_to_event(event_header_proto, event_body_proto)
+            .map_err(|e| Status::invalid_argument(format!("Failed to convert event: {}", e)))?;
 
-            let updated_attributes: HashMap<String, String> = entity_update.updated_attributes;
-            
-            self.event_processing_service
-                .process_event(
-                    &event_header.event_name,
-                    &entity_update.entity_type,
-                    &entity_update.entity_id,
-                    &updated_attributes,
-                )
-                .await
-                .map_err(|e| Status::from(AppError::Internal(e)))?;
+        // Process event
+        match self.event_processing_service.process_event(event).await {
+            Ok(_) => {
+                Ok(Response::new(EventResponse {
+                    success: true,
+                    message: "Event processed successfully".to_string(),
+                }))
+            }
+            Err(e) => {
+                // Check if it's a duplicate event error
+                if let Some(dup_err) = e.downcast_ref::<DuplicateEventError>() {
+                    return Err(Status::already_exists(format!(
+                        "Event with ID '{}' already exists",
+                        dup_err.event_id
+                    )));
+                }
+                Err(Status::from(AppError::Internal(e)))
+            }
         }
-
-        Ok(Response::new(EventResponse {
-            success: true,
-            message: "Event processed successfully".to_string(),
-        }))
     }
 
     async fn health_check(
@@ -102,7 +101,85 @@ impl EventService for EventServiceImpl {
     }
 }
 
-pub fn create_service(repository: CarEntityRepository) -> EventServiceServer<EventServiceImpl> {
-    EventServiceServer::new(EventServiceImpl::new(repository))
+fn convert_proto_to_event(
+    header: proto::EventHeader,
+    body: proto::EventBody,
+) -> Result<Event, String> {
+    // Convert EventHeader
+    let event_header = EventHeader {
+        uuid: if header.uuid.is_empty() {
+            None
+        } else {
+            Some(header.uuid)
+        },
+        event_name: header.event_name,
+        created_date: parse_datetime_option(&header.created_date),
+        saved_date: parse_datetime_option(&header.saved_date),
+        event_type: if header.event_type.is_empty() {
+            None
+        } else {
+            Some(header.event_type)
+        },
+    };
+
+    // Convert EntityUpdate list
+    let mut entities = Vec::new();
+    for entity_proto in body.entities {
+        // Validate entity_type and entity_id are not empty
+        if entity_proto.entity_type.is_empty() {
+            return Err("Invalid entity: entityType cannot be empty".to_string());
+        }
+        if entity_proto.entity_id.is_empty() {
+            return Err("Invalid entity: entityId cannot be empty".to_string());
+        }
+
+        // Convert map<string, string> to serde_json::Value
+        let updated_attributes: Value = serde_json::to_value(entity_proto.updated_attributes)
+            .map_err(|e| format!("Failed to convert updated_attributes: {}", e))?;
+
+        entities.push(EntityUpdate {
+            entity_type: entity_proto.entity_type,
+            entity_id: entity_proto.entity_id,
+            updated_attributes,
+        });
+    }
+
+    let event_body = EventBody { entities };
+
+    Ok(Event {
+        event_header,
+        event_body,
+    })
 }
 
+fn parse_datetime_option(dt_str: &str) -> Option<DateTime<Utc>> {
+    if dt_str.is_empty() {
+        return None;
+    }
+
+    // Try ISO 8601 formats
+    if let Ok(dt) = chrono::DateTime::parse_from_rfc3339(dt_str) {
+        return Some(dt.with_timezone(&Utc));
+    }
+    if let Ok(dt) = chrono::DateTime::parse_from_str(dt_str, "%Y-%m-%dT%H:%M:%S%.fZ") {
+        return Some(dt.with_timezone(&Utc));
+    }
+
+    // Try parsing as Unix timestamp (milliseconds)
+    if let Ok(ms) = dt_str.parse::<i64>() {
+        let secs = ms / 1000;
+        let nsecs = ((ms % 1000) * 1_000_000) as u32;
+        if let Some(dt) = chrono::DateTime::from_timestamp(secs, nsecs) {
+            return Some(dt);
+        }
+    }
+
+    None
+}
+
+pub fn create_service(
+    business_event_repo: BusinessEventRepository,
+    pool: PgPool,
+) -> EventServiceServer<EventServiceImpl> {
+    EventServiceServer::new(EventServiceImpl::new(business_event_repo, pool))
+}

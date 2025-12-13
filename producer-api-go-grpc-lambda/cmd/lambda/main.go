@@ -48,8 +48,8 @@ func init() {
 	}
 
 	// Initialize repository and service
-	repo := repository.NewCarEntityRepository(pool)
-	eventService = service.NewEventServiceImpl(repo, logger)
+	businessEventRepo := repository.NewBusinessEventRepository(pool)
+	eventService = service.NewEventServiceImpl(businessEventRepo, pool, logger)
 
 	logger.Info(fmt.Sprintf("%s Lambda handler initialized", constants.APIName()))
 }

@@ -32,3 +32,8 @@ output "nat_gateway_id" {
   description = "ID of the NAT Gateway"
   value       = var.enable_nat_gateway ? aws_nat_gateway.this[0].id : null
 }
+
+output "private_route_table_ids" {
+  description = "IDs of the private route tables"
+  value       = (var.enable_nat_gateway || var.enable_ipv6) ? aws_route_table.private[*].id : []
+}

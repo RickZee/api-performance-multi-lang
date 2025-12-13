@@ -13,6 +13,7 @@ from fastapi.responses import JSONResponse
 
 from config import load_lambda_config
 from constants import API_NAME
+from metadata_client import MetadataClient
 from models.event import Event
 from repository import BusinessEventRepository, get_connection_pool, DuplicateEventError, close_connection_pool
 from service import EventProcessingService
@@ -124,6 +125,19 @@ app.add_middleware(
 # Global service instance - will be initialized on first request
 _service: EventProcessingService | None = None
 
+# Global metadata client instance
+_metadata_client: MetadataClient | None = None
+
+
+def get_metadata_client() -> MetadataClient:
+    """Get or initialize metadata client (singleton pattern)."""
+    global _metadata_client
+    if _metadata_client is None:
+        base_url = os.getenv("METADATA_SERVICE_URL", "")
+        timeout = float(os.getenv("METADATA_SERVICE_TIMEOUT", "5.0"))
+        _metadata_client = MetadataClient(base_url=base_url, timeout=timeout)
+    return _metadata_client
+
 
 async def get_service() -> EventProcessingService:
     """Get or initialize service with connection pool (singleton pattern)."""
@@ -205,6 +219,29 @@ async def process_event(event: Event):
             raise HTTPException(status_code=422, detail="Entity type cannot be empty")
         if not entity.entity_id:
             raise HTTPException(status_code=422, detail="Entity ID cannot be empty")
+    
+    # Validate against metadata service
+    metadata_client = get_metadata_client()
+    if metadata_client.is_enabled():
+        # Convert event to dict for validation
+        event_dict = event.model_dump() if hasattr(event, 'model_dump') else event.dict()
+        validation_result = await metadata_client.validate_event(event_dict)
+        
+        if not validation_result.get("valid", True):
+            errors = validation_result.get("errors", [])
+            version = validation_result.get("version", "")
+            logger.warning(
+                f"{API_NAME} Event validation failed",
+                extra={"version": version, "error_count": len(errors)}
+            )
+            raise HTTPException(
+                status_code=422,
+                detail={
+                    "error": "Schema validation failed",
+                    "details": errors,
+                    "version": version,
+                }
+            )
     
     logger.info(f"{API_NAME} Received event: {event.event_header.event_name}")
     

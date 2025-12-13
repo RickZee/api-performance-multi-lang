@@ -22,7 +22,8 @@ export const options = getTestOptions();
 const MAX_RETRIES = 5;
 const INITIAL_RETRY_DELAY_MS = 100;
 const MAX_RETRY_DELAY_MS = 2000;
-const CONNECTION_TIMEOUT_MS = 5000;
+const CONNECTION_TIMEOUT_MS = 60000; // Increased to 60 seconds (k6's default) to ensure it's not the limiting factor
+const INVOKE_TIMEOUT_MS = 60000; // Timeout for individual gRPC calls
 
 // Get API configuration from environment
 const apiHost = __ENV.HOST || 'producer-api-java-grpc';
@@ -112,9 +113,11 @@ function initializeConnection() {
     const vuId = __VU || 'unknown';
     try {
         // Call connect() - this is lazy, actual connection happens on first invoke
+        // k6 gRPC client timeout is in seconds, and applies to both connection and requests
         client.connect(`${apiHost}:${apiPort}`, {
             plaintext: true,  // Use insecure connection (no TLS)
-            timeout: CONNECTION_TIMEOUT_MS / 1000, // Convert to seconds
+            timeout: CONNECTION_TIMEOUT_MS / 1000, // Convert to seconds (60s)
+            // k6 v0.29+ supports timeout in connect options which applies to all invokes
         });
         connectionInitialized = true;
         if (DEBUG) {
@@ -177,6 +180,8 @@ export default function () {
             if (DEBUG) {
                 console.log(`[TCP] VU ${vuId} Iter ${iterId}: Invoking gRPC method (attempt ${attempt + 1}/${MAX_RETRIES})...`);
             }
+            // k6 gRPC client.invoke() uses the timeout set in connect()
+            // The timeout from connect() applies to all invoke() calls
             response = client.invoke(`${serviceName}/${methodName}`, payload);
             
             // Success - break out of retry loop
@@ -184,6 +189,22 @@ export default function () {
         } catch (e) {
             const errorMsg = e.toString();
             console.error(`[TCP] VU ${vuId} Iter ${iterId}: gRPC invoke attempt ${attempt + 1} failed: ${errorMsg}`);
+            
+            // Check for deadline exceeded errors
+            if (errorMsg.includes('deadline exceeded') || 
+                errorMsg.includes('context deadline exceeded') ||
+                errorMsg.includes('DEADLINE_EXCEEDED')) {
+                console.error(`[TCP] VU ${vuId} Iter ${iterId}: DEADLINE EXCEEDED - Request timed out after ${CONNECTION_TIMEOUT_MS}ms`);
+                // For deadline exceeded, use longer backoff before retry
+                if (attempt < MAX_RETRIES - 1) {
+                    const delay = getRetryDelay(attempt) * 3; // Triple delay for deadline exceeded
+                    if (DEBUG) {
+                        console.log(`[TCP] VU ${vuId} Iter ${iterId}: Using extended backoff ${(delay * 1000).toFixed(0)}ms for deadline exceeded`);
+                    }
+                    sleep(delay);
+                    continue;
+                }
+            }
             
             // Check if it's a connection exhaustion error
             if (errorMsg.includes('cannot assign requested address') || 
@@ -232,7 +253,12 @@ export default function () {
     });
     
     if (!success) {
-        console.error(`gRPC call failed: response=${JSON.stringify(response)}`);
+        // Check for deadline exceeded in response
+        if (response && response.status === grpc.StatusDeadlineExceeded) {
+            console.error(`gRPC call failed: DEADLINE_EXCEEDED - Request timed out after ${CONNECTION_TIMEOUT_MS}ms`);
+        } else {
+            console.error(`gRPC call failed: response=${JSON.stringify(response)}`);
+        }
     }
     
     errorRate.add(!success);

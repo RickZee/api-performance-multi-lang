@@ -75,7 +75,7 @@ data "archive_file" "aurora_auto_start_zip" {
   type        = "zip"
   output_path = "${path.module}/aurora_auto_start.zip"
   source {
-    content = <<-EOF
+    content  = <<-EOF
 import boto3
 import os
 import json

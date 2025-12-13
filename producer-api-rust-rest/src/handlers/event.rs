@@ -10,6 +10,7 @@ use validator::{Validate, ValidationError};
 
 use crate::error::AppError;
 use crate::models::Event;
+use crate::repository::DuplicateEventError;
 use crate::service::EventProcessingService;
 
 use crate::constants::API_NAME;
@@ -48,7 +49,13 @@ async fn process_event(
     service
         .process_event(event)
         .await
-        .map_err(|e| AppError::Internal(e))?;
+        .map_err(|e| {
+            // Check if it's a duplicate event error
+            if let Some(dup_err) = e.downcast_ref::<DuplicateEventError>() {
+                return AppError::Conflict(format!("Event with ID '{}' already exists", dup_err.event_id));
+            }
+            AppError::Internal(e)
+        })?;
 
     Ok(Json(json!({
         "success": true,
@@ -81,7 +88,12 @@ async fn process_bulk_events(
             match service.process_event(event).await {
                 Ok(_) => processed_count += 1,
                 Err(e) => {
-                    tracing::error!("{} Error processing event in bulk: {}", API_NAME, e);
+                    // Check if it's a duplicate event error
+                    if let Some(dup_err) = e.downcast_ref::<DuplicateEventError>() {
+                        tracing::warn!("{} Duplicate event ID in bulk: {}", API_NAME, dup_err.event_id);
+                    } else {
+                        tracing::error!("{} Error processing event in bulk: {}", API_NAME, e);
+                    }
                     failed_count += 1;
                 }
             }

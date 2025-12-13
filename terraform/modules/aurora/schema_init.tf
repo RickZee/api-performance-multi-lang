@@ -13,7 +13,7 @@ resource "null_resource" "schema_init" {
     # Note: schema_hash trigger removed to prevent unnecessary re-initialization
     # The schema is idempotent (uses IF NOT EXISTS), so re-running is safe but unnecessary
     # Manual schema updates can be done via: python3 scripts/init-aurora-schema.py
-    database_name    = var.database_name
+    database_name = var.database_name
   }
 
   provisioner "local-exec" {

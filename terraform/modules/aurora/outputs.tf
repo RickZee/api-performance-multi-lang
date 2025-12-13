@@ -83,7 +83,7 @@ ${local.use_restricted_access ? "- Confluent Cloud CIDRs: ${join(", ", local.con
 
 For detailed setup, see: terraform/PUBLIC_ACCESS_SETUP.md
 EOT
-  ) : (
+    ) : (
     <<-EOT
 Aurora is configured for private access only.
 Use AWS PrivateLink for Confluent Cloud connectivity.

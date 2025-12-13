@@ -1,14 +1,21 @@
 package com.example.grpc;
 
 import com.example.constants.ApiConstants;
+import com.example.dto.Event;
+import com.example.repository.DuplicateEventError;
+import com.example.service.EventConverter;
 import com.example.service.EventProcessingService;
+import io.grpc.Status;
 import io.grpc.stub.StreamObserver;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import net.devh.boot.grpc.server.service.GrpcService;
-import reactor.core.publisher.Mono;
 
-import java.util.Map;
+import java.time.Duration;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
+import java.util.concurrent.atomic.AtomicReference;
 
 @GrpcService
 @RequiredArgsConstructor
@@ -16,76 +23,142 @@ import java.util.Map;
 public class EventServiceImpl extends EventServiceGrpc.EventServiceImplBase {
     
     private final EventProcessingService eventProcessingService;
+    private final EventConverter eventConverter;
 
     @Override
     public void processEvent(EventRequest request, StreamObserver<EventResponse> responseObserver) {
-        log.info("{} Received gRPC event: {}", ApiConstants.API_NAME, request.getEventHeader().getEventName());
+        log.info("{} Received gRPC event: {}", ApiConstants.API_NAME, 
+                request.hasEventHeader() ? request.getEventHeader().getEventName() : "unknown");
         
         try {
-            // Validate request - proto3 returns default instances, not null
-            // Check if required fields are present and non-empty
-            if (request.getEventHeader().getEventName().isEmpty() ||
-                request.getEventBody().getEntitiesList().isEmpty()) {
-                EventResponse errorResponse = EventResponse.newBuilder()
-                        .setSuccess(false)
-                        .setMessage("Invalid event: missing eventName or entities")
-                        .build();
-                responseObserver.onNext(errorResponse);
-                responseObserver.onCompleted();
+            // Validate request
+            if (!request.hasEventHeader()) {
+                sendErrorResponse(responseObserver, Status.INVALID_ARGUMENT, "Invalid event: missing eventHeader");
                 return;
             }
-
-            // Validate each entity update
+            
+            if (request.getEventHeader().getEventName().isEmpty()) {
+                sendErrorResponse(responseObserver, Status.INVALID_ARGUMENT, "Invalid event: eventName cannot be empty");
+                return;
+            }
+            
+            if (!request.hasEventBody()) {
+                sendErrorResponse(responseObserver, Status.INVALID_ARGUMENT, "Invalid event: missing eventBody");
+                return;
+            }
+            
+            if (request.getEventBody().getEntitiesList().isEmpty()) {
+                sendErrorResponse(responseObserver, Status.INVALID_ARGUMENT, "Invalid event: entities list cannot be empty");
+                return;
+            }
+            
+            // Validate each entity
             for (EntityUpdate entityUpdate : request.getEventBody().getEntitiesList()) {
                 if (entityUpdate.getEntityType().isEmpty()) {
-                    EventResponse errorResponse = EventResponse.newBuilder()
-                            .setSuccess(false)
-                            .setMessage("Invalid event: entityType cannot be empty")
-                            .build();
-                    responseObserver.onNext(errorResponse);
-                    responseObserver.onCompleted();
+                    sendErrorResponse(responseObserver, Status.INVALID_ARGUMENT, "Invalid entity: entityType cannot be empty");
                     return;
                 }
                 if (entityUpdate.getEntityId().isEmpty()) {
-                    EventResponse errorResponse = EventResponse.newBuilder()
-                            .setSuccess(false)
-                            .setMessage("Invalid event: entityId cannot be empty")
-                            .build();
-                    responseObserver.onNext(errorResponse);
-                    responseObserver.onCompleted();
+                    sendErrorResponse(responseObserver, Status.INVALID_ARGUMENT, "Invalid entity: entityId cannot be empty");
                     return;
                 }
             }
-
-            // Process each entity update
-            for (EntityUpdate entityUpdate : request.getEventBody().getEntitiesList()) {
-                eventProcessingService.processEvent(
-                        request.getEventHeader().getEventName(),
-                        entityUpdate.getEntityType(),
-                        entityUpdate.getEntityId(),
-                        entityUpdate.getUpdatedAttributesMap()
-                ).block(); // Block for simplicity in this implementation
-            }
-
-            EventResponse successResponse = EventResponse.newBuilder()
-                    .setSuccess(true)
-                    .setMessage("Event processed successfully")
-                    .build();
             
-            responseObserver.onNext(successResponse);
-            responseObserver.onCompleted();
+            // Convert protobuf to internal model
+            Event event = eventConverter.convertFromProto(request);
+            
+            // Process event with synchronization using CountDownLatch
+            // This avoids blocking the reactive context which causes deadlocks with R2DBC transactions
+            // The reactive chain will execute on the R2DBC thread, and we wait for it to complete
+            final CountDownLatch latch = new CountDownLatch(1);
+            final AtomicReference<Throwable> errorRef = new AtomicReference<>();
+            final AtomicReference<Boolean> responseSent = new AtomicReference<>(false);
+            
+            eventProcessingService.processEvent(event)
+                    .timeout(Duration.ofSeconds(55)) // Timeout before client timeout
+                    .subscribe(
+                            v -> {
+                                // Success - send response
+                                synchronized (responseSent) {
+                                    if (!responseSent.get()) {
+                                        EventResponse successResponse = EventResponse.newBuilder()
+                                                .setSuccess(true)
+                                                .setMessage("Event processed successfully")
+                                                .build();
+                                        responseObserver.onNext(successResponse);
+                                        responseObserver.onCompleted();
+                                        responseSent.set(true);
+                                    }
+                                }
+                                latch.countDown();
+                            },
+                            error -> {
+                                // Error occurred - store it and signal completion
+                                errorRef.set(error);
+                                latch.countDown();
+                            }
+                    );
+            
+            // Wait for completion with timeout (55 seconds to be under client timeout of 60s)
+            try {
+                if (!latch.await(55, TimeUnit.SECONDS)) {
+                    log.error("{} Event processing timed out after 55 seconds", ApiConstants.API_NAME);
+                    synchronized (responseSent) {
+                        if (!responseSent.get()) {
+                            sendErrorResponse(responseObserver, Status.DEADLINE_EXCEEDED, 
+                                    "Event processing timed out after 55 seconds");
+                            responseSent.set(true);
+                        }
+                    }
+                    return;
+                }
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                log.error("{} Event processing interrupted", ApiConstants.API_NAME, e);
+                synchronized (responseSent) {
+                    if (!responseSent.get()) {
+                        sendErrorResponse(responseObserver, Status.INTERNAL, 
+                                "Event processing was interrupted");
+                        responseSent.set(true);
+                    }
+                }
+                return;
+            }
+            
+            // Check for errors - only send error response if success response wasn't already sent
+            Throwable error = errorRef.get();
+            if (error != null) {
+                synchronized (responseSent) {
+                    if (!responseSent.get()) {
+                        if (error instanceof DuplicateEventError) {
+                            DuplicateEventError dupErr = (DuplicateEventError) error;
+                            log.warn("{} Duplicate event ID: {}", ApiConstants.API_NAME, dupErr.getEventId());
+                            sendErrorResponse(responseObserver, Status.ALREADY_EXISTS, 
+                                    "Event with ID '" + dupErr.getEventId() + "' already exists");
+                        } else if (error instanceof TimeoutException || 
+                                  (error.getCause() != null && error.getCause() instanceof TimeoutException) ||
+                                  (error.getMessage() != null && error.getMessage().contains("timed out"))) {
+                            log.error("{} Event processing timed out", ApiConstants.API_NAME, error);
+                            sendErrorResponse(responseObserver, Status.DEADLINE_EXCEEDED, 
+                                    "Event processing timed out after 55 seconds");
+                        } else {
+                            log.error("{} Error processing gRPC event", ApiConstants.API_NAME, error);
+                            sendErrorResponse(responseObserver, Status.INTERNAL, 
+                                    "Error processing event: " + error.getMessage());
+                        }
+                        responseSent.set(true);
+                    }
+                }
+            }
             
         } catch (Exception e) {
             log.error("{} Error processing gRPC event", ApiConstants.API_NAME, e);
-            
-            EventResponse errorResponse = EventResponse.newBuilder()
-                    .setSuccess(false)
-                    .setMessage("Error processing event: " + e.getMessage())
-                    .build();
-            
-            responseObserver.onNext(errorResponse);
-            responseObserver.onCompleted();
+            sendErrorResponse(responseObserver, Status.INTERNAL, "Error processing event: " + e.getMessage());
         }
+    }
+
+    private void sendErrorResponse(StreamObserver<EventResponse> responseObserver, Status status, String message) {
+        responseObserver.onError(status.withDescription(message).asException());
     }
 
     @Override
