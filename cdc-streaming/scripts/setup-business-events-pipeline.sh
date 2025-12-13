@@ -1,6 +1,6 @@
 #!/bin/bash
-# Setup Business Events CDC Pipeline
-# Configures Confluent Connect for CDC from business_events table only
+# Setup Event Headers CDC Pipeline
+# Configures Confluent Connect for CDC from event_headers table only
 # Deploys Flink SQL statements for all 4 event types
 # Monitors the entire pipeline
 
@@ -19,7 +19,7 @@ CYAN='\033[0;36m'
 NC='\033[0m'
 
 echo -e "${CYAN}========================================${NC}"
-echo -e "${CYAN}Business Events CDC Pipeline Setup${NC}"
+echo -e "${CYAN}Event Headers CDC Pipeline Setup${NC}"
 echo -e "${CYAN}========================================${NC}"
 echo ""
 
@@ -41,15 +41,15 @@ echo "  Kafka Cluster ID: $CLUSTER_ID"
 echo "  Flink Compute Pool ID: $COMPUTE_POOL_ID"
 echo ""
 
-# Step 1: Create raw-business-events topic
-echo -e "${BLUE}Step 1: Creating raw-business-events topic...${NC}"
-if confluent kafka topic describe raw-business-events &>/dev/null; then
-    echo -e "${YELLOW}⚠ Topic raw-business-events already exists${NC}"
+# Step 1: Create raw-event-headers topic
+echo -e "${BLUE}Step 1: Creating raw-event-headers topic...${NC}"
+if confluent kafka topic describe raw-event-headers &>/dev/null; then
+    echo -e "${YELLOW}⚠ Topic raw-event-headers already exists${NC}"
 else
-    confluent kafka topic create raw-business-events \
+    confluent kafka topic create raw-event-headers \
         --partitions 6 \
         --config retention.ms=604800000
-    echo -e "${GREEN}✓ Topic raw-business-events created${NC}"
+    echo -e "${GREEN}✓ Topic raw-event-headers created${NC}"
 fi
 echo ""
 
@@ -67,9 +67,9 @@ if confluent connect cluster describe "$OLD_CONNECTOR" &>/dev/null; then
 fi
 echo ""
 
-# Step 3: Deploy new connector for business_events table
-echo -e "${BLUE}Step 3: Deploying CDC connector for business_events table...${NC}"
-CONNECTOR_CONFIG="$PROJECT_ROOT/cdc-streaming/connectors/postgres-debezium-business-events-confluent-cloud.json"
+# Step 3: Deploy new connector for event_headers table
+echo -e "${BLUE}Step 3: Deploying CDC connector for event_headers table...${NC}"
+CONNECTOR_CONFIG="$PROJECT_ROOT/cdc-streaming/connectors/postgres-debezium-event-headers-confluent-cloud.json"
 
 if [ ! -f "$CONNECTOR_CONFIG" ]; then
     echo -e "${RED}✗ Connector config not found: $CONNECTOR_CONFIG${NC}"
@@ -120,7 +120,7 @@ confluent flink compute-pool use "$COMPUTE_POOL_ID"
 # Deploy source table
 echo "Deploying source table..."
 confluent flink statement create \
-    --statement-name "business-events-source-table" \
+    --statement-name "event-headers-source-table" \
     --statement-file <(head -n 38 "$FLINK_SQL_FILE" | tail -n +18) \
     --database "$CLUSTER_ID" \
     --wait || echo -e "${YELLOW}⚠ Source table may already exist${NC}"
@@ -128,7 +128,7 @@ confluent flink statement create \
 # Deploy sink tables
 echo "Deploying sink tables..."
 confluent flink statement create \
-    --statement-name "business-events-sink-tables" \
+    --statement-name "event-headers-sink-tables" \
     --statement-file <(sed -n '41,116p' "$FLINK_SQL_FILE") \
     --database "$CLUSTER_ID" \
     --wait || echo -e "${YELLOW}⚠ Sink tables may already exist${NC}"
@@ -182,7 +182,7 @@ echo ""
 
 # Check topics
 echo -e "${CYAN}Topics:${NC}"
-confluent kafka topic list | grep -E "(raw-business|filtered)" || echo "No filtered topics yet (will be created by Flink)"
+confluent kafka topic list | grep -E "(raw-event-headers|filtered)" || echo "No filtered topics yet (will be created by Flink)"
 echo ""
 
 # Check connector status
@@ -200,8 +200,8 @@ echo -e "${GREEN}========================================${NC}"
 echo ""
 echo -e "${CYAN}Next Steps:${NC}"
 echo "  1. Wait a few minutes for connector to process existing data"
-echo "  2. Check topics: confluent kafka topic list | grep -E '(raw-business|filtered)'"
-echo "  3. Verify messages: confluent kafka topic consume raw-business-events --max-messages 5"
+echo "  2. Check topics: confluent kafka topic list | grep -E '(raw-event-headers|filtered)'"
+echo "  3. Verify messages: confluent kafka topic consume raw-event-headers --max-messages 5"
 echo "  4. Monitor Flink: confluent flink statement list --compute-pool $COMPUTE_POOL_ID"
 echo "  5. Check filtered topics: confluent kafka topic consume filtered-car-created-events --max-messages 5"
 echo ""

@@ -1,9 +1,9 @@
 {
-  "_comment": "⚠️ NOT RECOMMENDED: This config is missing the ExtractNewRecordState transform. Use postgres-cdc-source-business-events-confluent-cloud-fixed.json instead. See RECOMMENDED_APPROACH.md for details.",
-  "name": "postgres-cdc-source-business-events",
+  "_comment": "⚠️ NOT RECOMMENDED: This config is missing the ExtractNewRecordState transform. Use postgres-cdc-source-business-events-confluent-cloud-fixed.json instead. See RECOMMENDED_APPROACH.md for details. Streams from event_headers table.",
+  "name": "postgres-cdc-source-event-headers",
   "config": {
     "connector.class": "PostgresCdcSource",
-    "name": "postgres-cdc-source-business-events",
+    "name": "postgres-cdc-source-event-headers",
     "kafka.auth.mode": "SASL_SSL",
     "kafka.api.key": "${KAFKA_API_KEY}",
     "kafka.api.secret": "${KAFKA_API_SECRET}",
@@ -14,9 +14,9 @@
     "database.password": "${DB_PASSWORD}",
     "database.dbname": "${DB_NAME}",
     "database.server.name": "${DB_SERVER_NAME:-aurora-postgres-cdc}",
-    "table.include.list": "${TABLE_INCLUDE_LIST:-public.business_events}",
+    "table.include.list": "${TABLE_INCLUDE_LIST:-public.event_headers}",
     "plugin.name": "pgoutput",
-    "slot.name": "${SLOT_NAME:-business_events_cdc_slot}",
+    "slot.name": "${SLOT_NAME:-event_headers_cdc_slot}",
     "snapshot.mode": "initial",
     "output.data.key.format": "JSON",
     "output.data.value.format": "JSON",
@@ -24,7 +24,7 @@
     "tasks.max": "1",
     "transforms": "route",
     "transforms.route.type": "org.apache.kafka.connect.transforms.RegexRouter",
-    "transforms.route.regex": "${TOPIC_PREFIX:-aurora-cdc}.public.business_events",
-    "transforms.route.replacement": "raw-business-events"
+    "transforms.route.regex": "${TOPIC_PREFIX:-aurora-cdc}.public.event_headers",
+    "transforms.route.replacement": "raw-event-headers"
   }
 }

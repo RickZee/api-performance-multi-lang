@@ -73,9 +73,9 @@ deploy_statement() {
 
 # Extract source table SQL
 echo -e "${BLUE}Step 1: Deploying Source Table${NC}"
-SOURCE_SQL=$(awk '/CREATE TABLE.*raw-business-events/,/);/{print; if(/);/) exit}' "$SQL_FILE" | grep -v "^--" | tr '\n' ' ' | sed 's/  */ /g')
+SOURCE_SQL=$(awk '/CREATE TABLE.*raw-event-headers/,/);/{print; if(/);/) exit}' "$SQL_FILE" | grep -v "^--" | tr '\n' ' ' | sed 's/  */ /g')
 if [ -n "$SOURCE_SQL" ]; then
-    deploy_statement "source-raw-business-events" "$SOURCE_SQL"
+    deploy_statement "source-raw-event-headers" "$SOURCE_SQL"
 else
     echo -e "${RED}✗ Could not extract source table SQL${NC}"
     exit 1

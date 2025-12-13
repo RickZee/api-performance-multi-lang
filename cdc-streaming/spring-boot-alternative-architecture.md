@@ -7,12 +7,12 @@ The existing CDC streaming system ([ARCHITECTURE.md](ARCHITECTURE.md)) uses:
 ```mermaid
 flowchart LR
     subgraph Source["Source"]
-        PG[("PostgreSQL<br/>business_events")]
+        PG[("PostgreSQL<br/>event_headers")]
     end
     
     subgraph ConfluentCloud["Confluent Cloud"]
         DC[Debezium<br/>Connector]
-        KR[raw-business-events<br/>Topic]
+        KR[raw-event-headers<br/>Topic]
         Flink[Flink SQL<br/>Statements]
         KF1[filtered-loan-events]
         KF2[filtered-car-events]
@@ -49,7 +49,7 @@ flowchart LR
 ```mermaid
 flowchart LR
     subgraph Source["Source"]
-        PG[("PostgreSQL<br/>business_events")]
+        PG[("PostgreSQL<br/>event_headers")]
     end
     
     subgraph EKS["AWS EKS Cluster"]
@@ -59,7 +59,7 @@ flowchart LR
     end
     
     subgraph Kafka["Amazon MSK / Confluent"]
-        KR[raw-business-events]
+        KR[raw-event-headers]
         KF[filtered-*-events]
     end
     

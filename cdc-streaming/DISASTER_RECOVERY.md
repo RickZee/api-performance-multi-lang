@@ -158,7 +158,7 @@ min.insync.replicas: 2
 # scripts/backup-kafka-topics.sh
 
 TOPICS=(
-  "raw-business-events"
+  "raw-event-headers"
   "filtered-loan-events"
   "filtered-service-events"
   "filtered-car-events"
@@ -390,7 +390,7 @@ confluent flink statement list --compute-pool $SECONDARY_COMPUTE_POOL
 **Verification**:
 ```bash
 # Check partition replication (Confluent Cloud)
-confluent kafka topic describe raw-business-events \
+confluent kafka topic describe raw-event-headers \
   --cluster prod-kafka-east
 ```
 

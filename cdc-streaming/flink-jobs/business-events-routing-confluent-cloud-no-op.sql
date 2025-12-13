@@ -1,31 +1,31 @@
--- Flink SQL Statements for Business Events Filtering and Routing (Confluent Cloud)
+-- Flink SQL Statements for Event Headers Filtering and Routing (Confluent Cloud)
 -- Modified version: Works WITHOUT __op field (PostgresCdcSource doesn't add it)
--- Processes 4 types of filtered business events:
+-- Processes 4 types of filtered event headers:
 -- 1. Car Created (CarCreated)
 -- 2. Loan Created (LoanCreated)
 -- 3. Loan Payment Submitted (LoanPaymentSubmitted)
 -- 4. Service Events (CarServiceDone)
 --
--- Source: business_events table from Aurora PostgreSQL
+-- Source: event_headers table from Aurora PostgreSQL
 -- Target: Filtered Kafka topics for each event type
 --
 -- DEPLOYMENT NOTE: Deploy statements in order:
--- 1. Source table (raw-business-events)
+-- 1. Source table (raw-event-headers)
 -- 2. Sink tables (filtered-*-events)
 -- 3. INSERT statements (one per filter)
 
 -- ============================================================================
 -- Step 1: Create Source Table
 -- ============================================================================
--- Source Table: Raw Business Events from Kafka (PostgresCdcSource output)
+-- Source Table: Raw Event Headers from Kafka (PostgresCdcSource output)
 -- Note: PostgresCdcSource outputs flat structure without __op, __table, __ts_ms
-CREATE TABLE `raw-business-events` (
+CREATE TABLE `raw-event-headers` (
     `id` STRING,
     `event_name` STRING,
     `event_type` STRING,
     `created_date` STRING,
     `saved_date` STRING,
-    `event_data` STRING
+    `header_data` STRING
 ) WITH (
     'connector' = 'confluent',
     'value.format' = 'json-registry',
@@ -43,7 +43,7 @@ CREATE TABLE `filtered-car-created-events` (
     `event_type` STRING,
     `created_date` STRING,
     `saved_date` STRING,
-    `event_data` STRING,
+    `header_data` STRING,
     `__op` STRING,
     `__table` STRING
 ) WITH (
@@ -58,7 +58,7 @@ CREATE TABLE `filtered-loan-created-events` (
     `event_type` STRING,
     `created_date` STRING,
     `saved_date` STRING,
-    `event_data` STRING,
+    `header_data` STRING,
     `__op` STRING,
     `__table` STRING
 ) WITH (
@@ -73,7 +73,7 @@ CREATE TABLE `filtered-loan-payment-submitted-events` (
     `event_type` STRING,
     `created_date` STRING,
     `saved_date` STRING,
-    `event_data` STRING,
+    `header_data` STRING,
     `__op` STRING,
     `__table` STRING
 ) WITH (
@@ -88,7 +88,7 @@ CREATE TABLE `filtered-service-events` (
     `event_type` STRING,
     `created_date` STRING,
     `saved_date` STRING,
-    `event_data` STRING,
+    `header_data` STRING,
     `__op` STRING,
     `__table` STRING
 ) WITH (
@@ -109,10 +109,10 @@ SELECT
     `event_type`,
     `created_date`,
     `saved_date`,
-    `event_data`,
+    `header_data`,
     'c' AS `__op`,                    -- Add __op = 'c' in Flink (assumes all are inserts)
-    'business_events' AS `__table`     -- Add __table in Flink
-FROM `raw-business-events`
+    'event_headers' AS `__table`     -- Add __table in Flink
+FROM `raw-event-headers`
 WHERE `event_type` = 'CarCreated';
 
 -- INSERT Statement: Loan Created Events Filter
@@ -124,10 +124,10 @@ SELECT
     `event_type`,
     `created_date`,
     `saved_date`,
-    `event_data`,
+    `header_data`,
     'c' AS `__op`,                    -- Add __op = 'c' in Flink
-    'business_events' AS `__table`    -- Add __table in Flink
-FROM `raw-business-events`
+    'event_headers' AS `__table`    -- Add __table in Flink
+FROM `raw-event-headers`
 WHERE `event_type` = 'LoanCreated';
 
 -- INSERT Statement: Loan Payment Submitted Events Filter
@@ -139,10 +139,10 @@ SELECT
     `event_type`,
     `created_date`,
     `saved_date`,
-    `event_data`,
+    `header_data`,
     'c' AS `__op`,                    -- Add __op = 'c' in Flink
-    'business_events' AS `__table`    -- Add __table in Flink
-FROM `raw-business-events`
+    'event_headers' AS `__table`    -- Add __table in Flink
+FROM `raw-event-headers`
 WHERE `event_type` = 'LoanPaymentSubmitted';
 
 -- INSERT Statement: Service Events Filter
@@ -154,9 +154,10 @@ SELECT
     `event_type`,
     `created_date`,
     `saved_date`,
-    `event_data`,
+    `header_data`,
     'c' AS `__op`,                    -- Add __op = 'c' in Flink
-    'business_events' AS `__table`    -- Add __table in Flink
-FROM `raw-business-events`
+    'event_headers' AS `__table`    -- Add __table in Flink
+FROM `raw-event-headers`
 WHERE `event_name` = 'CarServiceDone';
+
 

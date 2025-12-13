@@ -14,14 +14,14 @@ This document covers the back-end infrastructure components including AWS Lambda
 
 ### Overview
 
-Aurora PostgreSQL serves as the source of truth for business events stored in the `business_events` table. The database uses a hybrid data model combining relational columns for efficient filtering and a JSONB column for full event data.
+Aurora PostgreSQL serves as the source of truth for event headers stored in the `event_headers` table. The database uses a hybrid data model combining relational columns for efficient filtering and a JSONB column for header data. The `event_headers` table has a foreign key relationship to the `business_events` table.
 
 ### Database Schema
 
-The `business_events` table schema uses a hybrid approach:
+The `event_headers` table schema uses a hybrid approach:
 
 ```sql
-CREATE TABLE business_events (
+CREATE TABLE event_headers (
     -- Relational columns for efficient filtering and querying
     id VARCHAR(255) PRIMARY KEY,
     event_name VARCHAR(255) NOT NULL,
@@ -29,18 +29,24 @@ CREATE TABLE business_events (
     created_date TIMESTAMP WITH TIME ZONE,
     saved_date TIMESTAMP WITH TIME ZONE,
     
-    -- JSONB column for full event structure
-    event_data JSONB NOT NULL  -- Contains: {eventHeader: {...}, eventBody: {...}}
+    -- JSONB column for event header structure
+    header_data JSONB NOT NULL,  -- Contains: {uuid, eventName, eventType, createdDate, savedDate}
+    
+    -- Foreign key to business_events
+    CONSTRAINT fk_event_headers_business_events 
+        FOREIGN KEY (id) REFERENCES business_events(id) 
+        ON DELETE CASCADE
 );
 ```
 
 **Benefits of This Approach**:
 
 1. **Efficient Filtering**: Relational columns (`event_type`, `event_name`) enable fast filtering in Flink SQL without JSON parsing
-2. **Full Data Preservation**: JSONB `event_data` column preserves complete nested event structure
+2. **Header Data Preservation**: JSONB `header_data` column preserves event header structure
 3. **Index Support**: PostgreSQL can index relational columns for fast queries
-4. **Flexibility**: Consumers can access both relational metadata and nested entity data
+4. **Flexibility**: Consumers can access both relational metadata and header data
 5. **CDC Compatibility**: CDC connectors can efficiently capture both column values and JSONB content
+6. **Note**: Only header information is streamed via CDC. Entity information is stored separately and can be queried from the database if needed.
 
 ### Logical Replication Configuration
 
@@ -58,12 +64,39 @@ SELECT pg_create_logical_replication_slot('business_events_cdc_slot', 'pgoutput'
 
 ### How It Works
 
-- Producer APIs insert events into `business_events` table with both relational columns and full JSONB data
+- Producer APIs insert event headers into `event_headers` table with both relational columns and header JSONB data
 - PostgreSQL Write-Ahead Log (WAL) records all changes
 - Logical replication slots enable CDC capture without impacting database performance
-- CDC connector captures both relational column values and the `event_data` JSONB content
+- CDC connector captures both relational column values and the `header_data` JSONB content
 - Relational columns enable efficient filtering in Flink SQL
-- JSONB column preserves full event structure for consumers
+- JSONB column preserves event header structure for consumers
+- Note: Only header information is streamed. Entity information must be queried from the database separately if needed.
+
+### Event Processing Transaction Flow
+
+The Python Lambda API processes events atomically within a single database transaction. All related data (business events, event headers, and entities) are saved together, ensuring data consistency:
+
+```mermaid
+flowchart TD
+    A[process_event] --> B[Begin Transaction]
+    B --> C[Save business_event]
+    B --> D[Save event_header]
+    B --> E[Save entities]
+    C --> F{All Success?}
+    D --> F
+    E --> F
+    F -->|Yes| G[Commit Transaction]
+    F -->|No| H[Rollback Transaction]
+    G --> I[Return Success]
+    H --> J[Raise Exception]
+```
+
+**Transaction Benefits**:
+
+1. **Atomicity**: All operations (business_events, event_headers, entities) succeed or fail together
+2. **Data Consistency**: Foreign key relationships are maintained (event_headers.id → business_events.id, entities.event_id → event_headers.id)
+3. **Error Handling**: If any operation fails, all changes are automatically rolled back
+4. **Referential Integrity**: Foreign key constraints ensure event headers cannot exist without corresponding business events
 
 ## RDS Proxy for Connection Pooling
 
