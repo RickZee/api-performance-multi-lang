@@ -56,28 +56,6 @@ class EventProcessingService:
         
         event_id = event.event_header.uuid or f"event-{datetime.utcnow().isoformat()}"
         
-        # #region agent log
-        import json
-        try:
-            current_loop = asyncio.get_running_loop()
-            loop_id = id(current_loop)
-            # Try to get pool's loop if possible
-            pool_loop_id = None
-            try:
-                # asyncpg pools have a _loop attribute
-                if hasattr(self.pool, '_loop'):
-                    pool_loop_id = id(self.pool._loop)
-            except:
-                pass
-            with open('/Users/rickzakharov/dev/github/api-performance-multi-lang/.cursor/debug.log', 'a') as f:
-                f.write(json.dumps({"sessionId":"debug-session","runId":"run1","hypothesisId":"A,D","location":"event_processing.py:59","message":"BEFORE pool.acquire","data":{"current_loop_id":loop_id,"pool_loop_id":pool_loop_id,"pool_id":id(self.pool),"event_id":event_id,"loops_match":pool_loop_id == loop_id if pool_loop_id else None},"timestamp":int(__import__('time').time()*1000)})+'\n')
-        except Exception as e:
-            try:
-                with open('/Users/rickzakharov/dev/github/api-performance-multi-lang/.cursor/debug.log', 'a') as f:
-                    f.write(json.dumps({"sessionId":"debug-session","runId":"run1","hypothesisId":"ERROR","location":"event_processing.py:59","message":"Instrumentation error","data":{"error":str(e)},"timestamp":int(__import__('time').time()*1000)})+'\n')
-            except: pass
-        # #endregion
-        
         # Wrap all operations in a single transaction
         # Verify we're in the correct event loop before acquiring
         current_loop = asyncio.get_running_loop()

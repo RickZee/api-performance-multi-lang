@@ -51,6 +51,14 @@ public class FilterE2EIntegrationTest {
         testRepoDir = TestRepoSetup.setupTestRepo(tempDir);
         testCacheDir = tempDir + "/cache";
         
+        // Copy schemas to cache directory for tests (simulating GitSync behavior)
+        Path repoSchemasDir = Paths.get(testRepoDir, "schemas");
+        Path cacheSchemasDir = Paths.get(testCacheDir, "schemas");
+        if (Files.exists(repoSchemasDir)) {
+            Files.createDirectories(cacheSchemasDir);
+            copyDirectoryStatic(repoSchemasDir, cacheSchemasDir);
+        }
+        
         // Set test mode to skip GitSync startup
         System.setProperty("test.mode", "true");
         
@@ -83,14 +91,12 @@ public class FilterE2EIntegrationTest {
             .build();
     }
     
-    private void copyDirectory(Path source, Path target) throws IOException {
+    private static void copyDirectoryStatic(Path source, Path target) throws IOException {
         Files.walk(source).forEach(src -> {
             try {
                 Path dest = target.resolve(source.relativize(src));
                 if (Files.isDirectory(src)) {
-                    if (!Files.exists(dest)) {
-                        Files.createDirectories(dest);
-                    }
+                    Files.createDirectories(dest);
                 } else {
                     Files.copy(src, dest, StandardCopyOption.REPLACE_EXISTING);
                 }
@@ -98,6 +104,10 @@ public class FilterE2EIntegrationTest {
                 throw new RuntimeException(e);
             }
         });
+    }
+    
+    private void copyDirectory(Path source, Path target) throws IOException {
+        copyDirectoryStatic(source, target);
     }
     
     @AfterAll
@@ -135,22 +145,28 @@ public class FilterE2EIntegrationTest {
             .conditionLogic("AND")
             .build();
         
-        webTestClient.post()
+        Filter created = webTestClient.post()
             .uri("/api/v1/filters?version=v1")
             .bodyValue(request)
             .exchange()
             .expectStatus().isCreated()
             .expectBody(Filter.class)
-            .value(filter -> {
-                Assertions.assertNotNull(filter.getId());
-                Assertions.assertEquals("pending_approval", filter.getStatus());
-                filterId = filter.getId();
-            });
+            .returnResult()
+            .getResponseBody();
+        
+        Assertions.assertNotNull(created, "Filter should be created");
+        Assertions.assertNotNull(created.getId(), "Filter ID should not be null");
+        Assertions.assertFalse(created.getId().isEmpty(), "Filter ID should not be empty");
+        Assertions.assertEquals("pending_approval", created.getStatus());
+        filterId = created.getId();
     }
     
     @Test
     @Order(2)
     void testGenerateSQL() {
+        Assertions.assertNotNull(filterId, "Filter ID should be set from previous test");
+        Assertions.assertFalse(filterId.isEmpty(), "Filter ID should not be empty");
+        
         webTestClient.post()
             .uri("/api/v1/filters/{id}/generate?version=v1", filterId)
             .exchange()
@@ -259,6 +275,9 @@ public class FilterE2EIntegrationTest {
     @Test
     @Order(8)
     void testDeleteFilter() {
+        Assertions.assertNotNull(filterId, "Filter ID should be set from previous test");
+        Assertions.assertFalse(filterId.isEmpty(), "Filter ID should not be empty");
+        
         webTestClient.delete()
             .uri("/api/v1/filters/{id}?version=v1", filterId)
             .exchange()

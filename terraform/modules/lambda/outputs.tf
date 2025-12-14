@@ -38,3 +38,13 @@ output "role_name" {
   value       = aws_iam_role.lambda_execution.name
 }
 
+output "dlq_arn" {
+  description = "Dead Letter Queue ARN (if enabled)"
+  value       = var.enable_dlq ? aws_sqs_queue.lambda_dlq[0].arn : null
+}
+
+output "dlq_url" {
+  description = "Dead Letter Queue URL (if enabled)"
+  value       = var.enable_dlq ? aws_sqs_queue.lambda_dlq[0].url : null
+}
+

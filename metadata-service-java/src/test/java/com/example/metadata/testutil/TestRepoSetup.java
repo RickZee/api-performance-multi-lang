@@ -146,6 +146,13 @@ public class TestRepoSetup {
                     ]
                   },
                   "minItems": 1
+                },
+                "filters": {
+                  "type": "array",
+                  "description": "Filter configurations for this schema version",
+                  "items": {
+                    "type": "object"
+                  }
                 }
               },
               "required": ["eventHeader", "entities"],

@@ -8,6 +8,8 @@ from typing import Any, Dict, Optional
 import sys
 import os
 import boto3
+import time
+from botocore.exceptions import ClientError
 
 # Add the package directory to the path for Lambda
 sys.path.insert(0, os.path.dirname(__file__))
@@ -96,14 +98,37 @@ def _create_response(
 
 
 async def _handle_health_check() -> Dict[str, Any]:
-    """Handle health check request."""
-    return _create_response(
-        200,
-        {
-            "status": "healthy",
-            "message": "Producer API is healthy",
-        },
-    )
+    """Handle health check request with database connectivity test."""
+    try:
+        # Test database connectivity
+        service = await _initialize_service()
+        # Quick connection test using a simple query
+        conn = await service.connection_factory()
+        try:
+            await conn.execute("SELECT 1")
+            # Close direct connection (DSQL uses direct connections)
+            await conn.close()
+        except Exception as close_error:
+            logger.warning(f"{API_NAME} Error closing health check connection: {close_error}")
+        
+        return _create_response(
+            200,
+            {
+                "status": "healthy",
+                "message": "Producer API is healthy",
+                "database": "connected",
+            },
+        )
+    except Exception as e:
+        logger.error(f"{API_NAME} Health check failed: {e}")
+        return _create_response(
+            503,
+            {
+                "status": "unhealthy",
+                "message": "Database connection failed",
+                "error": str(e),
+            },
+        )
 
 
 async def _try_start_database() -> Optional[Dict[str, Any]]:
@@ -116,11 +141,30 @@ async def _try_start_database() -> Optional[Dict[str, Any]]:
         return None
     
     try:
-        # Invoke the auto-start Lambda
-        response = _lambda_client.invoke(
-            FunctionName=auto_start_function,
-            InvocationType='RequestResponse'
-        )
+        # Invoke the auto-start Lambda with timeout handling
+        import asyncio
+        
+        # Use asyncio timeout to prevent hanging
+        timeout_seconds = float(os.getenv('AUTO_START_TIMEOUT', '5.0'))
+        
+        try:
+            # Run Lambda invocation with timeout (boto3 is sync, so use to_thread)
+            response = await asyncio.wait_for(
+                asyncio.to_thread(
+                    _lambda_client.invoke,
+                    FunctionName=auto_start_function,
+                    InvocationType='RequestResponse'
+                ),
+                timeout=timeout_seconds
+            )
+        except asyncio.TimeoutError:
+            logger.warning(f"{API_NAME} Auto-start Lambda invocation timed out after {timeout_seconds}s")
+            return None
+        
+        # Check response status
+        if response.get('StatusCode') != 200:
+            logger.warning(f"{API_NAME} Auto-start Lambda returned non-200 status: {response.get('StatusCode')}")
+            return None
         
         response_payload = json.loads(response['Payload'].read().decode('utf-8'))
         
@@ -143,6 +187,12 @@ async def _try_start_database() -> Optional[Dict[str, Any]]:
             elif status in ['available', 'transitioning']:
                 # Database is available or transitioning, allow request to proceed
                 return None
+    except asyncio.TimeoutError:
+        logger.warning(f"{API_NAME} Auto-start Lambda invocation timed out")
+        return None
+    except ClientError as e:
+        logger.warning(f"{API_NAME} Failed to invoke auto-start Lambda: {e}")
+        return None
     except Exception as e:
         logger.warning(f"{API_NAME} Failed to check/start database: {e}")
         # Don't block the request if we can't check database status
@@ -238,7 +288,27 @@ async def _handle_process_event(event_body: str) -> Dict[str, Any]:
     # Process event
     try:
         service = await _initialize_service()
+        start_time = time.time()
         await service.process_event(event)
+        duration_ms = int((time.time() - start_time) * 1000)
+        
+        # Emit CloudWatch metric (non-blocking)
+        try:
+            cloudwatch = boto3.client('cloudwatch', region_name=os.getenv('AWS_REGION', 'us-east-1'))
+            cloudwatch.put_metric_data(
+                Namespace='ProducerAPI',
+                MetricData=[{
+                    'MetricName': 'EventProcessingDuration',
+                    'Value': duration_ms,
+                    'Unit': 'Milliseconds',
+                    'Dimensions': [
+                        {'Name': 'API', 'Value': 'PythonREST-DSQL'},
+                        {'Name': 'EventName', 'Value': event.event_header.event_name or 'unknown'}
+                    ]
+                }]
+            )
+        except Exception as e:
+            logger.debug(f"Failed to emit CloudWatch metric: {e}")
         
         return _create_response(
             200,
@@ -317,8 +387,24 @@ async def _handle_process_event(event_body: str) -> Dict[str, Any]:
 
 async def _handle_bulk_events(event_body: str) -> Dict[str, Any]:
     """Handle bulk event processing."""
+    # Check bulk event size limit
+    MAX_BULK_EVENTS = int(os.getenv('MAX_BULK_EVENTS', '100'))
+    
     try:
         events_data = json.loads(event_body)
+        
+        # Validate array size before processing
+        if len(events_data) > MAX_BULK_EVENTS:
+            return _create_response(
+                400,
+                {
+                    "error": "Too many events",
+                    "message": f"Maximum {MAX_BULK_EVENTS} events allowed per request",
+                    "received": len(events_data),
+                    "status": 400,
+                },
+            )
+        
         events = [Event(**event_data) for event_data in events_data]
     except json.JSONDecodeError as e:
         logger.warning(f"{API_NAME} Invalid JSON: {e}")
@@ -502,7 +588,18 @@ async def _async_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
     path = http_context.get("path", "")
     method = http_context.get("method", "")
     
-    logger.info(f"{API_NAME} Lambda request: {method} {path}")
+    # Extract request ID for correlation
+    request_id = request_context.get("requestId", context.request_id if context else "unknown")
+    
+    # Log with structured context
+    logger.info(
+        f"{API_NAME} Lambda request",
+        extra={
+            "request_id": request_id,
+            "method": method,
+            "path": path,
+        }
+    )
     
     # Route requests
     if path == "/api/v1/events/health" and method == "GET":

@@ -7,6 +7,6 @@ from producer_api_shared.repository import (
     EventHeaderRepository,
 )
 from producer_api_shared.exceptions import DuplicateEventError
-from .connection_pool import get_connection_pool, close_connection_pool
+from .connection import get_connection
 
-__all__ = ["BusinessEventRepository", "EntityRepository", "EventHeaderRepository", "get_connection_pool", "close_connection_pool", "DuplicateEventError"]
+__all__ = ["BusinessEventRepository", "EntityRepository", "EventHeaderRepository", "get_connection", "DuplicateEventError"]

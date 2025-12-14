@@ -338,18 +338,14 @@ GET /api/v1/schemas/v1?type=car
 
 ## 7. Schema Repository Structure
 
-The metadata service expects schemas organized in a versioned directory structure:
+The metadata service expects schemas organized in a versioned directory structure. Filters are embedded directly within the Event Schema (`event.json`) as a `filters` property:
 
 ```
 data/
 ├── schemas/
 │   ├── v1/
-│   │   ├── filters/
-│   │   │   ├── service-by-dealer-001.json
-│   │   │   ├── service-by-dealer-002.json
-│   │   │   └── service-events-for-dealer-001.json
 │   │   ├── event/
-│   │   │   ├── event.json
+│   │   │   ├── event.json          (contains filters array)
 │   │   │   └── event-header.json
 │   │   └── entity/
 │   │       ├── car.json
@@ -367,7 +363,7 @@ data/
 
 **Schema File Structure:**
 
-Event schema (`event.json`) references entity schemas using `$ref`:
+Event schema (`event.json`) references entity schemas using `$ref` and includes filters:
 ```json
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
@@ -384,10 +380,269 @@ Event schema (`event.json`) references entity schemas using `$ref`:
           {"$ref": "../entity/loan.json"}
         ]
       }
+    },
+    "filters": {
+      "type": "array",
+      "description": "Filter configurations for this schema version",
+      "items": {
+        "type": "object",
+        "properties": {
+          "id": { "type": "string" },
+          "name": { "type": "string" },
+          "outputTopic": { "type": "string" },
+          "conditions": { "type": "array" },
+          "enabled": { "type": "boolean" },
+          ...
+        }
+      }
     }
-  }
+  },
+  "required": ["eventHeader", "entities"]
 }
 ```
+
+---
+
+## 7.1 How Schemas Define Filters
+
+The event schemas define the structure and available fields that filters can reference in their conditions. The relationship between schemas and filters is fundamental to how the metadata service generates Flink SQL queries.
+
+### Schema-to-Database Mapping
+
+The event schema defines the logical structure of events, which maps to the database table structure used in Flink SQL:
+
+**Event Schema Structure:**
+```json
+{
+  "eventHeader": {
+    "uuid": "string",
+    "eventName": "string",
+    "eventType": "enum",
+    "createdDate": "date-time",
+    "savedDate": "date-time"
+  },
+  "entities": [...]
+}
+```
+
+**Database Table Structure (`event_headers`):**
+```sql
+CREATE TABLE event_headers (
+    id VARCHAR(255) PRIMARY KEY,              -- Maps to eventHeader.uuid
+    event_name VARCHAR(255) NOT NULL,         -- Maps to eventHeader.eventName
+    event_type VARCHAR(255),                   -- Maps to eventHeader.eventType
+    created_date TIMESTAMP WITH TIME ZONE,    -- Maps to eventHeader.createdDate
+    saved_date TIMESTAMP WITH TIME ZONE,      -- Maps to eventHeader.savedDate
+    header_data JSONB NOT NULL               -- Contains full eventHeader JSON
+);
+```
+
+### Available Filter Fields
+
+Filters can reference fields in three ways:
+
+1. **Direct Column References** - Fields that map directly to database columns:
+   - `id` - Event ID (UUID)
+   - `event_name` - Event name string
+   - `event_type` - Event type enum value
+   - `created_date` - Creation timestamp
+   - `saved_date` - Save timestamp
+   - `__op` - CDC operation type ('c' for create, 'u' for update, 'd' for delete)
+   - `__table` - Source table name
+
+2. **JSON Path References** - Fields within the `header_data` JSONB column:
+   - `header_data.uuid` - Event UUID
+   - `header_data.eventName` - Event name
+   - `header_data.eventType` - Event type
+   - `header_data.createdDate` - Creation date
+   - `header_data.savedDate` - Save date
+   - `header_data.dealerId` - Custom fields (if present in header_data)
+
+3. **Nested JSON Paths** - Deep references into JSON structures:
+   - `header_data.customField.nestedValue` - Multi-level JSON paths
+
+### Filter Field Path Examples
+
+**Example 1: Direct Column Reference**
+```json
+{
+  "field": "event_type",
+  "operator": "equals",
+  "value": "CarServiceDone",
+  "valueType": "string"
+}
+```
+**Generated SQL:**
+```sql
+WHERE `event_type` = 'CarServiceDone'
+```
+
+**Example 2: JSON Path Reference**
+```json
+{
+  "field": "header_data.dealerId",
+  "operator": "equals",
+  "value": "DEALER-001",
+  "valueType": "string"
+}
+```
+**Generated SQL:**
+```sql
+WHERE JSON_VALUE(`header_data`, '$.dealerId') = 'DEALER-001'
+```
+
+**Example 3: Complex Filter with Multiple Conditions**
+```json
+{
+  "conditions": [
+    {
+      "field": "event_type",
+      "operator": "equals",
+      "value": "CarServiceDone",
+      "valueType": "string"
+    },
+    {
+      "field": "header_data.dealerId",
+      "operator": "in",
+      "values": ["DEALER-001", "DEALER-002"],
+      "valueType": "string"
+    },
+    {
+      "field": "created_date",
+      "operator": "greaterThan",
+      "value": "2025-01-01T00:00:00Z",
+      "valueType": "timestamp"
+    }
+  ],
+  "conditionLogic": "AND"
+}
+```
+**Generated SQL:**
+```sql
+WHERE `__op` = 'c'
+  AND `event_type` = 'CarServiceDone'
+  AND JSON_VALUE(`header_data`, '$.dealerId') IN ('DEALER-001', 'DEALER-002')
+  AND `created_date` > '2025-01-01T00:00:00Z'
+```
+
+### Schema-Driven Filter Validation
+
+The metadata service uses schema information to:
+
+1. **Validate Field Existence** - Ensures filter fields reference valid schema properties
+2. **Type Checking** - Validates that filter values match schema field types
+3. **Enum Validation** - For enum fields, ensures values are from the allowed set
+4. **SQL Generation** - Converts schema field paths to appropriate SQL expressions
+
+### Schema Versioning and Filters
+
+Filters are embedded directly in the Event Schema and versioned alongside schemas:
+
+```
+schemas/
+├── v1/
+│   ├── event/
+│   │   └── event.json          (contains filters array)
+│   └── entity/
+│       └── ...
+└── v2/
+    ├── event/
+    │   └── event.json          (contains filters array for v2)
+    └── ...
+```
+
+**Key Points:**
+- Filters are stored as a `filters` array property within `event.json`
+- Each schema version has its own `event.json` with embedded filters
+- Filters reference fields from their corresponding schema version
+- When schemas evolve, filters must be updated to match new field structures
+- Filter deployment validates that filters are compatible with the current schema version
+- Schema and filters are updated atomically (single file write)
+
+### Filter Field Path Resolution
+
+The filter generator resolves field paths as follows:
+
+1. **Direct Column Match** - If field matches a database column name, use direct reference
+2. **JSON Path Extraction** - If field contains dots (e.g., `header_data.dealerId`), extract using `JSON_VALUE()`
+3. **Type Coercion** - Apply appropriate SQL casting based on `valueType` (string, number, boolean, timestamp)
+
+**Field Path Resolution Flow:**
+```mermaid
+flowchart TD
+    A[Filter Field Path] --> B{Contains '.'?}
+    B -->|No| C[Direct Column Reference]
+    B -->|Yes| D[Split by '.']
+    D --> E[First Part = Column Name]
+    E --> F[Remaining Parts = JSON Path]
+    F --> G[JSON_VALUE column, path]
+    C --> H[Generate SQL WHERE Clause]
+    G --> H
+```
+
+### Example: Complete Filter Using Schema Fields
+
+**Filter Definition:**
+```json
+{
+  "id": "service-events-for-dealer-001",
+  "name": "Service Events for Dealer 001",
+  "outputTopic": "filtered-service-events-dealer-001",
+  "conditions": [
+    {
+      "field": "event_type",
+      "operator": "equals",
+      "value": "CarServiceDone",
+      "valueType": "string"
+    },
+    {
+      "field": "header_data.dealerId",
+      "operator": "equals",
+      "value": "DEALER-001",
+      "valueType": "string"
+    }
+  ],
+  "conditionLogic": "AND"
+}
+```
+
+**Generated Flink SQL:**
+```sql
+-- Sink Table
+CREATE TABLE `filtered-service-events-dealer-001` (
+    `key` BYTES,
+    `id` STRING,
+    `event_name` STRING,
+    `event_type` STRING,
+    `created_date` STRING,
+    `saved_date` STRING,
+    `header_data` STRING,
+    `__op` STRING,
+    `__table` STRING
+) WITH (
+    'connector' = 'confluent',
+    'value.format' = 'json-registry'
+);
+
+-- INSERT with Filter Conditions
+INSERT INTO `filtered-service-events-dealer-001`
+SELECT 
+    CAST(`id` AS BYTES) AS `key`,
+    `id`,
+    `event_name`,
+    `event_type`,
+    `created_date`,
+    `saved_date`,
+    `header_data`,
+    `__op`,
+    `__table`
+FROM `raw-event-headers`
+WHERE `__op` = 'c'
+  AND `event_type` = 'CarServiceDone'
+  AND JSON_VALUE(`header_data`, '$.dealerId') = 'DEALER-001';
+```
+
+This demonstrates how the schema-defined fields (`event_type` from the event header schema and `dealerId` from the header_data JSON) are used to create precise filtering conditions in the generated Flink SQL.
 
 ---
 

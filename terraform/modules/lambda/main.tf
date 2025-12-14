@@ -126,6 +126,41 @@ resource "aws_cloudwatch_log_group" "lambda" {
   tags = var.tags
 }
 
+# Dead Letter Queue (SQS) for failed Lambda invocations
+resource "aws_sqs_queue" "lambda_dlq" {
+  count = var.enable_dlq ? 1 : 0
+  name  = "${var.function_name}-dlq"
+
+  message_retention_seconds = var.dlq_message_retention_seconds
+
+  tags = merge(
+    var.tags,
+    {
+      Name = "${var.function_name}-dlq"
+    }
+  )
+}
+
+# IAM policy for Lambda to send messages to DLQ
+resource "aws_iam_role_policy" "lambda_dlq" {
+  count = var.enable_dlq ? 1 : 0
+  name  = "${var.function_name}-dlq-policy"
+  role  = aws_iam_role.lambda_execution.id
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect = "Allow"
+        Action = [
+          "sqs:SendMessage"
+        ]
+        Resource = aws_sqs_queue.lambda_dlq[0].arn
+      }
+    ]
+  })
+}
+
 # Lambda function
 resource "aws_lambda_function" "this" {
   function_name = var.function_name
@@ -138,6 +173,12 @@ resource "aws_lambda_function" "this" {
 
   s3_bucket = var.s3_bucket
   s3_key    = var.s3_key
+
+  reserved_concurrent_executions = var.reserved_concurrent_executions
+
+  dead_letter_config {
+    target_arn = var.enable_dlq ? aws_sqs_queue.lambda_dlq[0].arn : null
+  }
 
   environment {
     variables = merge(
@@ -153,6 +194,10 @@ resource "aws_lambda_function" "this" {
         IAM_USERNAME                    = var.enable_aurora_dsql ? var.iam_database_user : ""
         AURORA_DSQL_CLUSTER_RESOURCE_ID = var.enable_aurora_dsql ? var.aurora_dsql_cluster_resource_id : ""
         DSQL_HOST                       = var.enable_aurora_dsql ? var.dsql_host : ""
+        DB_POOL_MAX_SIZE                = tostring(var.db_pool_max_size)
+        DB_POOL_MIN_SIZE                = tostring(var.db_pool_min_size)
+        MAX_BULK_EVENTS                 = tostring(var.max_bulk_events)
+        AUTO_START_TIMEOUT              = "5.0"
       },
       var.additional_environment_variables
     )

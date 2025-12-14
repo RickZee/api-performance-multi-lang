@@ -35,6 +35,36 @@
         ]
       },
       "minItems": 1
+    },
+    "filters": {
+      "type": "array",
+      "description": "Filter configurations for this schema version",
+      "items": {
+        "type": "object",
+        "properties": {
+          "id": { "type": "string" },
+          "name": { "type": "string" },
+          "description": { "type": "string" },
+          "consumerId": { "type": "string" },
+          "outputTopic": { "type": "string" },
+          "conditions": { 
+            "type": "array",
+            "items": { "type": "object" }
+          },
+          "enabled": { "type": "boolean" },
+          "conditionLogic": { "type": "string", "enum": ["AND", "OR"] },
+          "status": { "type": "string" },
+          "version": { "type": "integer" },
+          "createdAt": { "type": "string", "format": "date-time" },
+          "updatedAt": { "type": "string", "format": "date-time" },
+          "approvedBy": { "type": "string" },
+          "approvedAt": { "type": "string", "format": "date-time" },
+          "deployedAt": { "type": "string", "format": "date-time" },
+          "deploymentError": { "type": "string" },
+          "flinkStatementIds": { "type": "array", "items": { "type": "string" } }
+        },
+        "required": ["id", "name", "outputTopic", "conditions", "enabled"]
+      }
     }
   },
   "required": ["eventHeader", "entities"],

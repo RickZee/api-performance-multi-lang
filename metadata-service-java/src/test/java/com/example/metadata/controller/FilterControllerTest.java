@@ -13,6 +13,9 @@ import org.springframework.test.web.reactive.server.WebTestClient;
 
 import java.io.IOException;
 import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.Paths;
+import java.nio.file.StandardCopyOption;
 import java.util.List;
 
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT, properties = {
@@ -35,6 +38,14 @@ public class FilterControllerTest {
         testRepoDir = TestRepoSetup.setupTestRepo(tempDir);
         testCacheDir = tempDir + "/cache";
         
+        // Copy schemas to cache directory for tests (simulating GitSync behavior)
+        Path repoSchemasDir = Paths.get(testRepoDir, "schemas");
+        Path cacheSchemasDir = Paths.get(testCacheDir, "schemas");
+        if (Files.exists(repoSchemasDir)) {
+            Files.createDirectories(cacheSchemasDir);
+            copyDirectory(repoSchemasDir, cacheSchemasDir);
+        }
+        
         // Set test mode to skip GitSync startup
         System.setProperty("test.mode", "true");
         
@@ -42,6 +53,21 @@ public class FilterControllerTest {
         registry.add("git.branch", () -> "main");
         registry.add("git.local-cache-dir", () -> testCacheDir);
         registry.add("test.mode", () -> "true");
+    }
+    
+    private static void copyDirectory(Path source, Path target) throws IOException {
+        Files.walk(source).forEach(sourcePath -> {
+            try {
+                Path targetPath = target.resolve(source.relativize(sourcePath));
+                if (Files.isDirectory(sourcePath)) {
+                    Files.createDirectories(targetPath);
+                } else {
+                    Files.copy(sourcePath, targetPath, StandardCopyOption.REPLACE_EXISTING);
+                }
+            } catch (IOException e) {
+                throw new RuntimeException(e);
+            }
+        });
     }
     
     @AfterAll

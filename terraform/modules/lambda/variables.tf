@@ -171,3 +171,39 @@ variable "dsql_kms_key_arn" {
   default     = ""
 }
 
+variable "enable_dlq" {
+  description = "Enable Dead Letter Queue for failed Lambda invocations"
+  type        = bool
+  default     = true
+}
+
+variable "dlq_message_retention_seconds" {
+  description = "Message retention period for DLQ in seconds (default: 1209600 = 14 days)"
+  type        = number
+  default     = 1209600
+}
+
+variable "reserved_concurrent_executions" {
+  description = "Reserved concurrent executions for Lambda (null = no limit)"
+  type        = number
+  default     = null
+}
+
+variable "db_pool_max_size" {
+  description = "Maximum database connection pool size (PostgreSQL variant only)"
+  type        = number
+  default     = 10
+}
+
+variable "db_pool_min_size" {
+  description = "Minimum database connection pool size (PostgreSQL variant only)"
+  type        = number
+  default     = 1
+}
+
+variable "max_bulk_events" {
+  description = "Maximum number of events allowed in bulk request"
+  type        = number
+  default     = 100
+}
+

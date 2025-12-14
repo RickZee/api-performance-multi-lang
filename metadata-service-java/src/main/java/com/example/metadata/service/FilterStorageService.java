@@ -10,7 +10,6 @@ import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 
-import java.io.File;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -18,19 +17,19 @@ import java.nio.file.Paths;
 import java.time.Instant;
 import java.util.*;
 import java.util.concurrent.locks.ReentrantReadWriteLock;
-import java.util.stream.Collectors;
-import java.util.stream.Stream;
 
 @Service
 @Slf4j
 public class FilterStorageService {
     private final ObjectMapper objectMapper;
     private final String baseDir;
+    private final SchemaCacheService schemaCacheService;
     
     private final ReentrantReadWriteLock lock = new ReentrantReadWriteLock();
 
-    public FilterStorageService(GitSyncService gitSyncService) {
+    public FilterStorageService(GitSyncService gitSyncService, SchemaCacheService schemaCacheService) {
         this.baseDir = gitSyncService.getLocalDir();
+        this.schemaCacheService = schemaCacheService;
         this.objectMapper = new ObjectMapper();
         this.objectMapper.registerModule(new JavaTimeModule());
     }
@@ -39,11 +38,12 @@ public class FilterStorageService {
         lock.writeLock().lock();
         try {
             String filterId = generateFilterId(request.getName());
-            Path filtersDir = getFiltersDir(version);
-            Path filterPath = filtersDir.resolve(filterId + ".json");
             
-            // Check if filter already exists
-            if (Files.exists(filterPath)) {
+            // Check if filter already exists (without acquiring another lock)
+            SchemaCacheService.CachedSchema schema = schemaCacheService.loadVersion(version, baseDir);
+            boolean exists = schema.getFilters().stream()
+                .anyMatch(f -> f.getId().equals(filterId));
+            if (exists) {
                 throw new IOException("Filter with ID " + filterId + " already exists");
             }
             
@@ -77,7 +77,11 @@ public class FilterStorageService {
     public Filter get(String version, String filterId) throws IOException {
         lock.readLock().lock();
         try {
-            return loadFilter(version, filterId);
+            SchemaCacheService.CachedSchema schema = schemaCacheService.loadVersion(version, baseDir);
+            return schema.getFilters().stream()
+                .filter(f -> f.getId().equals(filterId))
+                .findFirst()
+                .orElseThrow(() -> new FilterNotFoundException(filterId, version));
         } finally {
             lock.readLock().unlock();
         }
@@ -86,27 +90,8 @@ public class FilterStorageService {
     public List<Filter> list(String version) throws IOException {
         lock.readLock().lock();
         try {
-            Path filtersDir = getFiltersDir(version);
-            
-            if (!Files.exists(filtersDir)) {
-                return new ArrayList<>();
-            }
-            
-            try (Stream<Path> paths = Files.list(filtersDir)) {
-                return paths
-                    .filter(Files::isRegularFile)
-                    .filter(p -> p.toString().endsWith(".json"))
-                    .map(p -> {
-                        try {
-                            return objectMapper.readValue(p.toFile(), Filter.class);
-                        } catch (IOException e) {
-                            log.warn("Failed to read filter file: {}", p, e);
-                            return null;
-                        }
-                    })
-                    .filter(Objects::nonNull)
-                    .collect(Collectors.toList());
-            }
+            SchemaCacheService.CachedSchema schema = schemaCacheService.loadVersion(version, baseDir);
+            return new ArrayList<>(schema.getFilters());
         } finally {
             lock.readLock().unlock();
         }
@@ -156,14 +141,38 @@ public class FilterStorageService {
     public void delete(String version, String filterId) throws IOException {
         lock.writeLock().lock();
         try {
-            Path filtersDir = getFiltersDir(version);
-            Path filterPath = filtersDir.resolve(filterId + ".json");
+            Path eventJsonPath = getEventJsonPath(version);
             
-            if (!Files.exists(filterPath)) {
+            if (!Files.exists(eventJsonPath)) {
                 throw new FilterNotFoundException(filterId, version);
             }
             
-            Files.delete(filterPath);
+            // Read current event.json
+            Map<String, Object> eventSchema = objectMapper.readValue(
+                eventJsonPath.toFile(), 
+                Map.class
+            );
+            
+            // Get filters array
+            List<Map<String, Object>> filters = (List<Map<String, Object>>) 
+                eventSchema.getOrDefault("filters", new ArrayList<>());
+            
+            // Remove filter
+            boolean removed = filters.removeIf(f -> filterId.equals(f.get("id")));
+            if (!removed) {
+                throw new FilterNotFoundException(filterId, version);
+            }
+            
+            // Write back to event.json
+            eventSchema.put("filters", filters);
+            objectMapper.writerWithDefaultPrettyPrinter()
+                .writeValue(eventJsonPath.toFile(), eventSchema);
+            
+            // Invalidate cache to force reload on next access
+            schemaCacheService.invalidate(version);
+            
+            // Force a reload to ensure the cache has the updated state
+            schemaCacheService.loadVersion(version, baseDir);
             
             log.info("Filter deleted: version={}, filterId={}", version, filterId);
         } finally {
@@ -221,37 +230,76 @@ public class FilterStorageService {
     }
 
     private Filter loadFilter(String version, String filterId) throws IOException {
-        Path filtersDir = getFiltersDir(version);
-        Path filterPath = filtersDir.resolve(filterId + ".json");
-        
-        if (!Files.exists(filterPath)) {
-            throw new FilterNotFoundException(filterId, version);
-        }
-        
-        try {
-            return objectMapper.readValue(filterPath.toFile(), Filter.class);
-        } catch (IOException e) {
-            throw new IOException("Failed to read filter: " + filterId, e);
-        }
+        SchemaCacheService.CachedSchema schema = schemaCacheService.loadVersion(version, baseDir);
+        return schema.getFilters().stream()
+            .filter(f -> f.getId().equals(filterId))
+            .findFirst()
+            .orElseThrow(() -> new FilterNotFoundException(filterId, version));
     }
 
     private void save(String version, Filter filter) throws IOException {
-        Path filtersDir = getFiltersDir(version);
-        Files.createDirectories(filtersDir);
+        Path eventJsonPath = getEventJsonPath(version);
         
-        Path filterPath = filtersDir.resolve(filter.getId() + ".json");
+        // Ensure directory exists
+        Files.createDirectories(eventJsonPath.getParent());
+        
+        // Read current event.json or create new one
+        Map<String, Object> eventSchema;
+        if (Files.exists(eventJsonPath)) {
+            eventSchema = objectMapper.readValue(eventJsonPath.toFile(), Map.class);
+        } else {
+            // Create minimal event schema structure if it doesn't exist
+            eventSchema = new HashMap<>();
+            eventSchema.put("$schema", "https://json-schema.org/draft/2020-12/schema");
+            eventSchema.put("type", "object");
+            eventSchema.put("properties", new HashMap<>());
+            eventSchema.put("required", Arrays.asList("eventHeader", "entities"));
+        }
+        
+        // Get or create filters array
+        List<Map<String, Object>> filters = (List<Map<String, Object>>) 
+            eventSchema.getOrDefault("filters", new ArrayList<>());
+        
+        // Convert filter to map
+        Map<String, Object> filterMap = objectMapper.convertValue(filter, Map.class);
+        
+        // Update or add filter
+        int index = findFilterIndex(filters, filter.getId());
+        if (index >= 0) {
+            filters.set(index, filterMap);
+        } else {
+            filters.add(filterMap);
+        }
+        
+        // Write back to event.json
+        eventSchema.put("filters", filters);
         objectMapper.writerWithDefaultPrettyPrinter()
-            .writeValue(filterPath.toFile(), filter);
+            .writeValue(eventJsonPath.toFile(), eventSchema);
+        
+        // Invalidate cache to force reload on next access
+        schemaCacheService.invalidate(version);
+        
+        // Force a reload to ensure the cache has the updated filter
+        // This ensures that subsequent reads will see the new filter
+        schemaCacheService.loadVersion(version, baseDir);
     }
 
-    private Path getFiltersDir(String version) {
-        // Check if baseDir contains a "schemas" subdirectory (git repo structure)
+    private Path getEventJsonPath(String version) {
         Path basePath = Paths.get(baseDir);
         Path schemasSubDir = basePath.resolve("schemas");
         if (Files.exists(schemasSubDir)) {
-            return schemasSubDir.resolve(version).resolve("filters");
+            return schemasSubDir.resolve(version).resolve("event").resolve("event.json");
         }
-        return basePath.resolve("schemas").resolve(version).resolve("filters");
+        return basePath.resolve("schemas").resolve(version).resolve("event").resolve("event.json");
+    }
+
+    private int findFilterIndex(List<Map<String, Object>> filters, String filterId) {
+        for (int i = 0; i < filters.size(); i++) {
+            if (filterId.equals(filters.get(i).get("id"))) {
+                return i;
+            }
+        }
+        return -1;
     }
 
     private String generateFilterId(String name) {
