@@ -1,6 +1,8 @@
 package com.example.metadata.service;
 
+import com.example.metadata.model.Filter;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
 import lombok.Data;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
@@ -13,13 +15,19 @@ import java.nio.file.Paths;
 import java.time.Instant;
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.stream.Collectors;
 
 @Service
 @Slf4j
 public class SchemaCacheService {
-    private final ObjectMapper objectMapper = new ObjectMapper();
+    private final ObjectMapper objectMapper;
     private final Map<String, CachedSchema> cache = new ConcurrentHashMap<>();
     private static final long CACHE_TTL_SECONDS = 3600; // 1 hour
+
+    public SchemaCacheService() {
+        this.objectMapper = new ObjectMapper();
+        this.objectMapper.registerModule(new JavaTimeModule());
+    }
 
     @Data
     public static class CachedSchema {
@@ -27,6 +35,7 @@ public class SchemaCacheService {
         private Map<String, Object> schema = new HashMap<>();
         private Map<String, Object> eventSchema = new HashMap<>();
         private Map<String, Map<String, Object>> entitySchemas = new HashMap<>();
+        private List<Filter> filters = new ArrayList<>();
         private Instant loadedAt = Instant.now();
     }
 
@@ -73,6 +82,27 @@ public class SchemaCacheService {
                     Map.class
                 );
                 cached.setEventSchema(eventSchema);
+                
+                // Extract filters from event schema
+                if (eventSchema.containsKey("filters")) {
+                    Object filtersObj = eventSchema.get("filters");
+                    if (filtersObj instanceof List) {
+                        List<Map<String, Object>> filtersList = (List<Map<String, Object>>) filtersObj;
+                        List<Filter> filters = filtersList.stream()
+                            .map(filterMap -> {
+                                try {
+                                    return objectMapper.convertValue(filterMap, Filter.class);
+                                } catch (Exception e) {
+                                    log.warn("Failed to parse filter: {}", filterMap, e);
+                                    return null;
+                                }
+                            })
+                            .filter(Objects::nonNull)
+                            .collect(Collectors.toList());
+                        cached.setFilters(filters);
+                        log.info("Loaded {} filters from event schema", filters.size());
+                    }
+                }
             } catch (IOException e) {
                 log.warn("Failed to load event schema: {}", eventSchemaPath, e);
             }
@@ -133,8 +163,8 @@ public class SchemaCacheService {
             }
         }
 
-        log.info("Loaded schema version: version={}, entityCount={}", 
-            version, cached.getEntitySchemas().size());
+        log.info("Loaded schema version: version={}, entityCount={}, filterCount={}", 
+            version, cached.getEntitySchemas().size(), cached.getFilters().size());
 
         return cached;
     }
