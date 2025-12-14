@@ -1,0 +1,25 @@
+server:
+  port: ${SERVER_PORT:8080}
+
+git:
+  repository: ${GIT_REPOSITORY:file:///app/data}
+  branch: ${GIT_BRANCH:main}
+  pull-interval: ${GIT_PULL_INTERVAL:PT5M}
+  local-cache-dir: ${LOCAL_CACHE_DIR:/tmp/schema-cache}
+
+validation:
+  default-version: ${DEFAULT_VERSION:latest}
+  accepted-versions: ${ACCEPTED_VERSIONS:v1,v2}
+  strict-mode: ${STRICT_MODE:true}
+
+confluent:
+  cloud:
+    api-key: ${CONFLUENT_CLOUD_API_KEY:}
+    api-secret: ${CONFLUENT_CLOUD_API_SECRET:}
+    flink-compute-pool-id: ${CONFLUENT_FLINK_COMPUTE_POOL_ID:}
+    flink-api-endpoint: ${CONFLUENT_FLINK_API_ENDPOINT:}
+
+logging:
+  level:
+    root: INFO
+    com.example.metadata: DEBUG

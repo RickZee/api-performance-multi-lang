@@ -222,7 +222,7 @@ module "aurora" {
 # RDS Proxy Module (enables connection pooling for high Lambda parallelism)
 # Disabled for dev environment to minimize infrastructure, enabled for test
 module "rds_proxy" {
-  count  = var.enable_aurora && var.enable_python_lambda && var.enable_rds_proxy && local.is_test ? 1 : 0
+  count  = var.enable_aurora && var.enable_python_lambda_pg && var.enable_rds_proxy && local.is_test ? 1 : 0
   source = "./modules/rds-proxy"
 
   project_name                   = var.project_name
@@ -245,7 +245,7 @@ module "rds_proxy" {
 # Security group rule: Allow RDS Proxy to access Aurora
 # Only created if RDS Proxy module is actually created (test environment)
 resource "aws_security_group_rule" "aurora_from_rds_proxy" {
-  count = var.enable_aurora && var.enable_python_lambda && var.enable_rds_proxy && local.is_test ? 1 : 0
+  count = var.enable_aurora && var.enable_python_lambda_pg && var.enable_rds_proxy && local.is_test ? 1 : 0
 
   type                     = "ingress"
   from_port                = 5432
@@ -280,7 +280,7 @@ locals {
   aurora_endpoint = var.enable_aurora ? try(module.aurora[0].cluster_endpoint, var.aurora_endpoint) : var.aurora_endpoint
 
   # Use RDS Proxy endpoint if available (for connection pooling), otherwise use Aurora endpoint
-  rds_proxy_endpoint = var.enable_aurora && var.enable_python_lambda && var.enable_rds_proxy ? try(module.rds_proxy[0].proxy_endpoint, null) : null
+  rds_proxy_endpoint = var.enable_aurora && var.enable_python_lambda_pg && var.enable_rds_proxy ? try(module.rds_proxy[0].proxy_endpoint, null) : null
   database_endpoint  = local.rds_proxy_endpoint != null ? local.rds_proxy_endpoint : local.aurora_endpoint
 
   database_url = local.has_database_url ? var.database_url : (
@@ -335,7 +335,7 @@ locals {
 # Starts Aurora cluster when invoked by API Lambda on connection failure
 # Defined before Python Lambda so it can be referenced in environment variables
 module "aurora_auto_start" {
-  count  = var.enable_aurora && local.is_test && var.enable_python_lambda ? 1 : 0
+  count  = var.enable_aurora && local.is_test && var.enable_python_lambda_pg ? 1 : 0
   source = "./modules/aurora-auto-start"
 
   function_name                  = "${var.project_name}-aurora-auto-start"
@@ -348,13 +348,13 @@ module "aurora_auto_start" {
 }
 
 # Python REST Lambda module (optional - disabled by default)
-module "python_rest_lambda" {
-  count  = var.enable_python_lambda ? 1 : 0
+module "python_rest_lambda_pg" {
+  count  = var.enable_python_lambda_pg ? 1 : 0
   source = "./modules/lambda"
 
-  function_name                  = "${var.project_name}-python-rest-lambda"
+  function_name                  = "${var.project_name}-python-rest-lambda-pg"
   s3_bucket                      = aws_s3_bucket.lambda_deployments.id
-  s3_key                         = "python-rest/lambda-deployment.zip"
+  s3_key                         = "python-rest-pg/lambda-deployment.zip"
   handler                        = "lambda_handler.handler"
   runtime                        = "python3.11"
   architectures                  = ["x86_64"]
@@ -375,7 +375,7 @@ module "python_rest_lambda" {
   iam_database_user               = var.iam_database_user
   aurora_dsql_cluster_resource_id = var.aurora_dsql_cluster_resource_id
 
-  additional_environment_variables = var.enable_aurora && local.is_test && var.enable_python_lambda ? {
+  additional_environment_variables = var.enable_aurora && local.is_test && var.enable_python_lambda_pg ? {
     AURORA_AUTO_START_FUNCTION_NAME = module.aurora_auto_start[0].function_name
   } : {}
 
@@ -387,7 +387,7 @@ module "python_rest_lambda" {
       subnet_ids         = var.subnet_ids
   } : null)
 
-  api_name        = "${var.project_name}-python-rest-http-api"
+  api_name        = "${var.project_name}-python-rest-pg-http-api"
   api_description = "HTTP API for Producer API Python REST Lambda"
   cors_config = {
     allow_origins = ["*"]
@@ -402,13 +402,13 @@ module "python_rest_lambda" {
 # Aurora Auto-Stop Lambda (only for test environment, not dev)
 # Monitors API Gateway invocations and stops Aurora if no activity for 3 hours
 module "aurora_auto_stop" {
-  count  = var.enable_aurora && local.is_test && var.enable_python_lambda ? 1 : 0
+  count  = var.enable_aurora && local.is_test && var.enable_python_lambda_pg ? 1 : 0
   source = "./modules/aurora-auto-stop"
 
   function_name                  = "${var.project_name}-aurora-auto-stop"
   aurora_cluster_id              = module.aurora[0].cluster_id
   aurora_cluster_arn             = module.aurora[0].cluster_arn
-  api_gateway_id                 = module.python_rest_lambda[0].api_id
+  api_gateway_id                 = module.python_rest_lambda_pg[0].api_id
   aws_region                     = var.aws_region
   inactivity_hours               = 3
   cloudwatch_logs_retention_days = local.cloudwatch_logs_retention
@@ -418,9 +418,9 @@ module "aurora_auto_stop" {
 
 # IAM policy to allow Python Lambda to invoke auto-start Lambda
 resource "aws_iam_role_policy" "python_lambda_auto_start" {
-  count = var.enable_aurora && local.is_test && var.enable_python_lambda ? 1 : 0
+  count = var.enable_aurora && local.is_test && var.enable_python_lambda_pg ? 1 : 0
   name  = "${var.project_name}-python-lambda-auto-start-policy"
-  role  = module.python_rest_lambda[0].role_name
+  role  = module.python_rest_lambda_pg[0].role_name
 
   policy = jsonencode({
     Version = "2012-10-17"
@@ -438,12 +438,12 @@ resource "aws_iam_role_policy" "python_lambda_auto_start" {
 
 # Lambda permission to allow Python Lambda to invoke auto-start Lambda
 resource "aws_lambda_permission" "aurora_auto_start_python_lambda" {
-  count         = var.enable_aurora && local.is_test && var.enable_python_lambda ? 1 : 0
+  count         = var.enable_aurora && local.is_test && var.enable_python_lambda_pg ? 1 : 0
   statement_id  = "AllowExecutionFromPythonLambda"
   action        = "lambda:InvokeFunction"
   function_name = module.aurora_auto_start[0].function_name
   principal     = "lambda.amazonaws.com"
-  source_arn    = module.python_rest_lambda[0].function_arn
+  source_arn    = module.python_rest_lambda_pg[0].function_arn
 }
 
 # Python REST Lambda DSQL module (separate from regular Python Lambda)
@@ -476,6 +476,7 @@ module "python_rest_lambda_dsql" {
   iam_database_user               = var.iam_database_user
   aurora_dsql_cluster_resource_id = var.enable_aurora_dsql_cluster ? try(module.aurora_dsql[0].cluster_resource_id, "") : var.aurora_dsql_cluster_resource_id
   dsql_host                       = var.enable_aurora_dsql_cluster ? try(module.aurora_dsql[0].dsql_host, "") : ""
+  dsql_kms_key_arn                = var.enable_aurora_dsql_cluster ? try(module.aurora_dsql[0].kms_key_arn, "") : ""
 
   additional_environment_variables = {}
 
@@ -512,67 +513,103 @@ module "database" {
   tags = local.common_tags
 }
 
-# SSM VPC Endpoints (required for SSM Session Manager from private subnets without NAT)
-# Only create if test runner EC2 is enabled and we have a VPC
-module "ssm_endpoints" {
-  count  = var.enable_dsql_test_runner_ec2 && (var.enable_aurora || var.enable_aurora_dsql_cluster) ? 1 : 0
-  source = "./modules/ssm-endpoints"
-
-  project_name   = var.project_name
-  vpc_id         = module.vpc[0].vpc_id
-  subnet_ids     = module.vpc[0].private_subnet_ids
-  vpc_cidr_block = module.vpc[0].vpc_cidr
-
-  tags = local.common_tags
-}
+# SSM VPC Endpoints (for SSM Session Manager from private subnets)
+# Bastion host is in public subnet and can use internet gateway for SSM
+# These endpoints remain configured for private subnets only (no change needed)
+# Note: Existing endpoints are fine - bastion doesn't need them
 
 # S3 VPC Endpoint (Gateway type - free, no data transfer charges)
-# Enables S3 access from private subnets without NAT Gateway
+# Enables S3 access from VPC without internet gateway
+# Note: S3 endpoint works with all route tables in the VPC
 module "s3_endpoint" {
-  count  = var.enable_dsql_test_runner_ec2 && (var.enable_aurora || var.enable_aurora_dsql_cluster) ? 1 : 0
+  count  = var.enable_bastion_host && (var.enable_aurora || var.enable_aurora_dsql_cluster) ? 1 : 0
   source = "./modules/s3-endpoint"
 
   project_name    = var.project_name
   vpc_id          = module.vpc[0].vpc_id
+  # S3 gateway endpoint applies to all route tables in VPC automatically
   route_table_ids = module.vpc[0].private_route_table_ids
 
   tags = local.common_tags
 }
 
-# DSQL Test Runner EC2 Instance
-# Creates an EC2 instance in private subnet for testing DSQL connector from inside VPC
-# Access via SSM Session Manager only (no inbound ports)
-module "dsql_test_runner_ec2" {
-  count  = var.enable_dsql_test_runner_ec2 && var.enable_aurora_dsql_cluster ? 1 : 0
-  source = "./modules/ec2-test-runner"
+# DSQL Test Runner EC2 Instance - REMOVED
+# Now using bastion host as test runner instead
+# Access via SSM Session Manager or SSH
+
+# EC2 Auto-Stop Lambda - REMOVED (no longer needed with bastion host)
+
+# Bastion Host
+# Creates an EC2 instance in public subnet for database access via SSH
+# Also used as test runner for DSQL connector (replaces dedicated test runner)
+module "bastion_host" {
+  count  = var.enable_bastion_host && var.enable_aurora_dsql_cluster ? 1 : 0
+  source = "./modules/bastion-host"
 
   project_name                    = var.project_name
   vpc_id                          = module.vpc[0].vpc_id
-  private_subnet_id               = module.vpc[0].private_subnet_ids[0]
+  public_subnet_id                = module.vpc[0].public_subnet_ids[0]
   vpc_cidr_block                  = module.vpc[0].vpc_cidr
-  instance_type                   = var.dsql_test_runner_instance_type
-  iam_database_user               = var.iam_database_user
+  instance_type                   = var.bastion_instance_type
   aurora_dsql_cluster_resource_id = module.aurora_dsql[0].cluster_resource_id
   dsql_kms_key_arn                = module.aurora_dsql[0].kms_key_arn
   aws_region                      = var.aws_region
   s3_bucket_name                  = aws_s3_bucket.lambda_deployments.id
+  ssh_public_key                  = var.bastion_ssh_public_key
+  ssh_allowed_cidr_blocks         = var.bastion_ssh_allowed_cidr_blocks
+  allocate_elastic_ip            = var.bastion_allocate_elastic_ip
 
   tags = local.common_tags
 }
 
-# EC2 Auto-Stop Lambda
-# Monitors SSM logins and EC2 activity, stops EC2 if no activity for 3 hours
-# Applies to all EC2 instances (currently the DSQL test runner)
-module "ec2_auto_stop" {
-  count  = var.enable_dsql_test_runner_ec2 && var.enable_aurora_dsql_cluster ? 1 : 0
-  source = "./modules/ec2-auto-stop"
+# Grant Bastion Host IAM Role Access to DSQL IAM User
+# 
+# DSQL requires IAM authentication even for admin operations, creating a chicken-and-egg problem.
+# The simplest solution is to grant the bastion role directly using a one-time manual step,
+# then Terraform can manage it going forward.
+#
+# One-time setup (run once manually from a machine with DSQL admin access):
+#   AWS IAM GRANT ${var.iam_database_user} TO 'arn:aws:iam::${data.aws_caller_identity.current.account_id}:role/${var.project_name}-bastion-role';
+#
+# This null_resource outputs the command to run and can be triggered on demand.
+resource "null_resource" "grant_bastion_iam_access" {
+  count = var.enable_bastion_host && var.enable_aurora_dsql_cluster ? 1 : 0
 
-  function_name                  = "${var.project_name}-ec2-auto-stop"
-  ec2_instance_id               = module.dsql_test_runner_ec2[0].instance_id
-  inactivity_hours               = 3
-  aws_region                     = var.aws_region
-  cloudwatch_logs_retention_days = local.cloudwatch_logs_retention
+  triggers = {
+    bastion_instance_id = module.bastion_host[0].instance_id
+    dsql_cluster_id     = module.aurora_dsql[0].cluster_resource_id
+    iam_user            = var.iam_database_user
+    bastion_role_arn    = "arn:aws:iam::${data.aws_caller_identity.current.account_id}:role/${var.project_name}-bastion-role"
+  }
 
-  tags = local.common_tags
+  # Output the command that needs to be run
+  # This can be run manually or via a separate automation
+  provisioner "local-exec" {
+    command = <<-EOT
+      echo "=========================================="
+      echo "DSQL IAM Role Mapping Required"
+      echo "=========================================="
+      echo ""
+      echo "Run this command from a machine with DSQL admin access:"
+      echo ""
+      echo "  AWS IAM GRANT ${var.iam_database_user} TO 'arn:aws:iam::${data.aws_caller_identity.current.account_id}:role/${var.project_name}-bastion-role';"
+      echo ""
+      echo "This is a one-time setup. After this, the connector will be able to connect."
+      echo ""
+      echo "To connect to DSQL, you need:"
+      echo "  1. A machine with IAM role/user mapped to postgres user in DSQL"
+      echo "  2. Or use AWS Console/CLI if available"
+      echo ""
+      echo "DSQL Host: ${module.aurora_dsql[0].dsql_host}"
+      echo "IAM User: ${var.iam_database_user}"
+      echo "Bastion Role: arn:aws:iam::${data.aws_caller_identity.current.account_id}:role/${var.project_name}-bastion-role"
+      echo "=========================================="
+    EOT
+  }
+
+  depends_on = [
+    module.bastion_host,
+    module.aurora_dsql,
+  ]
 }
 

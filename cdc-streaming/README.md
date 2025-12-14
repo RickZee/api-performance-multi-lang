@@ -11,6 +11,7 @@ PostgreSQL → CDC Connector → Kafka → Flink SQL → Filtered Topics → Con
 ```
 
 The system automatically:
+
 - **Captures** database changes via CDC
 - **Streams** events to Kafka
 - **Filters** events by type using Flink SQL
@@ -46,6 +47,7 @@ The system automatically:
 - **Confluent CLI** (`brew install confluentinc/tap/cli`)
 - **PostgreSQL database** (Aurora PostgreSQL or self-managed)
 - **Network connectivity** between Confluent Cloud and PostgreSQL
+- **AWS CLI** configured with appropriate credentials (for bastion host access)
 
 ### Setup Steps
 
@@ -70,9 +72,71 @@ The system automatically:
    ```
 
 3. **Monitor in Confluent Cloud Console**
-   - Navigate to https://confluent.cloud
+   - Navigate to <https://confluent.cloud>
    - View connectors, topics, and Flink statements
    - Monitor metrics and throughput
+
+4. **Access Database via Bastion Host** (Optional)
+
+   The bastion host provides secure access to the DSQL database for validation and debugging.
+
+   **Note**: DSQL is only accessible from within the VPC. You must connect via the bastion host (recommended) or install `psql` locally and use IAM authentication.
+
+   **Quick Query Script (Non-Interactive - Recommended):**
+
+   ```bash
+   # Run default table count query (no psql needed locally)
+   ./scripts/query-dsql.sh
+   
+   # Or run a custom query
+   ./scripts/query-dsql.sh "SELECT COUNT(*) FROM business_events WHERE created_date > NOW() - INTERVAL '1 hour';"
+   ```
+
+   **Interactive Connection via Bastion Host:**
+
+   ```bash
+   # Use the interactive connection script (connects via SSM)
+   ./scripts/connect-dsql.sh
+   
+   # Once connected to bastion host, run these commands (shown by script):
+   export DSQL_HOST=vftmkydwxvxys6asbsc6ih2the.dsql-fnh4.us-east-1.on.aws
+   export AWS_REGION=us-east-1
+   export PGPASSWORD=$(aws dsql generate-db-connect-admin-auth-token --region $AWS_REGION --hostname $DSQL_HOST)
+   psql -h $DSQL_HOST -U admin -d postgres -p 5432
+   
+   # Example queries to verify events
+   -- Count events by table
+   SELECT 'business_events' as table_name, COUNT(*) as count FROM business_events
+   UNION ALL SELECT 'event_headers', COUNT(*) FROM event_headers
+   UNION ALL SELECT 'car_entities', COUNT(*) FROM car_entities
+   UNION ALL SELECT 'loan_entities', COUNT(*) FROM loan_entities
+   UNION ALL SELECT 'loan_payment_entities', COUNT(*) FROM loan_payment_entities
+   UNION ALL SELECT 'service_record_entities', COUNT(*) FROM service_record_entities
+   ORDER BY table_name;
+   
+   -- View recent events
+   SELECT id, event_name, event_type, created_date 
+   FROM business_events 
+   ORDER BY created_date DESC 
+   LIMIT 10;
+   ```
+
+   **Local Connection (Requires psql Installation):**
+
+   If you want to connect directly from your local machine, install `psql` first:
+
+   ```bash
+   # macOS
+   brew install postgresql@16
+   
+   # Then connect (DSQL must be publicly accessible)
+   export DSQL_HOST=$(cd terraform && terraform output -raw aurora_dsql_host)
+   export AWS_REGION=us-east-1
+   export PGPASSWORD=$(aws dsql generate-db-connect-admin-auth-token --region $AWS_REGION --hostname $DSQL_HOST)
+   psql -h $DSQL_HOST -U admin -d postgres -p 5432
+   ```
+
+   **Note**: Direct local connection only works if DSQL is configured as publicly accessible. The bastion host method works regardless of public access settings.
 
 ## Key Features
 
@@ -98,12 +162,14 @@ The system automatically:
 ### Filter Configuration
 
 Filtering rules are defined in Flink SQL files:
+
 - `flink-jobs/business-events-routing-confluent-cloud.sql` - Main routing job (streams from event_headers)
 - Edit SQL files to modify filtering rules
 
 ### Connector Configuration
 
 Connector configuration files:
+
 - `connectors/postgres-cdc-source-v2-debezium-event-headers-confluent-cloud.json` - Recommended connector
 
 For detailed configuration, see [ARCHITECTURE.md](ARCHITECTURE.md).
@@ -111,6 +177,7 @@ For detailed configuration, see [ARCHITECTURE.md](ARCHITECTURE.md).
 ## Data Model
 
 The system uses a **hybrid data model** combining:
+
 - **Relational columns** for efficient filtering (`id`, `event_type`, `event_name`)
 - **JSONB column** (`header_data`) for event header structure
 - **Note**: Only header information is streamed. Entity information must be queried from the database separately if needed.
@@ -120,6 +187,7 @@ The system uses a **hybrid data model** combining:
 See [`data/schemas/event/samples/loan-created-event.json`](../data/schemas/event/samples/loan-created-event.json) for a complete example.
 
 **Schema Definitions:**
+
 - Event schema: [`data/schemas/event/event.json`](../data/schemas/event/event.json)
 - Entity schemas: [`data/schemas/entity/car.json`](../data/schemas/entity/car.json), [`data/schemas/entity/loan.json`](../data/schemas/entity/loan.json)
 - Sample data: [`data/entities/car/car-large.json`](../data/entities/car/car-large.json)
@@ -151,12 +219,13 @@ For advanced testing scenarios including parallel execution and high-throughput 
 ### Confluent Cloud Console
 
 Monitor everything via the web console:
+
 - **Connectors**: Status, throughput, errors
 - **Topics**: Message counts, throughput, consumer lag
 - **Flink Statements**: Processing metrics, latency, backpressure
 - **Consumer Groups**: Lag, offsets, throughput
 
-Access at: https://confluent.cloud → Your Environment
+Access at: <https://confluent.cloud> → Your Environment
 
 ### Quick CLI Checks
 
@@ -170,6 +239,90 @@ confluent kafka topic list
 # Check Flink statements
 confluent flink statement list --compute-pool <compute-pool-id>
 ```
+
+### Database Validation via Bastion Host
+
+To verify events are being stored in the database, use one of these methods:
+
+**Option 1: Quick Query Script (Non-Interactive - Recommended, No psql needed locally)**
+
+The script runs queries via the bastion host, so you don't need `psql` installed locally:
+
+```bash
+# Run default table count query (shows counts for all tables)
+./scripts/query-dsql.sh
+
+# Run a custom query
+./scripts/query-dsql.sh "SELECT COUNT(*) as total_events FROM business_events;"
+
+# Query recent events
+./scripts/query-dsql.sh "SELECT id, event_name, event_type, created_date FROM business_events ORDER BY created_date DESC LIMIT 10;"
+```
+
+**Option 2: Interactive Connection via Bastion Host**
+
+Connect to the bastion host (which has `psql` pre-installed):
+
+```bash
+# Connect interactively to the bastion host via SSM
+./scripts/connect-dsql.sh
+
+# The script will display connection commands. Once connected to bastion host, run:
+# (psql is already installed on the bastion host)
+export DSQL_HOST=vftmkydwxvxys6asbsc6ih2the.dsql-fnh4.us-east-1.on.aws
+export AWS_REGION=us-east-1
+export PGPASSWORD=$(aws dsql generate-db-connect-admin-auth-token --region $AWS_REGION --hostname $DSQL_HOST)
+psql -h $DSQL_HOST -U admin -d postgres -p 5432
+
+# Then run queries interactively
+SELECT 'business_events' as table_name, COUNT(*) as count FROM business_events
+UNION ALL SELECT 'event_headers', COUNT(*) FROM event_headers
+UNION ALL SELECT 'car_entities', COUNT(*) FROM car_entities
+UNION ALL SELECT 'loan_entities', COUNT(*) FROM loan_entities
+UNION ALL SELECT 'loan_payment_entities', COUNT(*) FROM loan_payment_entities
+UNION ALL SELECT 'service_record_entities', COUNT(*) FROM service_record_entities
+ORDER BY table_name;
+```
+
+**Option 3: Local Connection (Requires psql Installation)**
+
+If you want to connect directly from your local machine, install `psql` first:
+
+```bash
+# Install psql (macOS)
+brew install postgresql@16
+
+# Or if postgresql@16 not available:
+brew install postgresql
+
+# Then connect (requires DSQL to be publicly accessible)
+export DSQL_HOST=$(cd terraform && terraform output -raw aurora_dsql_host)
+export AWS_REGION=us-east-1
+export PGPASSWORD=$(aws dsql generate-db-connect-admin-auth-token --region $AWS_REGION --hostname $DSQL_HOST)
+psql -h $DSQL_HOST -U admin -d postgres -p 5432
+```
+
+**Note**: Options 1 and 2 work regardless of DSQL public access settings since they connect via the bastion host within the VPC. Option 3 requires DSQL to be publicly accessible and `psql` installed locally.
+
+**Option 3: Local Connection (Requires psql Installation)**
+
+If you want to connect directly from your local machine, install `psql` first:
+
+```bash
+# Install psql (macOS)
+brew install postgresql@16
+
+# Or if postgresql@16 not available:
+brew install postgresql
+
+# Then connect (requires DSQL to be publicly accessible)
+export DSQL_HOST=$(cd terraform && terraform output -raw aurora_dsql_host)
+export AWS_REGION=us-east-1
+export PGPASSWORD=$(aws dsql generate-db-connect-admin-auth-token --region $AWS_REGION --hostname $DSQL_HOST)
+psql -h $DSQL_HOST -U admin -d postgres -p 5432
+```
+
+**Note**: Options 1 and 2 work regardless of DSQL public access settings since they connect via the bastion host within the VPC. Option 3 requires DSQL to be publicly accessible and `psql` installed locally.
 
 For detailed monitoring commands and REST API integration, see [ADVANCED_USE_CASES.md](ADVANCED_USE_CASES.md).
 

@@ -67,12 +67,12 @@ print_info "Using S3 bucket: $BUCKET_NAME"
 
 # Build Python REST Lambda function
 print_info "Building Python REST Lambda function..."
-cd "$PROJECT_ROOT/producer-api-python-rest-lambda"
+cd "$PROJECT_ROOT/producer-api-python-rest-lambda-pg"
 if [ -f "scripts/build-lambda.sh" ]; then
     bash scripts/build-lambda.sh
     if [ -f "lambda-deployment.zip" ]; then
         print_info "Uploading Python REST Lambda to S3..."
-        aws s3 cp lambda-deployment.zip "s3://${BUCKET_NAME}/python-rest/lambda-deployment.zip"
+        aws s3 cp lambda-deployment.zip "s3://${BUCKET_NAME}/python-rest-pg/lambda-deployment.zip"
         print_info "Python REST Lambda uploaded successfully"
         # Clean up local zip file
         rm -f lambda-deployment.zip

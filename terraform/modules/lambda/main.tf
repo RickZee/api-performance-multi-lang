@@ -92,6 +92,28 @@ resource "aws_iam_role_policy" "lambda_dsql_auth" {
   }
 }
 
+# IAM policy for KMS decrypt access (required for DSQL connections)
+# DSQL uses KMS encryption, and Lambda needs decrypt permission to connect
+resource "aws_iam_role_policy" "lambda_dsql_kms" {
+  count = var.enable_aurora_dsql && var.dsql_kms_key_arn != "" ? 1 : 0
+  name  = "${var.function_name}-dsql-kms-policy"
+  role  = aws_iam_role.lambda_execution.id
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect = "Allow"
+        Action = [
+          "kms:Decrypt",
+          "kms:DescribeKey"
+        ]
+        Resource = var.dsql_kms_key_arn
+      }
+    ]
+  })
+}
+
 # Data sources for IAM policy
 data "aws_region" "current" {}
 data "aws_caller_identity" "current" {}

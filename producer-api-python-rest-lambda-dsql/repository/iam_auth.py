@@ -88,14 +88,19 @@ def generate_iam_auth_token(
         # Extract the presigned URL query string (includes all query parameters with signature)
         # The token is the query string part after the '?'
         parsed = urlparse(signed_url)
-        token = parsed.query
+        signed_query = parsed.query
         
-        if not token:
+        if not signed_query:
             raise Exception(f"Failed to generate DSQL token from URL: {request.url}")
         
-        # DSQL expects the full presigned URL query string as the password
-        # Format: Action=DbConnect&X-Amz-Algorithm=...&X-Amz-Signature=...
-        logger.info(f"Generated DSQL token (length: {len(token)})")
+        # Phase 1 Fix: Update token format to include host/port prefix
+        # Aligns with standard Aurora IAM token structure for signature validation
+        # Format: {endpoint}:{port}/?{signed_query}
+        token = f"{endpoint}:{port}/?{signed_query}"
+        
+        # DSQL expects the presigned URL with host/port prefix as the password
+        # This format matches standard Aurora IAM token structure
+        logger.info(f"Generated DSQL token with host/port prefix (length: {len(token)})")
         
         # Cache the token (valid for 15 minutes, but we'll expire it at 14 minutes)
         expires_at = datetime.utcnow() + timedelta(minutes=14)

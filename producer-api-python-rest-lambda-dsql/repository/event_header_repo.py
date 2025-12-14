@@ -6,7 +6,6 @@ import logging
 import asyncio
 from typing import Optional
 from datetime import datetime
-from repository.connection_pool import invalidate_connection_pool
 from repository.business_event_repo import DuplicateEventError
 
 logger = logging.getLogger(__name__)
@@ -20,12 +19,16 @@ MAX_RETRY_DELAY = 2.0  # 2 seconds
 class EventHeaderRepository:
     """Repository for event header database operations."""
     
-    def __init__(self, pool: asyncpg.Pool):
-        """Initialize repository with connection pool."""
-        self.pool = pool
+    def __init__(self, pool: Optional[asyncpg.Pool] = None):
+        """Initialize repository (pool is optional, connections are passed directly)."""
+        self.pool = pool  # Kept for backward compatibility, but not used
     
     def _is_retryable_error(self, error: Exception) -> bool:
-        """Check if error is retryable (connection/timeout errors)."""
+        """Check if error is retryable (connection/timeout/transaction conflicts).
+        
+        Includes DSQL OC000 transaction conflict errors which require retry
+        due to Optimistic Concurrency Control (OCC).
+        """
         error_str = str(error).lower()
         retryable_errors = [
             'connection',
@@ -39,19 +42,14 @@ class EventHeaderRepository:
             'could not connect',
             'network is unreachable',
             'no route to host',
+            # DSQL transaction conflicts (OC000) - Optimistic Concurrency Control
+            'conflicts with another transaction',
+            'oc000',
+            'mutation conflicts',
+            'transaction conflict',
+            'change conflicts',
         ]
         return any(err in error_str for err in retryable_errors)
-    
-    def _is_pool_invalidation_error(self, error: Exception) -> bool:
-        """Check if error indicates connection pool should be invalidated (wrong database/connection)."""
-        error_str = str(error).lower()
-        # Check for errors that suggest wrong database connection
-        invalid_pool_errors = [
-            '127.0.0.1',  # Connecting to localhost instead of RDS
-            'localhost',
-            'cannot assign requested address',  # Connection to wrong endpoint
-        ]
-        return any(err in error_str for err in invalid_pool_errors)
     
     async def _retry_with_backoff(self, func, *args, **kwargs):
         """Retry function with exponential backoff."""
@@ -66,11 +64,6 @@ class EventHeaderRepository:
                 raise
             except Exception as e:
                 last_error = e
-                
-                # If this is a pool invalidation error, invalidate the pool before retrying
-                if self._is_pool_invalidation_error(e) and attempt == 0:
-                    logger.warning(f"Pool invalidation error detected: {e}. Invalidating connection pool...")
-                    await invalidate_connection_pool()
                 
                 # Check if error is retryable
                 if not self._is_retryable_error(e) or attempt == MAX_RETRIES - 1:
@@ -110,10 +103,9 @@ class EventHeaderRepository:
                 await self._insert_header(conn, event_id, event_name, event_type,
                                         created_date, saved_date, header_data)
             else:
-                # Acquire connection from pool
-                async with self.pool.acquire() as connection:
-                    await self._insert_header(connection, event_id, event_name, event_type, 
-                                            created_date, saved_date, header_data)
+                # Connection should always be provided by service layer
+                # This fallback should not be reached in normal operation
+                raise ValueError("Connection must be provided (no pool available)")
         
         await self._retry_with_backoff(_do_create)
     

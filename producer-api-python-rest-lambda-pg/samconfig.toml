@@ -1,0 +1,28 @@
+version = 0.1
+
+[default]
+[default.global.parameters]
+stack_name = "producer-api-python-rest-lambda-pg-local"
+
+[default.local_start_api.parameters]
+template = "sam-template.yaml"
+warm_containers = "EAGER"
+container_host = "host.docker.internal"
+container_host_interface = "127.0.0.1"
+parameter_overrides = [
+    "DatabaseURL=postgresql://postgres:postgres@car_dealership_db:5432/car_dealership",
+    "LogLevel=debug"
+]
+docker_network = "producer-api-python-rest-lambda-pg_default"
+
+[default.local_invoke.parameters]
+template = "sam-template.yaml"
+warm_containers = "EAGER"
+container_host = "host.docker.internal"
+container_host_interface = "127.0.0.1"
+parameter_overrides = [
+    "DatabaseURL=postgresql://postgres:postgres@host.docker.internal:5432/car_dealership",
+    "LogLevel=info"
+]
+docker_network = "bridge"
+

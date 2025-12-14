@@ -1,14 +1,27 @@
 # Back-End Implementation Guide
 
-This document covers the back-end infrastructure components including AWS Lambda functions, Aurora PostgreSQL, and RDS Proxy for the CDC streaming architecture.
+This document covers the back-end infrastructure components including AWS Lambda functions, Aurora PostgreSQL, Aurora DSQL, and RDS Proxy for the CDC streaming architecture.
 
 ## Table of Contents
 
-1. [Aurora PostgreSQL Database](#aurora-postgresql-database)
+1. [Database Options](#database-options)
+   - [Aurora PostgreSQL Database](#aurora-postgresql-database)
+   - [Aurora DSQL Database](#aurora-dsql-database)
 2. [RDS Proxy for Connection Pooling](#rds-proxy-for-connection-pooling)
 3. [Aurora Auto-Start/Stop for Cost Optimization](#aurora-auto-startstop-for-cost-optimization)
 4. [Lambda Functions](#lambda-functions)
 5. [Configuration and Deployment](#configuration-and-deployment)
+
+## Database Options
+
+The project supports two database options for event storage:
+
+1. **Aurora PostgreSQL** - Traditional managed PostgreSQL database with connection pooling and auto-start/stop features
+2. **Aurora DSQL** - Serverless distributed SQL database (released May 2025) with IAM authentication and VPC endpoints
+
+Both databases support the same schema and CDC streaming functionality. Choose based on your requirements:
+- **Aurora PostgreSQL**: Better for traditional workloads, supports RDS Proxy, auto-start/stop, and standard password authentication
+- **Aurora DSQL**: Better for serverless workloads, auto-scales, uses IAM authentication, and VPC endpoints (no RDS Proxy needed)
 
 ## Aurora PostgreSQL Database
 
@@ -98,6 +111,78 @@ flowchart TD
 3. **Error Handling**: If any operation fails, all changes are automatically rolled back
 4. **Referential Integrity**: Foreign key constraints ensure event headers cannot exist without corresponding business events
 
+## Aurora DSQL Database
+
+### Overview
+
+Aurora DSQL (DynamoDB SQL) is a serverless, distributed SQL database released by AWS in May 2025. It provides PostgreSQL compatibility with serverless auto-scaling, IAM authentication, and VPC endpoint connectivity.
+
+### Key Features
+
+- **Serverless**: Auto-scales based on load using Aurora Capacity Units (ACU)
+- **IAM Authentication**: Uses IAM roles/users instead of passwords
+- **VPC Endpoints**: Connects via VPC endpoints (not direct VPC access)
+- **PostgreSQL Compatible**: Supports PostgreSQL 16 feature subset
+- **Multi-Region**: Supports active-active deployments across regions
+- **No RDS Proxy Needed**: Built-in connection management
+- **No Auto-Start/Stop**: Serverless auto-scales, no manual lifecycle management
+
+### Architecture
+
+- DSQL cluster created via `aws_dsql_cluster` resource (not `aws_rds_cluster`)
+- VPC endpoint created for connectivity (always uses private subnets)
+- KMS encryption required (custom KMS key)
+- IAM database users mapped to IAM roles/users
+- Lambda functions connect via VPC endpoint DNS name
+
+### Connection Details
+
+- **Authentication**: IAM-based (no master password)
+- **Connection String**: Uses VPC endpoint DNS name
+- **Port**: 5432 (PostgreSQL standard)
+- **Hostname**: Format `<cluster-id>.<service-suffix>.<region>.on.aws` (for SNI)
+- **VPC Required**: Lambda must be in VPC to access VPC endpoint
+
+### Configuration
+
+- **Managed via Terraform**: `terraform/modules/aurora-dsql/`
+- **Enabled via**: `enable_aurora_dsql_cluster = true`
+- **Scaling**: Configured via `aurora_dsql_min_capacity` and `aurora_dsql_max_capacity` (ACU)
+- **Auto-Pause**: Can be enabled for cost optimization (`aurora_dsql_auto_pause = true`)
+
+### Differences from Aurora PostgreSQL
+
+| Feature | Aurora PostgreSQL | Aurora DSQL |
+|---------|------------------|-------------|
+| Authentication | Password-based | IAM-based |
+| Connection | Direct VPC or RDS Proxy | VPC endpoints only |
+| Scaling | Manual instance sizing | Serverless ACU auto-scaling |
+| Start/Stop | Manual or auto-start/stop | Serverless (no start/stop) |
+| RDS Proxy | Supported | Not needed |
+| Cost Model | Instance-based | ACU-based (pay per use) |
+
+### CDC Support
+
+- DSQL supports CDC via Debezium connector
+- Custom Debezium connector available: `debezium-connector-dsql/`
+- See [DEPLOY_DSQL_CONNECTOR.md](DEPLOY_DSQL_CONNECTOR.md) for setup details
+
+### When to Use DSQL
+
+- **Serverless workloads**: Auto-scaling Lambda functions
+- **IAM-first security**: Prefer IAM authentication over passwords
+- **Cost optimization**: Pay-per-use ACU model for variable workloads
+- **Multi-region**: Need active-active deployments
+- **Modern architecture**: Building new serverless applications
+
+### When to Use Aurora PostgreSQL
+
+- **Traditional workloads**: Predictable, steady-state workloads
+- **Password authentication**: Existing password-based auth systems
+- **RDS Proxy**: Need connection pooling for high concurrency
+- **Auto-start/stop**: Want manual lifecycle management for cost savings
+- **Established patterns**: Existing PostgreSQL tooling and workflows
+
 ## RDS Proxy for Connection Pooling
 
 ### Overview
@@ -125,8 +210,10 @@ Manages database connections efficiently for Lambda functions writing events to 
 ### Configuration
 
 - **Managed via Terraform**: `terraform/modules/rds-proxy/`
-- **Enabled by default**: When both Aurora and Python Lambda are enabled
+- **Enabled for test environment**: When `enable_aurora = true`, `enable_python_lambda_pg = true`, `enable_rds_proxy = true`, and `environment = "test"`
+- **Disabled for dev environment**: Minimizes infrastructure costs in dev
 - **Can be disabled**: Via `enable_rds_proxy = false` variable
+- **Note**: RDS Proxy is only for Aurora PostgreSQL. Aurora DSQL uses VPC endpoints and doesn't require RDS Proxy (it has built-in connection management).
 
 ### Capacity
 
@@ -144,7 +231,9 @@ Monitor CloudWatch metrics to detect saturation:
 
 ### Overview
 
-For dev/staging environments, **Aurora Auto-Start/Stop** functionality is deployed to automatically manage database lifecycle and reduce costs during periods of inactivity.
+For test environments, **Aurora Auto-Start/Stop** functionality is deployed to automatically manage Aurora PostgreSQL database lifecycle and reduce costs during periods of inactivity.
+
+**Note**: Auto-start/stop is only available for Aurora PostgreSQL, not Aurora DSQL. DSQL is serverless and auto-scales, so it doesn't require manual start/stop management.
 
 ### Purpose
 
@@ -154,7 +243,7 @@ Automatically stops Aurora cluster when inactive and starts it when API requests
 
 - **Cost Savings**: Reduces compute costs by stopping the database during off-hours or low-activity periods
 - **User Experience**: Provides seamless experience with automatic startup on first request
-- **Environment**: Only enabled for non-production environments (dev/staging)
+- **Environment**: Only enabled for test environment (not dev or prod)
 
 ### Auto-Stop Lambda
 
@@ -252,12 +341,13 @@ The Python REST Lambda handler includes automatic database startup logic:
 
 **When Auto-Start/Stop is Enabled**:
 
-- **Environments**: Only dev/staging (not production)
+- **Environments**: Only test environment (not dev or prod)
 - **Conditions**:
   - `enable_aurora = true`
-  - `enable_python_lambda = true`
-  - `environment != "prod"`
+  - `enable_python_lambda_pg = true`
+  - `environment = "test"`
 - **Terraform**: Automatically deployed when conditions are met
+- **Note**: Auto-start/stop only applies to Aurora PostgreSQL. Aurora DSQL is serverless and doesn't support manual start/stop.
 
 ### Monitoring
 
@@ -296,6 +386,7 @@ Key CloudWatch metrics to monitor:
    - Auto-start Lambda errors
    - Excessive 503 responses from API
    - Database startup failures
+5. **Aurora DSQL**: Auto-start/stop doesn't apply to DSQL. DSQL is serverless and auto-scales based on load.
 
 ### Configuration Files
 
@@ -307,7 +398,7 @@ Key CloudWatch metrics to monitor:
   - `main.tf`: Lambda function code
   - `variables.tf`: Configuration variables
   - `outputs.tf`: Function name and ARN
-- **API Lambda Handler**: `producer-api-python-rest-lambda/lambda_handler.py`
+- **API Lambda Handler**: `producer-api-python-rest-lambda-pg/lambda_handler.py`
   - Includes connection error detection
   - Invokes auto-start Lambda on connection failure
   - Returns user-friendly 503 responses
@@ -316,7 +407,7 @@ Key CloudWatch metrics to monitor:
 
 To disable auto-start/stop functionality:
 
-1. **Via Terraform Variables**: Set `environment = "prod"` (auto-start/stop only enabled for non-production)
+1. **Via Terraform Variables**: Set `environment = "dev"` or `environment = "prod"` (auto-start/stop only enabled for test environment)
 2. **Manual Override**: Comment out auto-start/stop modules in `terraform/main.tf`
 3. **Keep Database Running**: Manually start database and disable auto-stop Lambda schedule
 
@@ -324,30 +415,62 @@ To disable auto-start/stop functionality:
 
 ### Producer API Lambda
 
-The producer API Lambda functions handle incoming event requests and write them to the `business_events` table in Aurora PostgreSQL.
+The project includes two Python REST Lambda implementations for different database backends:
 
-**Python REST Lambda** (`producer-api-python-rest-lambda/`):
+#### Python REST Lambda for PostgreSQL (`producer-api-python-rest-lambda-pg/`)
 
-- **Purpose**: REST API endpoint for creating business events
-- **Database Connection**: Uses RDS Proxy endpoint for connection pooling
-- **Auto-Start Integration**: Automatically invokes auto-start Lambda on connection failures
+- **Purpose**: REST API endpoint for creating business events with Aurora PostgreSQL
+- **Database Connection**: Uses RDS Proxy endpoint for connection pooling (test environment) or direct Aurora connection (dev)
+- **Auto-Start Integration**: Automatically invokes auto-start Lambda on connection failures (test environment only)
 - **Error Handling**: Returns user-friendly 503 responses when database is starting
 
 **Key Features**:
 
-- Connection pooling via RDS Proxy
-- Automatic database startup on connection failure
+- Connection pooling via RDS Proxy (test environment)
+- Automatic database startup on connection failure (test environment)
 - User-friendly error responses with retry guidance
 - Support for both local and Aurora PostgreSQL
+- Password-based authentication
 
 **Configuration**:
 
 - Environment variables:
-  - `DATABASE_URL`: Database connection string (RDS Proxy endpoint)
-  - `AURORA_AUTO_START_FUNCTION_NAME`: Auto-start Lambda function name
+  - `DATABASE_URL`: Database connection string (RDS Proxy endpoint in test, Aurora endpoint in dev)
+  - `AURORA_AUTO_START_FUNCTION_NAME`: Auto-start Lambda function name (test environment only)
 - IAM Permissions:
   - `rds-db:connect` for database access
-  - `lambda:InvokeFunction` for auto-start Lambda invocation
+  - `lambda:InvokeFunction` for auto-start Lambda invocation (test environment)
+
+#### Python REST Lambda for DSQL (`producer-api-python-rest-lambda-dsql/`)
+
+- **Purpose**: REST API endpoint for creating business events with Aurora DSQL
+- **Database Connection**: Uses VPC endpoints for DSQL connectivity
+- **Authentication**: IAM-based authentication (no passwords)
+- **Scaling**: DSQL auto-scales based on load (no manual start/stop needed)
+
+**Key Features**:
+
+- IAM-based authentication (no password management)
+- VPC endpoint connectivity
+- Serverless auto-scaling
+- Same API interface as PostgreSQL version
+
+**Configuration**:
+
+- Environment variables:
+  - `AURORA_DSQL_ENDPOINT`: DSQL VPC endpoint DNS name
+  - `AURORA_DSQL_PORT`: DSQL port (default: 5432)
+  - `IAM_USERNAME`: IAM database username
+  - `AURORA_DSQL_CLUSTER_RESOURCE_ID`: DSQL cluster resource ID for IAM permissions
+  - `DSQL_HOST`: DSQL hostname for SNI (format: `<cluster-id>.<service-suffix>.<region>.on.aws`)
+- IAM Permissions:
+  - `dsql:DbConnect` for database access
+  - `kms:Decrypt` and `kms:DescribeKey` for KMS encryption (DSQL uses KMS)
+
+**Terraform Variables**:
+
+- `enable_python_lambda_pg`: Enable PostgreSQL Lambda (default: false)
+- `enable_python_lambda_dsql`: Enable DSQL Lambda (default: false)
 
 ## Configuration and Deployment
 
@@ -356,19 +479,29 @@ The producer API Lambda functions handle incoming event requests and write them 
 All back-end infrastructure is managed via Terraform:
 
 - **Aurora PostgreSQL**: `terraform/modules/aurora/`
-- **RDS Proxy**: `terraform/modules/rds-proxy/`
-- **Auto-Stop Lambda**: `terraform/modules/aurora-auto-stop/`
-- **Auto-Start Lambda**: `terraform/modules/aurora-auto-start/`
+- **Aurora DSQL**: `terraform/modules/aurora-dsql/`
+- **RDS Proxy**: `terraform/modules/rds-proxy/` (PostgreSQL only)
+- **Auto-Stop Lambda**: `terraform/modules/aurora-auto-stop/` (PostgreSQL, test environment only)
+- **Auto-Start Lambda**: `terraform/modules/aurora-auto-start/` (PostgreSQL, test environment only)
 - **Lambda Functions**: `terraform/modules/lambda/`
 
 ### Deployment Steps
 
 1. **Configure Terraform Variables**:
+
+   For Aurora PostgreSQL:
    ```hcl
    enable_aurora = true
-   enable_python_lambda = true
-   enable_rds_proxy = true
-   environment = "dev"  # or "staging" (not "prod" for auto-start/stop)
+   enable_python_lambda_pg = true
+   enable_rds_proxy = true  # Only enabled for test environment
+   environment = "test"  # "test" for auto-start/stop, "dev" for minimal setup, "prod" for production
+   ```
+
+   For Aurora DSQL:
+   ```hcl
+   enable_aurora_dsql_cluster = true
+   enable_python_lambda_dsql = true
+   environment = "dev"  # or "test" or "prod"
    ```
 
 2. **Deploy Infrastructure**:
@@ -387,16 +520,27 @@ All back-end infrastructure is managed via Terraform:
 
 ### Environment-Specific Configuration
 
-**Development/Staging**:
-- Auto-start/stop enabled
-- RDS Proxy enabled
-- Cost optimization features active
+**Development (`environment = "dev"`)**:
+- Minimal infrastructure (1 day logs, 1 day backups)
+- No RDS Proxy (minimizes costs)
+- No auto-start/stop
+- Smaller instance class (db.t3.medium)
+- Aurora PostgreSQL or DSQL supported
 
-**Production**:
+**Test (`environment = "test"`)**:
+- Standard setup (3 days logs, 3 days backups)
+- RDS Proxy enabled (for PostgreSQL)
+- Auto-start/stop enabled (for PostgreSQL)
+- Larger instance class (db.r5.large for PostgreSQL)
+- Aurora PostgreSQL or DSQL supported
+
+**Production (`environment = "prod"`)**:
 - Auto-start/stop disabled
-- RDS Proxy enabled
+- RDS Proxy enabled (for PostgreSQL)
 - Database always running
 - Enhanced monitoring and alerting
+- Longer backup retention
+- Aurora PostgreSQL or DSQL supported
 
 ## Related Documentation
 

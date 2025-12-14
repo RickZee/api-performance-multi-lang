@@ -1,16 +1,16 @@
-output "python_rest_api_url" {
-  description = "API Gateway HTTP API endpoint URL for Python REST"
-  value       = var.enable_python_lambda ? module.python_rest_lambda[0].api_url : null
+output "python_rest_pg_api_url" {
+  description = "API Gateway HTTP API endpoint URL for Python REST (PostgreSQL)"
+  value       = var.enable_python_lambda_pg ? module.python_rest_lambda_pg[0].api_url : null
 }
 
-output "python_rest_function_name" {
-  description = "Python REST Lambda function name"
-  value       = var.enable_python_lambda ? module.python_rest_lambda[0].function_name : null
+output "python_rest_pg_function_name" {
+  description = "Python REST Lambda function name (PostgreSQL)"
+  value       = var.enable_python_lambda_pg ? module.python_rest_lambda_pg[0].function_name : null
 }
 
-output "python_rest_function_arn" {
-  description = "Python REST Lambda function ARN"
-  value       = var.enable_python_lambda ? module.python_rest_lambda[0].function_arn : null
+output "python_rest_pg_function_arn" {
+  description = "Python REST Lambda function ARN (PostgreSQL)"
+  value       = var.enable_python_lambda_pg ? module.python_rest_lambda_pg[0].function_arn : null
 }
 
 output "python_rest_dsql_api_url" {
@@ -146,29 +146,32 @@ output "terraform_state_bucket_name" {
 # }
 
 # DSQL Test Runner EC2 Outputs
-output "dsql_test_runner_instance_id" {
-  description = "EC2 instance ID for DSQL test runner"
-  value       = var.enable_dsql_test_runner_ec2 && var.enable_aurora_dsql_cluster ? module.dsql_test_runner_ec2[0].instance_id : null
+# DSQL Test Runner Outputs - REMOVED (now using bastion host)
+# Use bastion_host_instance_id and bastion_host_ssm_command instead
+
+# Bastion Host Outputs
+output "bastion_host_instance_id" {
+  description = "Bastion host instance ID"
+  value       = var.enable_bastion_host && var.enable_aurora_dsql_cluster ? module.bastion_host[0].instance_id : null
 }
 
-output "dsql_test_runner_private_ip" {
-  description = "Private IP address of DSQL test runner EC2 instance"
-  value       = var.enable_dsql_test_runner_ec2 && var.enable_aurora_dsql_cluster ? module.dsql_test_runner_ec2[0].private_ip : null
+output "bastion_host_public_ip" {
+  description = "Bastion host public IP address"
+  value       = var.enable_bastion_host && var.enable_aurora_dsql_cluster ? module.bastion_host[0].public_ip : null
 }
 
-output "dsql_test_runner_ssm_command" {
-  description = "Command to connect to DSQL test runner via SSM Session Manager"
-  value       = var.enable_dsql_test_runner_ec2 && var.enable_aurora_dsql_cluster ? "aws ssm start-session --target ${module.dsql_test_runner_ec2[0].instance_id} --region ${var.aws_region}" : null
+output "bastion_host_elastic_ip" {
+  description = "Bastion host Elastic IP address (if allocated)"
+  value       = var.enable_bastion_host && var.enable_aurora_dsql_cluster && var.bastion_allocate_elastic_ip ? module.bastion_host[0].elastic_ip : null
 }
 
-# EC2 Auto-Stop Outputs
-output "ec2_auto_stop_function_name" {
-  description = "EC2 auto-stop Lambda function name"
-  value       = var.enable_dsql_test_runner_ec2 && var.enable_aurora_dsql_cluster ? module.ec2_auto_stop[0].function_name : null
+output "bastion_host_ssh_command" {
+  description = "SSH command to connect to bastion host"
+  value       = var.enable_bastion_host && var.enable_aurora_dsql_cluster ? module.bastion_host[0].ssh_command : null
 }
 
-output "ec2_auto_stop_function_arn" {
-  description = "EC2 auto-stop Lambda function ARN"
-  value       = var.enable_dsql_test_runner_ec2 && var.enable_aurora_dsql_cluster ? module.ec2_auto_stop[0].function_arn : null
+output "bastion_host_ssm_command" {
+  description = "SSM command to connect to bastion host"
+  value       = var.enable_bastion_host && var.enable_aurora_dsql_cluster ? module.bastion_host[0].ssm_command : null
 }
 

@@ -54,7 +54,7 @@ class ConfigManager:
         "producer-api-go-grpc",
         "producer-api-go-rest-lambda",
         "producer-api-go-grpc-lambda",
-        "producer-api-python-rest-lambda",
+        "producer-api-python-rest-lambda-pg",
     ]
     
     @staticmethod
@@ -146,8 +146,8 @@ class ConfigManager:
                 health_check_port=9085,
                 is_lambda=True,
             ),
-            "producer-api-python-rest-lambda": APIConfig(
-                name="producer-api-python-rest-lambda",
+            "producer-api-python-rest-lambda-pg": APIConfig(
+                name="producer-api-python-rest-lambda-pg",
                 test_file="lambda-rest-api-test.js",
                 port=9088,
                 protocol="http",

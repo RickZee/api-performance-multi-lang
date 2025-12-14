@@ -14,9 +14,11 @@ sys.path.insert(0, os.path.dirname(__file__))
 
 from config import load_lambda_config
 from constants import API_NAME
-from models.event import Event
-from repository import BusinessEventRepository, get_connection_pool, DuplicateEventError
-from service import EventProcessingService
+from producer_api_shared.models import Event
+from producer_api_shared.repository import BusinessEventRepository
+from producer_api_shared.exceptions import DuplicateEventError
+from producer_api_shared.service import EventProcessingService
+from repository import get_connection
 
 # Configure logging
 logging.basicConfig(
@@ -36,7 +38,7 @@ _lambda_client = None
 
 
 async def _initialize_service():
-    """Initialize service with connection pool (singleton pattern)."""
+    """Initialize service (no pool, connections created per invocation)."""
     global _service, _config, _lambda_client
     
     if _service is None:
@@ -53,14 +55,21 @@ async def _initialize_service():
         # Initialize Lambda client for auto-start functionality
         _lambda_client = boto3.client('lambda', region_name=os.getenv('AWS_REGION', 'us-east-1'))
         
-        # Get connection pool
-        pool = await get_connection_pool(_config)
+        # Initialize repositories and service with connection factory
+        business_event_repo = BusinessEventRepository()
         
-        # Initialize repositories and service
-        business_event_repo = BusinessEventRepository(pool)
-        _service = EventProcessingService(business_event_repo, pool)
+        # Create connection factory for direct connections (DSQL pattern)
+        async def connection_factory():
+            return await get_connection(_config)
         
-        logger.info(f"{API_NAME} Lambda handler initialized")
+        _service = EventProcessingService(
+            business_event_repo=business_event_repo,
+            connection_factory=connection_factory,
+            api_name=API_NAME,
+            should_close_connection=True  # Close direct connections after use
+        )
+        
+        logger.info(f"{API_NAME} Lambda handler initialized (using direct connections)")
     
     return _service
 
@@ -205,7 +214,7 @@ async def _handle_process_event(event_body: str) -> Dict[str, Any]:
             },
         )
     
-    # Validate each entity
+    # Validate each entity (Pydantic models handle validation automatically)
     for entity in event.event_body.entities:
         if not entity.entity_type:
             return _create_response(
@@ -270,11 +279,37 @@ async def _handle_process_event(event_body: str) -> Dict[str, Any]:
                 headers={"Retry-After": "60"}
             )
         
-        logger.error(f"{API_NAME} Error processing event: {e}", exc_info=True)
+        # Classify error for structured logging
+        from service.retry_utils import classify_dsql_error
+        is_retryable, error_type, sqlstate = classify_dsql_error(e)
+        
+        # Log with structured context
+        log_context = {
+            'error_type': error_type,
+            'sqlstate': sqlstate,
+            'is_retryable': is_retryable,
+            'exception': str(e),
+        }
+        
+        if error_type == 'OC000_TRANSACTION_CONFLICT':
+            logger.error(
+                f"{API_NAME} OC000 transaction conflict - all retries exhausted",
+                extra=log_context,
+                exc_info=True
+            )
+        else:
+            logger.error(
+                f"{API_NAME} Error processing event: {error_type}",
+                extra=log_context,
+                exc_info=True
+            )
+        
         return _create_response(
             500,
             {
                 "error": f"Error processing event: {str(e)}",
+                "error_type": error_type,
+                "sqlstate": sqlstate,
                 "status": 500,
             },
         )
@@ -351,7 +386,7 @@ async def _handle_bulk_events(event_body: str) -> Dict[str, Any]:
                 failed_count += 1
                 continue
             
-            # Validate entities
+            # Validate entities (Pydantic models handle validation automatically)
             valid = True
             for entity in event.event_body.entities:
                 if not entity.entity_type or not entity.entity_id:

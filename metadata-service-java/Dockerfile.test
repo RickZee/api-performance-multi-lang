@@ -1,0 +1,23 @@
+FROM eclipse-temurin:17-jdk
+
+WORKDIR /app
+
+# Install git for git operations in tests
+RUN apt-get update && apt-get install -y git && rm -rf /var/lib/apt/lists/*
+
+# Copy gradle files first for better caching
+COPY build.gradle settings.gradle ./
+COPY gradle/ gradle/
+COPY gradlew* ./
+
+# Make gradlew executable
+RUN chmod +x gradlew
+
+# Download dependencies (this will cache them)
+RUN ./gradlew dependencies --no-daemon
+
+# Copy all source code
+COPY src/ src/
+
+# Default command runs all tests
+CMD ["./gradlew", "test", "--no-daemon", "--info"]
