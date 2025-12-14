@@ -1,0 +1,27 @@
+{
+  "id": "service-by-dealer-001",
+  "name": "Service Events for Dealer 001",
+  "description": "Routes service events from Tesla Service Center - San Francisco to dedicated topic",
+  "consumerId": "dealer-001-service-consumer",
+  "outputTopic": "filtered-service-events-dealer-001",
+  "conditions": [
+    {
+      "field": "event_type",
+      "operator": "equals",
+      "value": "CarServiceDone",
+      "valueType": "string",
+      "logicalOperator": "AND"
+    },
+    {
+      "field": "header_data.dealerId",
+      "operator": "equals",
+      "value": "DEALER-001",
+      "valueType": "string",
+      "logicalOperator": "AND"
+    }
+  ],
+  "enabled": true,
+  "conditionLogic": "AND",
+  "status": "pending_approval",
+  "version": 1
+}

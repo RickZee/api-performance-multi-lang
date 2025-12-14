@@ -39,6 +39,11 @@ output "cluster_resource_id" {
   value = aws_dsql_cluster.this.identifier
 }
 
+output "kms_key_arn" {
+  description = "KMS key ARN used for DSQL cluster encryption"
+  value       = aws_kms_key.dsql.arn
+}
+
 output "dsql_host" {
   description = <<-EOT
     DSQL cluster host for connection (format: <cluster-id>.<service-suffix>.<region>.on.aws)

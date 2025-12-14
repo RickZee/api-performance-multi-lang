@@ -35,6 +35,20 @@ Fill in:
 - `CC_KAFKA_API_SECRET`
 - `DSQL_ENDPOINT_PRIMARY` (Terraform output `aurora_dsql_endpoint`)
 
+### If you already have a repo-root `.env`
+
+If you already keep Confluent creds in repo-root `.env` (gitignored), using keys:
+- `KAFKA_BOOTSTRAP_SERVERS`
+- `KAFKA_API_KEY`
+- `KAFKA_API_SECRET`
+
+…then you can auto-generate `connect.env` from it:
+
+```bash
+cd /tmp/api-performance-multi-lang
+./terraform/confluent-option-a/setup-connect-env.sh
+```
+
 ## 4) Run E2E
 
 On EC2:

@@ -97,7 +97,7 @@ check_env() {
         echo "  export SCHEMA_REGISTRY_API_KEY='your-sr-key'"
         echo "  export SCHEMA_REGISTRY_API_SECRET='your-sr-secret'"
         echo ""
-        echo "Or copy .env.example.k6 to .env and fill in values"
+        echo "Or copy env-examples/k6.env.example to .env and fill in values"
         return 1
     fi
     

@@ -553,7 +553,25 @@ module "dsql_test_runner_ec2" {
   instance_type                   = var.dsql_test_runner_instance_type
   iam_database_user               = var.iam_database_user
   aurora_dsql_cluster_resource_id = module.aurora_dsql[0].cluster_resource_id
+  dsql_kms_key_arn                = module.aurora_dsql[0].kms_key_arn
   aws_region                      = var.aws_region
+  s3_bucket_name                  = aws_s3_bucket.lambda_deployments.id
+
+  tags = local.common_tags
+}
+
+# EC2 Auto-Stop Lambda
+# Monitors SSM logins and EC2 activity, stops EC2 if no activity for 3 hours
+# Applies to all EC2 instances (currently the DSQL test runner)
+module "ec2_auto_stop" {
+  count  = var.enable_dsql_test_runner_ec2 && var.enable_aurora_dsql_cluster ? 1 : 0
+  source = "./modules/ec2-auto-stop"
+
+  function_name                  = "${var.project_name}-ec2-auto-stop"
+  ec2_instance_id               = module.dsql_test_runner_ec2[0].instance_id
+  inactivity_hours               = 3
+  aws_region                     = var.aws_region
+  cloudwatch_logs_retention_days = local.cloudwatch_logs_retention
 
   tags = local.common_tags
 }

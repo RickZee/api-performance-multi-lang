@@ -1,0 +1,27 @@
+{
+  "id": "service-by-dealer-003",
+  "name": "Service Events for Dealer 003",
+  "description": "Routes service events from Mercedes Service Center - New York to dedicated topic",
+  "consumerId": "dealer-003-service-consumer",
+  "outputTopic": "filtered-service-events-dealer-003",
+  "conditions": [
+    {
+      "field": "event_type",
+      "operator": "equals",
+      "value": "CarServiceDone",
+      "valueType": "string",
+      "logicalOperator": "AND"
+    },
+    {
+      "field": "header_data.dealerId",
+      "operator": "equals",
+      "value": "DEALER-003",
+      "valueType": "string",
+      "logicalOperator": "AND"
+    }
+  ],
+  "enabled": true,
+  "conditionLogic": "AND",
+  "status": "pending_approval",
+  "version": 1
+}

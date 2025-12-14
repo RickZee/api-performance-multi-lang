@@ -8,14 +8,15 @@ import (
 	"os/signal"
 	"syscall"
 
-	"github.com/gin-gonic/gin"
-	"go.uber.org/zap"
 	"metadata-service/internal/api"
 	"metadata-service/internal/cache"
 	"metadata-service/internal/compat"
 	"metadata-service/internal/config"
 	"metadata-service/internal/sync"
 	"metadata-service/internal/validator"
+
+	"github.com/gin-gonic/gin"
+	"go.uber.org/zap"
 )
 
 func main() {
@@ -41,7 +42,7 @@ func main() {
 	// Initialize components
 	schemaCache := cache.NewSchemaCache(cfg.Git.LocalCacheDir, logger)
 	gitSync := sync.NewGitSync(cfg.Git.Repository, cfg.Git.Branch, cfg.Git.LocalCacheDir, cfg.Git.PullInterval, logger)
-	
+
 	// Start git sync
 	if err := gitSync.Start(); err != nil {
 		logger.Fatal("Failed to start git sync", zap.Error(err))
@@ -56,7 +57,7 @@ func main() {
 
 	// Setup router
 	router := gin.Default()
-	
+
 	// API routes
 	v1 := router.Group("/api/v1")
 	{
@@ -65,6 +66,18 @@ func main() {
 		v1.GET("/schemas/versions", handlers.GetVersions)
 		v1.GET("/schemas/:version", handlers.GetSchema)
 		v1.GET("/health", handlers.Health)
+
+		// Filter routes
+		v1.POST("/filters", handlers.CreateFilter)
+		v1.GET("/filters", handlers.ListFilters)
+		v1.GET("/filters/:id", handlers.GetFilter)
+		v1.PUT("/filters/:id", handlers.UpdateFilter)
+		v1.DELETE("/filters/:id", handlers.DeleteFilter)
+		v1.POST("/filters/:id/generate", handlers.GenerateSQL)
+		v1.POST("/filters/:id/validate", handlers.ValidateSQL)
+		v1.POST("/filters/:id/approve", handlers.ApproveFilter)
+		v1.POST("/filters/:id/deploy", handlers.DeployFilter)
+		v1.GET("/filters/:id/status", handlers.GetFilterStatus)
 	}
 
 	// Start server
@@ -96,4 +109,3 @@ func main() {
 
 	logger.Info("Server stopped")
 }
-

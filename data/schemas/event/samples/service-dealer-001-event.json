@@ -1,0 +1,27 @@
+{
+  "eventHeader": {
+    "uuid": "service-dealer-001-test-001",
+    "eventName": "Car Service Done",
+    "eventType": "CarServiceDone",
+    "createdDate": "2025-01-15T10:00:00Z",
+    "savedDate": "2025-01-15T10:00:01Z"
+  },
+  "entities": [
+    {
+      "entityHeader": {
+        "entityId": "SERVICE-TEST-001",
+        "entityType": "ServiceRecord",
+        "createdAt": "2025-01-15T10:00:00Z",
+        "updatedAt": "2025-01-15T10:00:00Z"
+      },
+      "id": "SERVICE-TEST-001",
+      "carId": "CAR-2025-001",
+      "serviceDate": "2025-01-15T10:00:00Z",
+      "amountPaid": 450.00,
+      "dealerId": "DEALER-001",
+      "dealerName": "Tesla Service Center - San Francisco",
+      "mileageAtService": 15000,
+      "description": "Annual maintenance and tire rotation"
+    }
+  ]
+}

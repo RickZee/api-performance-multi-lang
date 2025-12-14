@@ -47,7 +47,7 @@ resource "aws_iam_role_policy_attachment" "ssm_managed_instance_core" {
   policy_arn = "arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore"
 }
 
-# IAM policy for DSQL database authentication
+# IAM policy for DSQL database authentication (IAM database user)
 resource "aws_iam_role_policy" "dsql_auth" {
   name = "${var.project_name}-dsql-test-runner-dsql-auth"
   role = aws_iam_role.test_runner.id
@@ -61,6 +61,70 @@ resource "aws_iam_role_policy" "dsql_auth" {
           "rds-db:connect"
         ]
         Resource = "arn:aws:rds-db:${var.aws_region}:${data.aws_caller_identity.current.account_id}:dbuser:${var.aurora_dsql_cluster_resource_id}/${var.iam_database_user}"
+      }
+    ]
+  })
+}
+
+# IAM policy for DSQL admin access (to create users and schema)
+resource "aws_iam_role_policy" "dsql_admin" {
+  name = "${var.project_name}-dsql-test-runner-dsql-admin"
+  role = aws_iam_role.test_runner.id
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect = "Allow"
+        Action = [
+          "dsql:DbConnectAdmin"
+        ]
+        Resource = "arn:aws:dsql:${var.aws_region}:${data.aws_caller_identity.current.account_id}:cluster/${var.aurora_dsql_cluster_resource_id}"
+      }
+    ]
+  })
+}
+
+# IAM policy for KMS decrypt (required to access encrypted DSQL cluster)
+resource "aws_iam_role_policy" "kms_decrypt" {
+  count = var.dsql_kms_key_arn != "" ? 1 : 0
+  name  = "${var.project_name}-dsql-test-runner-kms-decrypt"
+  role  = aws_iam_role.test_runner.id
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect = "Allow"
+        Action = [
+          "kms:Decrypt",
+          "kms:DescribeKey"
+        ]
+        Resource = var.dsql_kms_key_arn
+      }
+    ]
+  })
+}
+
+# IAM policy for S3 read access (to download deployment packages)
+resource "aws_iam_role_policy" "s3_read" {
+  count = var.s3_bucket_name != "" ? 1 : 0
+  name  = "${var.project_name}-dsql-test-runner-s3-read"
+  role  = aws_iam_role.test_runner.id
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect = "Allow"
+        Action = [
+          "s3:GetObject",
+          "s3:ListBucket"
+        ]
+        Resource = [
+          "arn:aws:s3:::${var.s3_bucket_name}",
+          "arn:aws:s3:::${var.s3_bucket_name}/*"
+        ]
       }
     ]
   })
@@ -102,6 +166,14 @@ resource "aws_security_group" "test_runner" {
     description = "Allow HTTP outbound (for package installs)"
     from_port   = 80
     to_port     = 80
+    protocol    = "tcp"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+
+  egress {
+    description = "Allow Kafka/Confluent Cloud outbound (port 9092)"
+    from_port   = 9092
+    to_port     = 9092
     protocol    = "tcp"
     cidr_blocks = ["0.0.0.0/0"]
   }

@@ -8,8 +8,8 @@ version = '1.0.0'
 description = 'Debezium Connector for Amazon Aurora DSQL'
 
 java {
-    sourceCompatibility = '17'
-    targetCompatibility = '17'
+    sourceCompatibility = '11'
+    targetCompatibility = '11'
 }
 
 repositories {
