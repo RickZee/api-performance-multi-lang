@@ -161,3 +161,14 @@ output "dsql_test_runner_ssm_command" {
   value       = var.enable_dsql_test_runner_ec2 && var.enable_aurora_dsql_cluster ? "aws ssm start-session --target ${module.dsql_test_runner_ec2[0].instance_id} --region ${var.aws_region}" : null
 }
 
+# EC2 Auto-Stop Outputs
+output "ec2_auto_stop_function_name" {
+  description = "EC2 auto-stop Lambda function name"
+  value       = var.enable_dsql_test_runner_ec2 && var.enable_aurora_dsql_cluster ? module.ec2_auto_stop[0].function_name : null
+}
+
+output "ec2_auto_stop_function_arn" {
+  description = "EC2 auto-stop Lambda function ARN"
+  value       = var.enable_dsql_test_runner_ec2 && var.enable_aurora_dsql_cluster ? module.ec2_auto_stop[0].function_arn : null
+}
+

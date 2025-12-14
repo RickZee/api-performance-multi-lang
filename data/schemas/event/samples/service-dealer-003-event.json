@@ -1,0 +1,27 @@
+{
+  "eventHeader": {
+    "uuid": "service-dealer-003-test-001",
+    "eventName": "Car Service Done",
+    "eventType": "CarServiceDone",
+    "createdDate": "2025-01-17T09:15:00Z",
+    "savedDate": "2025-01-17T09:15:01Z"
+  },
+  "entities": [
+    {
+      "entityHeader": {
+        "entityId": "SERVICE-TEST-003",
+        "entityType": "ServiceRecord",
+        "createdAt": "2025-01-17T09:15:00Z",
+        "updatedAt": "2025-01-17T09:15:00Z"
+      },
+      "id": "SERVICE-TEST-003",
+      "carId": "CAR-2025-003",
+      "serviceDate": "2025-01-17T09:15:00Z",
+      "amountPaid": 680.00,
+      "dealerId": "DEALER-003",
+      "dealerName": "Mercedes Service Center - New York",
+      "mileageAtService": 30000,
+      "description": "30,000-mile service: transmission fluid, air filter, and comprehensive inspection"
+    }
+  ]
+}

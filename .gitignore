@@ -80,3 +80,7 @@ scripts/test-results/
 .env.*.local
 .env.aurora
 **/.env.aurora
+
+# Confluent Option A (contains Confluent Cloud credentials)
+terraform/confluent-option-a/connect.env
+**/terraform/confluent-option-a/connect.env

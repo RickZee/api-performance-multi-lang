@@ -76,10 +76,12 @@ resource "aws_iam_role_policy" "lambda_dsql_auth" {
       {
         Effect = "Allow"
         Action = [
-          "rds-db:connect"
+          "dsql:DbConnect"
         ]
-        # Use specific resource ID if provided, otherwise use wildcard (will be updated after cluster creation)
-        Resource = var.aurora_dsql_cluster_resource_id != "" ? "arn:aws:rds-db:${data.aws_region.current.name}:${data.aws_caller_identity.current.account_id}:dbuser:${var.aurora_dsql_cluster_resource_id}/${var.iam_database_user}" : "arn:aws:rds-db:${data.aws_region.current.name}:${data.aws_caller_identity.current.account_id}:dbuser:*/${var.iam_database_user}"
+        # DSQL uses different resource format than RDS
+        # Format: arn:aws:dsql:region:account:cluster/cluster-id
+        # Note: DSQL doesn't include username in resource ARN like RDS does
+        Resource = var.aurora_dsql_cluster_resource_id != "" ? "arn:aws:dsql:${data.aws_region.current.name}:${data.aws_caller_identity.current.account_id}:cluster/${var.aurora_dsql_cluster_resource_id}" : "arn:aws:dsql:${data.aws_region.current.name}:${data.aws_caller_identity.current.account_id}:cluster/*"
       }
     ]
   })

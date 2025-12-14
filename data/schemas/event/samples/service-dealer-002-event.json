@@ -1,0 +1,27 @@
+{
+  "eventHeader": {
+    "uuid": "service-dealer-002-test-001",
+    "eventName": "Car Service Done",
+    "eventType": "CarServiceDone",
+    "createdDate": "2025-01-16T14:30:00Z",
+    "savedDate": "2025-01-16T14:30:02Z"
+  },
+  "entities": [
+    {
+      "entityHeader": {
+        "entityId": "SERVICE-TEST-002",
+        "entityType": "ServiceRecord",
+        "createdAt": "2025-01-16T14:30:00Z",
+        "updatedAt": "2025-01-16T14:30:00Z"
+      },
+      "id": "SERVICE-TEST-002",
+      "carId": "CAR-2025-002",
+      "serviceDate": "2025-01-16T14:30:00Z",
+      "amountPaid": 525.00,
+      "dealerId": "DEALER-002",
+      "dealerName": "BMW Service Center - Los Angeles",
+      "mileageAtService": 25000,
+      "description": "Oil change, brake pad replacement, and inspection"
+    }
+  ]
+}

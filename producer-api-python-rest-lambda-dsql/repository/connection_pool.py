@@ -68,10 +68,12 @@ async def get_connection_pool(database_url_or_config: Union[str, LambdaConfig]) 
                     iam_username=config.iam_username,
                     region=config.aws_region
                 )
-                # URL-encode the IAM token to handle special characters
+                # DSQL token is a presigned URL query string (e.g., "Action=DbConnect&X-Amz-Algorithm=...")
+                # It contains special characters like &, =, % that need URL encoding for the connection string
+                # But we'll pass it directly to asyncpg.create_pool as password parameter to avoid double-encoding
                 encoded_token = quote_plus(iam_token)
                 database_url = f"postgresql://{config.iam_username}:{encoded_token}@{dsql_endpoint}:{config.aurora_dsql_port}/{config.database_name}"
-                logger.info("Using IAM authentication for Aurora DSQL")
+                logger.info(f"Using IAM authentication for Aurora DSQL (token length: {len(iam_token)}, encoded length: {len(encoded_token)})")
             except Exception as e:
                 logger.error(f"Failed to generate IAM auth token: {e}", exc_info=True)
                 raise
@@ -146,12 +148,16 @@ async def get_connection_pool(database_url_or_config: Union[str, LambdaConfig]) 
             # Create pool - it will automatically bind to the current running event loop
             # Note: The 'loop' parameter is deprecated in newer asyncpg versions
             # The pool will automatically use asyncio.get_running_loop()
-            # For DSQL with IAM auth, parse the URL and use connection parameters directly
+            # For DSQL with IAM auth, use connection parameters directly (avoid URL encoding/decoding)
             # This avoids asyncpg parsing issues with special characters in IAM tokens
             if config_obj and config_obj.use_iam_auth:
-                # Parse connection parameters from URL for better asyncpg compatibility
-                from urllib.parse import urlparse
-                parsed = urlparse(database_url)
+                # Generate IAM token directly (don't go through URL encoding/decoding)
+                iam_token = generate_iam_auth_token(
+                    endpoint=config_obj.dsql_host or config_obj.aurora_dsql_endpoint,
+                    port=config_obj.aurora_dsql_port,
+                    iam_username=config_obj.iam_username,
+                    region=config_obj.aws_region
+                )
                 
                 # DSQL requires SSL for IAM authentication
                 # CRITICAL: asyncpg uses the 'host' parameter for BOTH TCP connection AND SSL SNI
@@ -160,20 +166,18 @@ async def get_connection_pool(database_url_or_config: Union[str, LambdaConfig]) 
                 # Using the direct endpoint format ensures correct SNI for DSQL.
                 
                 # Use dsql_host for connection - ensures correct SNI and private DNS resolution
-                if config_obj.dsql_host:
-                    dsql_host = config_obj.dsql_host
-                    logger.info(f"Using DSQL host for connection: {dsql_host}")
-                else:
-                    # Fallback to VPC endpoint (may fail with invalid SNI)
-                    dsql_host = parsed.hostname
-                    logger.warning(f"DSQL_HOST not set, using parsed hostname (may fail): {dsql_host}")
+                dsql_host = config_obj.dsql_host or config_obj.aurora_dsql_endpoint
+                if not dsql_host:
+                    raise ValueError("DSQL_HOST or AURORA_DSQL_ENDPOINT must be set for DSQL connections")
+                
+                logger.info(f"Connecting to DSQL: host={dsql_host}, user={config_obj.iam_username}, database={config_obj.database_name}, token_length={len(iam_token)}")
                 
                 _pool = await asyncpg.create_pool(
                     host=dsql_host,  # Use direct endpoint - asyncpg will use this for SNI
-                    port=parsed.port or 5432,
-                    user=parsed.username,
-                    password=parsed.password,
-                    database=parsed.path.lstrip('/'),
+                    port=config_obj.aurora_dsql_port,
+                    user=config_obj.iam_username,
+                    password=iam_token,  # Presigned URL query string (pass directly, no encoding/decoding)
+                    database=config_obj.database_name,
                     min_size=1,
                     max_size=10,  # Increased for FastAPI (better concurrency)
                     command_timeout=30,

@@ -50,13 +50,52 @@ def generate_iam_auth_token(
     
     # Generate new token
     try:
-        rds_client = boto3.client('rds', region_name=region)
-        token = rds_client.generate_db_auth_token(
-            DBHostname=endpoint,
-            Port=port,
-            DBUsername=iam_username,
-            Region=region
-        )
+        # For DSQL, we need to manually construct the presigned URL
+        # DSQL uses a presigned URL format: endpoint/?Action=DbConnect&...signature...
+        # We'll use botocore's signing capabilities to create this
+        from botocore.auth import SigV4QueryAuth
+        from botocore.awsrequest import AWSRequest
+        from urllib.parse import urlencode, urlparse
+        
+        # Get AWS credentials from environment (Lambda provides these automatically)
+        session = boto3.Session(region_name=region)
+        credentials = session.get_credentials()
+        
+        if not credentials:
+            raise Exception("No AWS credentials available")
+        
+        # Construct the DSQL endpoint URL
+        # Format: https://<hostname>/?Action=DbConnect
+        # Note: Username is NOT included in the presigned URL - it's specified in the connection string
+        # The IAM policy condition (dsql:DbUser) determines which user the token allows
+        query_params = {
+            'Action': 'DbConnect'
+        }
+        dsql_url = f"https://{endpoint}/?{urlencode(query_params)}"
+        
+        # Create AWS request
+        request = AWSRequest(method='GET', url=dsql_url)
+        
+        # Use SigV4QueryAuth for presigned URLs (adds signature to query string)
+        # This is different from SigV4Auth which adds signature to headers
+        expires_in = 900  # 15 minutes
+        signer = SigV4QueryAuth(credentials, 'dsql', region, expires=expires_in)
+        signer.add_auth(request)
+        
+        # After signing with SigV4QueryAuth, the URL should have signature in query string
+        signed_url = request.url
+        
+        # Extract the presigned URL query string (includes all query parameters with signature)
+        # The token is the query string part after the '?'
+        parsed = urlparse(signed_url)
+        token = parsed.query
+        
+        if not token:
+            raise Exception(f"Failed to generate DSQL token from URL: {request.url}")
+        
+        # DSQL expects the full presigned URL query string as the password
+        # Format: Action=DbConnect&X-Amz-Algorithm=...&X-Amz-Signature=...
+        logger.info(f"Generated DSQL token (length: {len(token)})")
         
         # Cache the token (valid for 15 minutes, but we'll expire it at 14 minutes)
         expires_at = datetime.utcnow() + timedelta(minutes=14)

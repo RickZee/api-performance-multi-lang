@@ -261,14 +261,15 @@ services:
     ports:
       - "8080:8080"
     environment:
-      GIT_REPOSITORY: ${GIT_REPOSITORY:-}
+      GIT_REPOSITORY: ${GIT_REPOSITORY:-file:///app/data}
       GIT_BRANCH: ${GIT_BRANCH:-main}
       LOCAL_CACHE_DIR: /tmp/schema-cache
       SERVER_PORT: 8080
-      DEFAULT_VERSION: ${DEFAULT_VERSION:-latest}
+      DEFAULT_VERSION: ${DEFAULT_VERSION:-v1}
       STRICT_MODE: ${STRICT_MODE:-true}
     volumes:
       - metadata_cache:/tmp/schema-cache
+      - ./data:/app/data:ro
     restart: unless-stopped
     networks:
       - car_network

@@ -153,6 +153,53 @@
             "enum": ["AND", "OR"],
             "default": "AND",
             "description": "How to combine multiple conditions (default: AND)"
+          },
+          "status": {
+            "type": "string",
+            "enum": ["pending_approval", "approved", "deploying", "deployed", "failed", "disabled"],
+            "default": "pending_approval",
+            "description": "Current status of the filter in the deployment workflow"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time",
+            "description": "ISO 8601 timestamp when the filter was created"
+          },
+          "updatedAt": {
+            "type": "string",
+            "format": "date-time",
+            "description": "ISO 8601 timestamp when the filter was last updated"
+          },
+          "approvedBy": {
+            "type": "string",
+            "description": "User or system that approved the filter for deployment"
+          },
+          "approvedAt": {
+            "type": "string",
+            "format": "date-time",
+            "description": "ISO 8601 timestamp when the filter was approved"
+          },
+          "deployedAt": {
+            "type": "string",
+            "format": "date-time",
+            "description": "ISO 8601 timestamp when the filter was successfully deployed"
+          },
+          "deploymentError": {
+            "type": "string",
+            "description": "Error message if deployment failed"
+          },
+          "flinkStatementIds": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "IDs of Flink statements created for this filter (sink table and INSERT statement)"
+          },
+          "version": {
+            "type": "integer",
+            "minimum": 1,
+            "default": 1,
+            "description": "Version number of the filter configuration"
           }
         }
       }
