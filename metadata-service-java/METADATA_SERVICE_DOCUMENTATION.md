@@ -2,7 +2,7 @@
 
 ## Executive Summary
 
-The Metadata Service is a centralized microservice providing schema validation, filter management, and Flink SQL deployment capabilities for the event-based processing platform. It exists in two implementations (Go and Java) with identical functionality.
+The Metadata Service is a centralized microservice providing schema validation, filter management, and Flink SQL deployment capabilities for the event-based processing platform. It is implemented using Spring Boot (Java).
 
 ---
 
@@ -66,65 +66,7 @@ graph TB
 
 ## 3. Component Architecture
 
-### 3.1 Go Implementation (`metadata-service-go/`)
-
-```mermaid
-graph LR
-    subgraph cmd [cmd/server]
-        Main[main.go]
-    end
-
-    subgraph internal [internal]
-        subgraph api [api]
-            Handlers[handlers.go]
-            Models[models.go]
-            FilterModels[filter_models.go]
-        end
-
-        subgraph cache [cache]
-            SchemaCache[schema_cache.go]
-        end
-
-        subgraph sync [sync]
-            GitSyncSvc[git_sync.go]
-        end
-
-        subgraph validator [validator]
-            JSONValidator[json_schema_validator.go]
-            RefResolver[ref_resolver.go]
-        end
-
-        subgraph compat [compat]
-            Compatibility[compatibility.go]
-        end
-
-        subgraph filter [filter]
-            Storage[storage.go]
-            Generator[generator.go]
-            Deployer[deployer.go]
-        end
-
-        subgraph config [config]
-            Config[config.go]
-        end
-    end
-
-    Main --> Config
-    Main --> SchemaCache
-    Main --> GitSyncSvc
-    Main --> JSONValidator
-    Main --> Handlers
-    Handlers --> SchemaCache
-    Handlers --> GitSyncSvc
-    Handlers --> JSONValidator
-    Handlers --> Compatibility
-    Handlers --> Storage
-    Handlers --> Generator
-    Handlers --> Deployer
-    JSONValidator --> RefResolver
-```
-
-### 3.2 Java Implementation (`metadata-service-java/`)
+### 3.1 Java Implementation (`metadata-service-java/`)
 
 ```mermaid
 graph LR
@@ -194,7 +136,7 @@ sequenceDiagram
     Validator->>Resolver: ResolveSchema(eventSchema)
     Resolver->>Resolver: Resolve $ref references
     Resolver-->>Validator: ResolvedSchema
-    Validator->>Validator: gojsonschema.Validate()
+    Validator->>Validator: JsonSchema.validate()
     Validator-->>API: ValidationResult
     API-->>Client: {valid, version, errors[]}
 ```
@@ -271,7 +213,6 @@ graph TB
         end
 
         subgraph metadata [Metadata Services]
-            MetaGo[Metadata Go :8080]
             MetaJava[Metadata Java :8081]
         end
 
@@ -290,14 +231,13 @@ graph TB
         ConfluentAPI[Confluent Cloud API]
     end
 
-    GoREST -->|HTTP :8080| MetaGo
-    PythonLambda -->|HTTP :8080| MetaGo
+    GoREST -->|HTTP :8081| MetaJava
+    PythonLambda -->|HTTP :8081| MetaJava
+    JavaREST -->|HTTP :8081| MetaJava
     
-    MetaGo -->|git clone/pull| GitHub
-    MetaGo -->|read schemas| DataVol
+    MetaJava -->|git clone/pull| GitHub
     MetaJava -->|read schemas| DataVol
     
-    MetaGo -->|Deploy Flink SQL| ConfluentAPI
     MetaJava -->|Deploy Flink SQL| ConfluentAPI
 
     GoREST --> Postgres
@@ -468,27 +408,7 @@ Event schema (`event.json`) references entity schemas using `$ref`:
 | `CONFLUENT_FLINK_COMPUTE_POOL_ID` | - | Flink compute pool ID |
 | `CONFLUENT_FLINK_API_ENDPOINT` | - | Flink API endpoint |
 
-### 8.2 Configuration File (Go Implementation)
-
-Optional `config.yaml` file:
-
-```yaml
-git:
-  repository: "https://github.com/org/schema-repo.git"
-  branch: "main"
-  pull_interval: "5m"
-  local_cache_dir: "/tmp/schema-cache"
-
-validation:
-  default_version: "latest"
-  accepted_versions: ["v1", "v2"]
-  strict_mode: true
-
-server:
-  port: 8080
-```
-
-### 8.3 Configuration File (Java Implementation)
+### 8.2 Configuration File (Java Implementation)
 
 `application.yml`:
 
@@ -595,9 +515,6 @@ graph TB
 **Docker Compose:**
 ```bash
 # Start metadata service
-docker-compose --profile metadata-service up -d metadata-service
-
-# Or Java implementation
 docker-compose --profile metadata-service-java up -d metadata-service-java
 ```
 
@@ -626,25 +543,7 @@ export SERVER_PORT=8080
 
 ## 11. Key Files Reference
 
-### 11.1 Go Implementation
-
-| File | Purpose |
-|------|---------|
-| [`cmd/server/main.go`](metadata-service-go/cmd/server/main.go) | Application entry point, server initialization |
-| [`internal/api/handlers.go`](metadata-service-go/internal/api/handlers.go) | HTTP request handlers for all endpoints |
-| [`internal/api/models.go`](metadata-service-go/internal/api/models.go) | API request/response models |
-| [`internal/api/filter_models.go`](metadata-service-go/internal/api/filter_models.go) | Filter-specific API models |
-| [`internal/cache/schema_cache.go`](metadata-service-go/internal/cache/schema_cache.go) | In-memory schema caching with TTL |
-| [`internal/sync/git_sync.go`](metadata-service-go/internal/sync/git_sync.go) | Git repository synchronization |
-| [`internal/validator/json_schema_validator.go`](metadata-service-go/internal/validator/json_schema_validator.go) | JSON Schema Draft 2020-12 validation |
-| [`internal/validator/ref_resolver.go`](metadata-service-go/internal/validator/ref_resolver.go) | $ref reference resolution |
-| [`internal/compat/compatibility.go`](metadata-service-go/internal/compat/compatibility.go) | Schema compatibility checking |
-| [`internal/filter/storage.go`](metadata-service-go/internal/filter/storage.go) | Filter persistence in git repository |
-| [`internal/filter/generator.go`](metadata-service-go/internal/filter/generator.go) | Flink SQL generation from filters |
-| [`internal/filter/deployer.go`](metadata-service-go/internal/filter/deployer.go) | Confluent Cloud Flink deployment |
-| [`internal/config/config.go`](metadata-service-go/internal/config/config.go) | Configuration loading and management |
-
-### 11.2 Java Implementation
+### 11.1 Java Implementation
 
 | File | Purpose |
 |------|---------|
@@ -684,24 +583,6 @@ flowchart TD
 ```
 
 ### 12.1 Integration Code Examples
-
-**Go Producer API:**
-```go
-metadataClient := metadata.NewClient(
-    os.Getenv("METADATA_SERVICE_URL"),
-    5*time.Second,
-    logger,
-)
-
-if metadataClient.IsEnabled() {
-    result, err := metadataClient.ValidateEvent(event)
-    if err != nil {
-        logger.Warn("Validation failed, allowing event", zap.Error(err))
-    } else if !result.Valid && strictMode {
-        return errors.New("event validation failed")
-    }
-}
-```
 
 **Python Producer API:**
 ```python
@@ -959,15 +840,7 @@ stateDiagram-v2
 
 ### 15.1 Unit Testing
 
-Both implementations include comprehensive unit tests:
-
-**Go Implementation:**
-- `integration_test.go` - Integration tests
-- `integration_validation_test.go` - Validation tests
-- `integration_filter_e2e_test.go` - Filter E2E tests
-- `integration_git_sync_test.go` - Git sync tests
-
-**Java Implementation:**
+The Java implementation includes comprehensive unit tests:
 - `FilterControllerTest.java` - Controller unit tests
 - `SchemaValidationServiceTest.java` - Validation service tests
 - `FilterGeneratorServiceTest.java` - SQL generation tests
@@ -1051,10 +924,9 @@ Potential improvements for future versions:
 
 ## Appendix B: Related Documentation
 
-- [CDC Streaming Backend Implementation](cdc-streaming/BACKEND_IMPLEMENTATION.md)
-- [Metadata Service Go README](metadata-service-go/README.md)
-- [Metadata Service Java README](metadata-service-java/README.md)
-- [Producer API Documentation](producer-api-go-rest/README.md)
+- [CDC Streaming Backend Implementation](../cdc-streaming/BACKEND_IMPLEMENTATION.md)
+- [Metadata Service Java README](README.md)
+- [Producer API Documentation](../producer-api-go-rest/README.md)
 
 ---
 

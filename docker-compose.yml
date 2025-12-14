@@ -208,7 +208,7 @@ services:
       DATABASE_URL: postgresql://postgres:password@postgres-large:5432/car_entities
       SERVER_PORT: 9083
       LOG_LEVEL: info
-      METADATA_SERVICE_URL: ${METADATA_SERVICE_URL:-http://metadata-service:8080}
+      METADATA_SERVICE_URL: ${METADATA_SERVICE_URL:-http://metadata-service-java:8080}
       METADATA_SERVICE_TIMEOUT: ${METADATA_SERVICE_TIMEOUT:-5s}
     depends_on:
       postgres-large:
@@ -254,42 +254,7 @@ services:
           memory: 1G
           cpus: '1.0'
 
-  # Metadata Service - Schema Validation
-  metadata-service:
-    build: ./metadata-service
-    container_name: metadata-service
-    ports:
-      - "8080:8080"
-    environment:
-      GIT_REPOSITORY: ${GIT_REPOSITORY:-}
-      GIT_BRANCH: ${GIT_BRANCH:-main}
-      LOCAL_CACHE_DIR: /app/data
-      SERVER_PORT: 8080
-      DEFAULT_VERSION: ${DEFAULT_VERSION:-v1}
-      STRICT_MODE: ${STRICT_MODE:-true}
-    volumes:
-      - ./data:/app/data:rw
-    # For local testing: mount data directory and use file:// URL for git
-    # Example: GIT_REPOSITORY=file:///app/data docker-compose up
-    restart: unless-stopped
-    networks:
-      - car_network
-    profiles:
-      - metadata-service
-    deploy:
-      resources:
-        limits:
-          memory: 1G
-          cpus: '1.0'
-        reservations:
-          memory: 512M
-          cpus: '0.5'
-    healthcheck:
-      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost:8080/api/v1/health"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-
+  # Metadata Service - Schema Validation (Java)
   metadata-service-java:
     build: ./metadata-service-java
     container_name: metadata-service-java
