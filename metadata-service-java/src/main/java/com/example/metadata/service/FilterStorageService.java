@@ -160,6 +160,13 @@ public class FilterStorageService {
             // Remove filter
             boolean removed = filters.removeIf(f -> filterId.equals(f.get("id")));
             if (!removed) {
+                // Log available filter IDs for debugging
+                List<String> availableIds = filters.stream()
+                    .map(f -> (String) f.get("id"))
+                    .filter(id -> id != null)
+                    .toList();
+                log.warn("Filter not found for deletion: version={}, filterId={}, availableIds={}", 
+                    version, filterId, availableIds);
                 throw new FilterNotFoundException(filterId, version);
             }
             

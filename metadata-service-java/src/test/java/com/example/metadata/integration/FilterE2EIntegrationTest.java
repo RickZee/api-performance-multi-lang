@@ -1,6 +1,7 @@
 package com.example.metadata.integration;
 
 import com.example.metadata.config.AppConfig;
+import com.example.metadata.exception.FilterNotFoundException;
 import com.example.metadata.model.*;
 import com.example.metadata.service.*;
 import com.example.metadata.testutil.TestRepoSetup;
@@ -274,18 +275,43 @@ public class FilterE2EIntegrationTest {
     
     @Test
     @Order(8)
-    void testDeleteFilter() {
-        Assertions.assertNotNull(filterId, "Filter ID should be set from previous test");
-        Assertions.assertFalse(filterId.isEmpty(), "Filter ID should not be empty");
+    void testDeleteFilter() throws IOException {
+        // The filterId should be set by testCreateFilter (Order 1) when running all tests together
+        // When running in isolation, filterId will be null, so we need to handle that case
+        String filterIdToDelete = filterId;
         
+        // If filterId is not set, try to get it from the API
+        if (filterIdToDelete == null || filterIdToDelete.isEmpty()) {
+            // Get filters from the API
+            List<Filter> filters = webTestClient.get()
+                .uri("/api/v1/filters?version=v1")
+                .exchange()
+                .expectStatus().isOk()
+                .expectBodyList(Filter.class)
+                .returnResult()
+                .getResponseBody();
+            
+            if (filters == null || filters.isEmpty()) {
+                Assertions.fail("No filters exist to delete. This test requires testCreateFilter to run first.");
+            }
+            filterIdToDelete = filters.get(0).getId();
+        }
+        
+        // Verify filter exists via API before deletion
+        webTestClient.get()
+            .uri("/api/v1/filters/{id}?version=v1", filterIdToDelete)
+            .exchange()
+            .expectStatus().isOk();
+        
+        // Delete the filter
         webTestClient.delete()
-            .uri("/api/v1/filters/{id}?version=v1", filterId)
+            .uri("/api/v1/filters/{id}?version=v1", filterIdToDelete)
             .exchange()
             .expectStatus().isNoContent();
         
         // Verify deletion
         webTestClient.get()
-            .uri("/api/v1/filters/{id}?version=v1", filterId)
+            .uri("/api/v1/filters/{id}?version=v1", filterIdToDelete)
             .exchange()
             .expectStatus().isNotFound();
     }

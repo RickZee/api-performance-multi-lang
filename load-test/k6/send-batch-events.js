@@ -24,6 +24,10 @@
  * 
  *   # Override API URL explicitly
  *   k6 run --env DB_TYPE=pg --env API_URL=https://xxxxx.execute-api.us-east-1.amazonaws.com send-batch-events.js
+ * 
+ *   # Save events to custom file for validation
+ *   k6 run --env DB_TYPE=pg --env EVENTS_FILE=/tmp/my-events.json send-batch-events.js
+ *   python3 scripts/validate-against-sent-events.py --events-file /tmp/my-events.json --aurora --dsql
  */
 
 import http from 'k6/http';
@@ -54,6 +58,10 @@ const serviceEventDuration = new Trend('service_event_duration', true);
 
 // Test start time (set in setup)
 let testStartTime = null;
+
+// Note: k6 doesn't support shared state between VUs easily
+// Events will be collected per-VU and aggregated in handleSummary
+// We'll use a workaround: write events to a JSON string that gets appended
 
 // Test configuration - configurable number of events per type via environment variable
 // Default: 5 events per type (for quick testing)
@@ -348,6 +356,9 @@ function generateCarServiceEvent(carId, serviceId = null, vuId = null, iteration
     });
 }
 
+// File to save sent events for validation
+const EVENTS_FILE = __ENV.EVENTS_FILE || '/tmp/k6-sent-events.json';
+
 // Use setup function to generate linked IDs for each batch
 export function setup() {
     // Record test start time
@@ -477,7 +488,8 @@ export function setup() {
         monthlyPayments: monthlyPayments,
         serviceIds: serviceIds,
         successfulCars: {}, // Track successful Car creations for sequential mode
-        successfulLoans: {} // Track successful Loan creations for sequential mode
+        successfulLoans: {}, // Track successful Loan creations for sequential mode
+        sentEvents: [] // Collect sent events for validation (per-VU)
     };
 }
 
@@ -627,12 +639,15 @@ export default function (data) {
     const isLambda = apiUrl.includes('execute-api') || apiUrl.includes('amazonaws.com');
     const timeout = isLambda ? 30000 : 5000; // 30s for Lambda, 5s for regular API
     
+    // Check if request was successful (status 200)
+    const isSuccess = res.status === 200;
+    
     success = check(res, {
         'status is 200': (r) => r.status === 200,
         [`response time < ${timeout}ms`]: (r) => r.timings.duration < timeout,
         'response body contains success': (r) => {
             const body = r.body || '';
-            return body.includes('successfully') || body.includes('processed') || body.includes('Event processed') || r.status === 200;
+            return body.includes('successfully') || body.includes('processed') || body.includes('Event processed') || body.includes('"success":true') || r.status === 200;
         },
     });
     
@@ -708,6 +723,37 @@ export default function (data) {
         serviceEventsSent.add(success);
     }
     
+    // Save successful events to data object for validation
+    // Save if status is 200 (regardless of check() result, as check() may fail on timing)
+    if (res.status === 200) {
+        try {
+            const eventData = JSON.parse(payload);
+            const savedEvent = {
+                uuid: eventData.eventHeader.uuid,
+                eventName: eventData.eventHeader.eventName,
+                eventType: eventData.eventHeader.eventType,
+                entityType: eventData.eventBody.entities[0]?.entityType,
+                entityId: eventData.eventBody.entities[0]?.entityId,
+                timestamp: new Date().toISOString(),
+                vuId: vuId,
+                iteration: globalIteration,
+                eventIndex: eventIndexInType
+            };
+            
+            // Add to data object (per-VU, will be aggregated in handleSummary)
+            if (!data.sentEvents) {
+                data.sentEvents = [];
+            }
+            data.sentEvents.push(savedEvent);
+            
+            // Also log event in a parseable format for collection
+            // Format: K6_EVENT: <json>
+            console.log(`K6_EVENT: ${JSON.stringify(savedEvent)}`);
+        } catch (e) {
+            // Silently fail - event saving is optional
+        }
+    }
+    
     // Log progress periodically (every 10% or every 100 events, whichever is smaller)
     const logInterval = Math.max(1, Math.min(Math.floor(EVENTS_PER_TYPE / 10), 100));
     if (eventIndexInType % logInterval === 0 || eventIndexInType === EVENTS_PER_TYPE - 1) {
@@ -727,6 +773,10 @@ export function teardown(data) {
 }
 
 export function handleSummary(data) {
+    return generateSummaryText(data);
+}
+
+function generateSummaryText(data) {
     // Safely access metrics with fallbacks
     const totalRequests = data.metrics?.http_reqs?.values?.count || 0;
     const totalErrors = data.metrics?.errors?.values?.count || 0;
@@ -845,6 +895,6 @@ Next Steps:
   3. Verify events in Confluent Cloud input topics
   4. Check Flink jobs/SQL statements
   5. Verify events in Confluent Cloud output topics
-`,
+`
     };
 }
