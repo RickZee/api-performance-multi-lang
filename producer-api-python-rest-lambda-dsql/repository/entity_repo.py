@@ -12,9 +12,9 @@ logger = logging.getLogger(__name__)
 class EntityRepository:
     """Generic repository for entity database operations."""
     
-    def __init__(self, pool: asyncpg.Pool, table_name: str):
-        """Initialize repository with connection pool and table name."""
-        self.pool = pool
+    def __init__(self, pool: Optional[asyncpg.Pool], table_name: str):
+        """Initialize repository (pool is optional, connections are passed directly)."""
+        self.pool = pool  # Kept for backward compatibility, but not used
         self.table_name = table_name
     
     async def exists_by_entity_id(self, entity_id: str, conn: Optional[asyncpg.Connection] = None) -> bool:
@@ -33,14 +33,9 @@ class EntityRepository:
             )
             return exists
         else:
-            async with self.pool.acquire() as conn:
-                exists = await conn.fetchval(
-                    f"""
-                    SELECT EXISTS(SELECT 1 FROM {self.table_name} WHERE entity_id = $1)
-                    """,
-                    entity_id,
-                )
-                return exists
+            # Connection should always be provided by service layer
+            # This fallback should not be reached in normal operation
+            raise ValueError("Connection must be provided (no pool available)")
     
     async def create(self, entity_id: str, entity_type: str,
                      created_at: Optional[datetime], updated_at: Optional[datetime],
@@ -71,19 +66,9 @@ class EntityRepository:
                 event_id,
             )
         else:
-            async with self.pool.acquire() as conn:
-                await conn.execute(
-                    f"""
-                    INSERT INTO {self.table_name} (entity_id, entity_type, created_at, updated_at, entity_data, event_id)
-                    VALUES ($1, $2, $3, $4, $5, $6)
-                    """,
-                    entity_id,
-                    entity_type,
-                    created_at,
-                    updated_at,
-                    json.dumps(entity_data),
-                    event_id,
-                )
+            # Connection should always be provided by service layer
+            # This fallback should not be reached in normal operation
+            raise ValueError("Connection must be provided (no pool available)")
     
     async def update(self, entity_id: str, updated_at: datetime, entity_data: dict,
                     event_id: Optional[str] = None, conn: Optional[asyncpg.Connection] = None) -> None:
@@ -109,15 +94,6 @@ class EntityRepository:
                 entity_id,
             )
         else:
-            async with self.pool.acquire() as conn:
-                await conn.execute(
-                    f"""
-                    UPDATE {self.table_name}
-                    SET updated_at = $1, entity_data = $2, event_id = $3
-                    WHERE entity_id = $4
-                    """,
-                    updated_at,
-                    json.dumps(entity_data),
-                    event_id,
-                    entity_id,
-                )
+            # Connection should always be provided by service layer
+            # This fallback should not be reached in normal operation
+            raise ValueError("Connection must be provided (no pool available)")

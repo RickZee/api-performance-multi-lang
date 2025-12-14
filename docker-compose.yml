@@ -261,20 +261,60 @@ services:
     ports:
       - "8080:8080"
     environment:
-      GIT_REPOSITORY: ${GIT_REPOSITORY:-file:///app/data}
+      GIT_REPOSITORY: ${GIT_REPOSITORY:-}
       GIT_BRANCH: ${GIT_BRANCH:-main}
-      LOCAL_CACHE_DIR: /tmp/schema-cache
+      LOCAL_CACHE_DIR: /app/data
       SERVER_PORT: 8080
       DEFAULT_VERSION: ${DEFAULT_VERSION:-v1}
       STRICT_MODE: ${STRICT_MODE:-true}
     volumes:
-      - metadata_cache:/tmp/schema-cache
-      - ./data:/app/data:ro
+      - ./data:/app/data:rw
+    # For local testing: mount data directory and use file:// URL for git
+    # Example: GIT_REPOSITORY=file:///app/data docker-compose up
     restart: unless-stopped
     networks:
       - car_network
     profiles:
       - metadata-service
+    deploy:
+      resources:
+        limits:
+          memory: 1G
+          cpus: '1.0'
+        reservations:
+          memory: 512M
+          cpus: '0.5'
+    healthcheck:
+      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost:8080/api/v1/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  metadata-service-java:
+    build: ./metadata-service-java
+    container_name: metadata-service-java
+    ports:
+      - "8081:8080"
+    environment:
+      GIT_REPOSITORY: ${GIT_REPOSITORY:-}
+      GIT_BRANCH: ${GIT_BRANCH:-main}
+      LOCAL_CACHE_DIR: /tmp/schema-cache
+      SERVER_PORT: 8080
+      DEFAULT_VERSION: ${DEFAULT_VERSION:-v1}
+      STRICT_MODE: ${STRICT_MODE:-true}
+      CONFLUENT_CLOUD_API_KEY: ${CONFLUENT_CLOUD_API_KEY:-}
+      CONFLUENT_CLOUD_API_SECRET: ${CONFLUENT_CLOUD_API_SECRET:-}
+      CONFLUENT_FLINK_COMPUTE_POOL_ID: ${CONFLUENT_FLINK_COMPUTE_POOL_ID:-}
+      CONFLUENT_FLINK_API_ENDPOINT: ${CONFLUENT_FLINK_API_ENDPOINT:-}
+    volumes:
+      - ./data:/app/data:rw
+    # For local testing: mount data directory and use file:// URL for git
+    # Example: GIT_REPOSITORY=file:///app/data docker-compose up
+    restart: unless-stopped
+    networks:
+      - car_network
+    profiles:
+      - metadata-service-java
     deploy:
       resources:
         limits:

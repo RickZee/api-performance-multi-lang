@@ -43,24 +43,24 @@ class DsqlConnectorIT {
                 postgres.getPassword())) {
             
             try (Statement stmt = conn.createStatement()) {
-                stmt.execute("""
-                    CREATE TABLE event_headers (
-                        id VARCHAR(255) PRIMARY KEY,
-                        event_name VARCHAR(255) NOT NULL,
-                        event_type VARCHAR(255),
-                        created_date TIMESTAMP WITH TIME ZONE,
-                        saved_date TIMESTAMP WITH TIME ZONE,
-                        header_data JSONB NOT NULL
-                    )
-                """);
+                stmt.execute(
+                    "CREATE TABLE event_headers (" +
+                    "    id VARCHAR(255) PRIMARY KEY," +
+                    "    event_name VARCHAR(255) NOT NULL," +
+                    "    event_type VARCHAR(255)," +
+                    "    created_date TIMESTAMP WITH TIME ZONE," +
+                    "    saved_date TIMESTAMP WITH TIME ZONE," +
+                    "    header_data JSONB NOT NULL" +
+                    ")"
+                );
                 
                 // Insert test data
-                stmt.execute("""
-                    INSERT INTO event_headers (id, event_name, event_type, created_date, saved_date, header_data)
-                    VALUES 
-                        ('event-1', 'LoanCreated', 'LoanCreated', NOW(), NOW(), '{"uuid": "event-1"}'::jsonb),
-                        ('event-2', 'CarCreated', 'CarCreated', NOW(), NOW(), '{"uuid": "event-2"}'::jsonb)
-                """);
+                stmt.execute(
+                    "INSERT INTO event_headers (id, event_name, event_type, created_date, saved_date, header_data) " +
+                    "VALUES " +
+                    "    ('event-1', 'LoanCreated', 'LoanCreated', NOW(), NOW(), '{\"uuid\": \"event-1\"}'::jsonb)," +
+                    "    ('event-2', 'CarCreated', 'CarCreated', NOW(), NOW(), '{\"uuid\": \"event-2\"}'::jsonb)"
+                );
             }
         }
     }

@@ -1,0 +1,40 @@
+{
+  "ID": "service-events-for-dealer-001",
+  "Name": "Service Events for Dealer 001",
+  "Description": "Routes service events from Tesla Service Center SF to dedicated topic",
+  "ConsumerID": "dealer-001-service-consumer",
+  "OutputTopic": "filtered-service-events-dealer-001",
+  "Conditions": [
+    {
+      "Field": "event_type",
+      "Operator": "equals",
+      "Value": "CarServiceDone",
+      "Values": null,
+      "Min": null,
+      "Max": null,
+      "ValueType": "string",
+      "LogicalOperator": "AND"
+    },
+    {
+      "Field": "header_data.dealerId",
+      "Operator": "equals",
+      "Value": "DEALER-001",
+      "Values": null,
+      "Min": null,
+      "Max": null,
+      "ValueType": "string",
+      "LogicalOperator": "AND"
+    }
+  ],
+  "Enabled": true,
+  "ConditionLogic": "AND",
+  "Status": "approved",
+  "CreatedAt": "2025-12-14T17:54:02.611971838Z",
+  "UpdatedAt": "2025-12-14T17:54:02.69591788Z",
+  "ApprovedBy": "test-user",
+  "ApprovedAt": "2025-12-14T17:54:02.69591788Z",
+  "DeployedAt": null,
+  "DeploymentError": "",
+  "FlinkStatementIDs": null,
+  "Version": 1
+}

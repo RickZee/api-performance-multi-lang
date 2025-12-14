@@ -13,9 +13,11 @@ from fastapi.responses import JSONResponse
 
 from config import load_lambda_config
 from constants import API_NAME
-from models.event import Event
-from repository import BusinessEventRepository, get_connection_pool, DuplicateEventError, close_connection_pool
-from service import EventProcessingService
+from producer_api_shared.models import Event
+from producer_api_shared.repository import BusinessEventRepository
+from producer_api_shared.exceptions import DuplicateEventError
+from producer_api_shared.service import EventProcessingService
+from repository import get_connection
 
 # Configure logging
 logging.basicConfig(
@@ -65,20 +67,7 @@ async def lifespan(app: FastAPI):
         # Store service in app.state for access
         app.state.service = _service
 
-        # Verify pool is bound to the same loop
-        if hasattr(_service.pool, '_loop'):
-            pool_loop_id = id(_service.pool._loop)
-            logger.info(f"{API_NAME} Service initialized - pool loop: {pool_loop_id}, startup loop: {id(startup_loop)}")
-            if pool_loop_id != id(startup_loop):
-                logger.error(f"{API_NAME} WARNING: Pool loop mismatch at startup!")
-                # #region agent log - Hypothesis F
-                try:
-                    with open('/Users/rickzakharov/dev/github/api-performance-multi-lang/.cursor/debug.log', 'a') as f:
-                        f.write(json.dumps({"sessionId":"debug-session","runId":"run2","hypothesisId":"F","location":"app.py:lifespan","message":"POOL LOOP MISMATCH DETECTED","data":{"startup_loop_id":id(startup_loop),"pool_loop_id":pool_loop_id},"timestamp":int(__import__('time').time()*1000)})+'\n')
-                except: pass
-                # #endregion
-
-        logger.info(f"{API_NAME} Service initialized on startup")
+        logger.info(f"{API_NAME} Service initialized on startup (using direct connections)")
         # #region agent log - Hypothesis F
         try:
             with open('/Users/rickzakharov/dev/github/api-performance-multi-lang/.cursor/debug.log', 'a') as f:
@@ -100,14 +89,9 @@ async def lifespan(app: FastAPI):
     except: pass
     # #endregion
 
-    if _service is not None and _service.pool is not None:
-        try:
-            await _service.pool.close()
-            logger.info(f"{API_NAME} Connection pool closed")
-        except Exception as e:
-            logger.warning(f"{API_NAME} Error closing connection pool: {e}")
-        _service = None
-    await close_connection_pool()
+    # No pool to close (using direct connections)
+    _service = None
+    logger.info(f"{API_NAME} Service cleaned up")
 
 
 app = FastAPI(title=API_NAME, version="1.0.0", lifespan=lifespan)
@@ -150,28 +134,19 @@ async def get_service() -> EventProcessingService:
         elif _config.log_level == "error":
             logging.getLogger().setLevel(logging.ERROR)
         
-        # Get connection pool
-        # #region agent log
-        try:
-            loop_before_pool = asyncio.get_running_loop()
-            loop_id_before_pool = id(loop_before_pool)
-            with open('/Users/rickzakharov/dev/github/api-performance-multi-lang/.cursor/debug.log', 'a') as f:
-                f.write(json.dumps({"sessionId":"debug-session","runId":"run1","hypothesisId":"A,B","location":"app.py:57","message":"BEFORE get_connection_pool","data":{"loop_id":loop_id_before_pool},"timestamp":int(__import__('time').time()*1000)})+'\n')
-        except: pass
-        # #endregion
-        pool = await get_connection_pool(_config)
-        # #region agent log
-        try:
-            loop_after_pool = asyncio.get_running_loop()
-            loop_id_after_pool = id(loop_after_pool)
-            with open('/Users/rickzakharov/dev/github/api-performance-multi-lang/.cursor/debug.log', 'a') as f:
-                f.write(json.dumps({"sessionId":"debug-session","runId":"run1","hypothesisId":"A,B","location":"app.py:58","message":"AFTER get_connection_pool","data":{"loop_id":loop_id_after_pool,"pool_id":id(pool)},"timestamp":int(__import__('time').time()*1000)})+'\n')
-        except: pass
-        # #endregion
+        # Initialize repositories and service with connection factory
+        business_event_repo = BusinessEventRepository()
         
-        # Initialize repositories and service
-        business_event_repo = BusinessEventRepository(pool)
-        _service = EventProcessingService(business_event_repo, pool)
+        # Create connection factory for direct connections (DSQL pattern)
+        async def connection_factory():
+            return await get_connection(_config)
+        
+        _service = EventProcessingService(
+            business_event_repo=business_event_repo,
+            connection_factory=connection_factory,
+            api_name=API_NAME,
+            should_close_connection=True  # Close direct connections after use
+        )
         
         logger.info(f"{API_NAME} FastAPI app initialized")
     
@@ -199,7 +174,7 @@ async def process_event(event: Event):
     if not event.event_body.entities:
         raise HTTPException(status_code=422, detail="Event body must contain at least one entity")
     
-    # Validate each entity
+    # Validate each entity (Pydantic models handle validation automatically)
     for entity in event.event_body.entities:
         if not entity.entity_type:
             raise HTTPException(status_code=422, detail="Entity type cannot be empty")
@@ -222,16 +197,6 @@ async def process_event(event: Event):
     try:
         # Get service (should already be initialized from lifespan)
         service = await get_service()
-        
-        # Verify we're in the correct event loop
-        request_loop = asyncio.get_running_loop()
-        if hasattr(service.pool, '_loop'):
-            pool_loop = service.pool._loop
-            if pool_loop is not request_loop:
-                logger.error(f"{API_NAME} CRITICAL: Event loop mismatch! Pool: {id(pool_loop)}, Request: {id(request_loop)}")
-                raise RuntimeError(f"Pool created in loop {id(pool_loop)} but used in loop {id(request_loop)}")
-            else:
-                logger.debug(f"{API_NAME} Event loop verified: {id(request_loop)}")
         
         await service.process_event(event)
         
@@ -285,7 +250,7 @@ async def process_bulk_events(events: List[Event]):
                 errors.append(f"Event {idx}: must contain at least one entity")
                 continue
             
-            # Validate entities
+            # Validate entities (Pydantic models handle validation automatically)
             valid = True
             for entity in event.event_body.entities:
                 if not entity.entity_type or not entity.entity_id:

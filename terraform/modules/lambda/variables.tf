@@ -165,3 +165,9 @@ variable "dsql_host" {
   default     = ""
 }
 
+variable "dsql_kms_key_arn" {
+  description = "ARN of the KMS key used for DSQL encryption (required for Lambda to decrypt DSQL connections)"
+  type        = string
+  default     = ""
+}
+

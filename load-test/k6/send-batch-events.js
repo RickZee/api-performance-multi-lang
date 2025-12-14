@@ -7,7 +7,7 @@
  * 3. Loan Payment Submitted
  * 4. Car Service Done
  * 
- * Flow: k6 → REST API → PostgreSQL → CDC → Confluent Cloud
+ * Flow: k6 → REST API → PostgreSQL/DSQL → CDC → Confluent Cloud
  * 
  * Usage:
  *   # Send 5 events of each type (default, 4 types = 20 total, 1 VU per type = 4 VUs total)
@@ -16,8 +16,14 @@
  *   # Send 1000 events of each type with 10 VUs per type (4 types = 4000 total, 40 VUs total)
  *   k6 run --env HOST=producer-api-java-rest --env PORT=8081 --env EVENTS_PER_TYPE=1000 --env VUS_PER_EVENT_TYPE=10 send-batch-events.js
  * 
- *   # Lambda API with 1000 events per type, 20 VUs per type (4 types = 4000 total, 80 VUs total)
- *   k6 run --env API_URL=https://xxxxx.execute-api.us-east-1.amazonaws.com --env EVENTS_PER_TYPE=1000 --env VUS_PER_EVENT_TYPE=20 send-batch-events.js
+ *   # Lambda API with PostgreSQL (pg) - 1000 events per type, 20 VUs per type
+ *   k6 run --env DB_TYPE=pg --env EVENTS_PER_TYPE=1000 --env VUS_PER_EVENT_TYPE=20 send-batch-events.js
+ * 
+ *   # Lambda API with DSQL (dsql) - 1000 events per type, 20 VUs per type
+ *   k6 run --env DB_TYPE=dsql --env EVENTS_PER_TYPE=1000 --env VUS_PER_EVENT_TYPE=20 send-batch-events.js
+ * 
+ *   # Override API URL explicitly
+ *   k6 run --env DB_TYPE=pg --env API_URL=https://xxxxx.execute-api.us-east-1.amazonaws.com send-batch-events.js
  */
 
 import http from 'k6/http';
@@ -65,9 +71,15 @@ const VUS_PER_EVENT_TYPE = parseInt(__ENV.VUS_PER_EVENT_TYPE || '1', 10);
 const TOTAL_VUS = VUS_PER_EVENT_TYPE * NUM_EVENT_TYPES;
 const EVENTS_PER_VU = Math.ceil(EVENTS_PER_TYPE / VUS_PER_EVENT_TYPE);
 
+// Sequential processing mode: wait for dependencies to succeed
+// Set SEQUENTIAL_MODE=true to enable sequential event processing
+// When enabled: Car → Loan → Payment → Service (each waits for previous to complete)
+const SEQUENTIAL_MODE = __ENV.SEQUENTIAL_MODE === 'true' || __ENV.SEQUENTIAL_MODE === '1';
+
 export const options = {
-    vus: TOTAL_VUS,
-    iterations: EVENTS_PER_VU * TOTAL_VUS, // Total iterations: each VU runs EVENTS_PER_VU iterations
+    vus: SEQUENTIAL_MODE ? 1 : TOTAL_VUS, // Sequential mode uses 1 VU to process events in order
+    iterations: SEQUENTIAL_MODE ? EVENTS_PER_TYPE * NUM_EVENT_TYPES : EVENTS_PER_TYPE * TOTAL_VUS, // Sequential: 5*4=20, Parallel: 5*4*1=20
+    maxDuration: '10m',
     thresholds: {
         // Abort if error rate exceeds 50% (half of requests failing)
         'http_req_failed': ['rate<0.5'],
@@ -76,10 +88,33 @@ export const options = {
 
 // Get API configuration from environment
 // Support both regular REST API (HOST/PORT) and Lambda API (API_URL/LAMBDA_API_URL)
-// Default to Lambda API if no configuration provided
+// Support DB_TYPE parameter (pg or dsql) to select appropriate Lambda API endpoint
 let apiUrl;
-if (__ENV.API_URL || __ENV.LAMBDA_API_URL || __ENV.LAMBDA_PYTHON_REST_API_URL) {
-    // Lambda API - use full URL
+const dbType = (__ENV.DB_TYPE || '').toLowerCase();
+
+// If DB_TYPE is specified (pg or dsql), use corresponding Lambda API URL
+if (dbType === 'pg' || dbType === 'dsql') {
+    // Lambda API - determine URL based on DB_TYPE
+    let baseUrl;
+    if (__ENV.API_URL) {
+        // Explicit API_URL takes precedence
+        baseUrl = __ENV.API_URL;
+    } else if (dbType === 'pg') {
+        // PostgreSQL Lambda API
+        baseUrl = __ENV.LAMBDA_PYTHON_REST_API_URL || __ENV.LAMBDA_PG_API_URL || __ENV.LAMBDA_API_URL;
+    } else if (dbType === 'dsql') {
+        // DSQL Lambda API
+        baseUrl = __ENV.LAMBDA_DSQL_API_URL || __ENV.LAMBDA_PYTHON_REST_DSQL_API_URL || __ENV.LAMBDA_API_URL;
+    }
+    
+    if (!baseUrl) {
+        throw new Error(`DB_TYPE=${dbType} specified but no API URL found. Please set API_URL, LAMBDA_${dbType.toUpperCase()}_API_URL, or LAMBDA_API_URL environment variable.`);
+    }
+    
+    const apiPath = __ENV.API_PATH || '/api/v1/events';
+    apiUrl = baseUrl.includes('/api/v1/events') ? baseUrl : `${baseUrl.replace(/\/$/, '')}${apiPath}`;
+} else if (__ENV.API_URL || __ENV.LAMBDA_API_URL || __ENV.LAMBDA_PYTHON_REST_API_URL) {
+    // Lambda API - use full URL (legacy support)
     const baseUrl = __ENV.API_URL || __ENV.LAMBDA_API_URL || __ENV.LAMBDA_PYTHON_REST_API_URL;
     const apiPath = __ENV.API_PATH || '/api/v1/events';
     apiUrl = baseUrl.includes('/api/v1/events') ? baseUrl : `${baseUrl.replace(/\/$/, '')}${apiPath}`;
@@ -89,7 +124,7 @@ if (__ENV.API_URL || __ENV.LAMBDA_API_URL || __ENV.LAMBDA_PYTHON_REST_API_URL) {
     const apiPort = __ENV.PORT || 8081;
     apiUrl = `http://${apiHost}:${apiPort}/api/v1/events`;
 } else {
-    // Default to Lambda API
+    // Default to Lambda API (legacy behavior)
     const defaultLambdaUrl = 'https://k5z0vg8boa.execute-api.us-east-1.amazonaws.com';
     const apiPath = __ENV.API_PATH || '/api/v1/events';
     apiUrl = `${defaultLambdaUrl}${apiPath}`;
@@ -440,56 +475,101 @@ export function setup() {
         carIds: carIds,
         loanIds: loanIds,
         monthlyPayments: monthlyPayments,
-        serviceIds: serviceIds
+        serviceIds: serviceIds,
+        successfulCars: {}, // Track successful Car creations for sequential mode
+        successfulLoans: {} // Track successful Loan creations for sequential mode
     };
 }
 
 export default function (data) {
     const vuId = __VU; // Virtual User ID (1 to TOTAL_VUS)
-    const iteration = __ITER; // Current iteration for this VU (0 to EVENTS_PER_VU-1)
+    const globalIteration = __ITER; // Global iteration (0 to TOTAL_ITERATIONS-1)
     let payload;
     let eventType;
     let success;
     let eventIndexInType; // Event index within the event type (0 to EVENTS_PER_TYPE-1)
     
-    // Determine which event type this VU handles
-    // VU assignment: VU 1-VUS_PER_EVENT_TYPE handle Car, 
-    //                VU VUS_PER_EVENT_TYPE+1 to 2*VUS_PER_EVENT_TYPE handle Loan, etc.
-    const eventTypeIndex = Math.floor((vuId - 1) / VUS_PER_EVENT_TYPE); // 0=Car, 1=Loan, 2=Payment, 3=Service
-    const vuIndexInType = ((vuId - 1) % VUS_PER_EVENT_TYPE); // Position within event type (0 to VUS_PER_EVENT_TYPE-1)
-    
-    // Calculate which event index this VU should handle in this iteration
-    // Events are split evenly across VUs: 
-    //   VU 0 handles events 0, VUS_PER_EVENT_TYPE, 2*VUS_PER_EVENT_TYPE, etc.
-    //   VU 1 handles events 1, VUS_PER_EVENT_TYPE+1, 2*VUS_PER_EVENT_TYPE+1, etc.
-    //   This ensures even distribution and parallel processing
-    eventIndexInType = vuIndexInType + (iteration * VUS_PER_EVENT_TYPE);
-    
-    // Ensure we don't exceed the number of events per type
-    if (eventIndexInType >= EVENTS_PER_TYPE) {
-        return; // This VU has finished its assigned events for this type
+    // Sequential mode: process events in order (Car → Loan → Payment → Service)
+    // Each event type waits for previous to complete before starting
+    if (SEQUENTIAL_MODE) {
+        // In sequential mode, iterations are: 0-4: Car, 5-9: Loan, 10-14: Payment, 15-19: Service
+        const eventTypeIndex = Math.floor(globalIteration / EVENTS_PER_TYPE);
+        eventIndexInType = globalIteration - (eventTypeIndex * EVENTS_PER_TYPE);
+        
+        // Ensure we don't exceed the number of event types
+        if (eventTypeIndex >= NUM_EVENT_TYPES) {
+            return; // This iteration is beyond our event types
+        }
+        
+        // For Payment and Service events, check if dependencies succeeded
+        if (eventTypeIndex === 2) {
+            // Loan Payment: check if corresponding Loan was created successfully
+            // We'll track this in shared data
+            if (!data.successfulLoans || !data.successfulLoans[eventIndexInType]) {
+                console.log(`[VU ${vuId}] Skipping Loan Payment ${eventIndexInType + 1}/${EVENTS_PER_TYPE}: Loan ${eventIndexInType} not created yet`);
+                // Still try to send, but log the dependency issue
+            }
+        } else if (eventTypeIndex === 3) {
+            // Car Service: check if corresponding Car was created successfully
+            if (!data.successfulCars || !data.successfulCars[eventIndexInType]) {
+                console.log(`[VU ${vuId}] Skipping Car Service ${eventIndexInType + 1}/${EVENTS_PER_TYPE}: Car ${eventIndexInType} not created yet`);
+                // Still try to send, but log the dependency issue
+            }
+        }
+    } else {
+        // Parallel mode: original logic
+        // Determine which event type this iteration should send based on global iteration
+        // Iterations 0-9: Car, 10-19: Loan, 20-29: Payment, 30-39: Service
+        const eventTypeIndex = Math.floor(globalIteration / EVENTS_PER_TYPE);
+        
+        // Ensure we don't exceed the number of event types
+        if (eventTypeIndex >= NUM_EVENT_TYPES) {
+            return; // This iteration is beyond our event types
+        }
+        
+        // Calculate the event index within the event type (0 to EVENTS_PER_TYPE-1)
+        // For Car (iterations 0-9): eventIndexInType = 0-9
+        // For Loan (iterations 10-19): eventIndexInType = 0-9
+        // etc.
+        eventIndexInType = globalIteration - (eventTypeIndex * EVENTS_PER_TYPE);
     }
     
+    // Determine event type index for payload generation
+    const eventTypeIndex = SEQUENTIAL_MODE 
+        ? Math.floor(globalIteration / EVENTS_PER_TYPE)
+        : Math.floor(globalIteration / EVENTS_PER_TYPE);
+    
+    // Determine which VU should handle this event type
+    // VU assignment: VU 1-VUS_PER_EVENT_TYPE handle Car, 
+    //                VU VUS_PER_EVENT_TYPE+1 to 2*VUS_PER_EVENT_TYPE handle Loan, etc.
+    const expectedVuStart = eventTypeIndex * VUS_PER_EVENT_TYPE + 1;
+    const expectedVuEnd = (eventTypeIndex + 1) * VUS_PER_EVENT_TYPE;
+    
+    // Check if this VU should handle this event type
+    // Since k6 distributes iterations non-deterministically, we allow any VU to process
+    // any iteration, but we ensure each iteration sends the correct event type
+    // This way, all 40 iterations will send events, regardless of which VU processes them
+    
     // Generate the appropriate event based on event type
-    // Pass VU ID, iteration, and event index to ensure unique UUIDs
+    // Pass VU ID, globalIteration, and event index to ensure unique UUIDs
     if (eventTypeIndex === 0) {
         // Car Created
-        payload = generateCarCreatedEvent(data.carIds[eventIndexInType], vuId, iteration, eventIndexInType);
+        payload = generateCarCreatedEvent(data.carIds[eventIndexInType], vuId, globalIteration, eventIndexInType);
         eventType = "CarCreated";
     } else if (eventTypeIndex === 1) {
         // Loan Created
         const carIndex = eventIndexInType; // Link to corresponding car
-        payload = generateLoanCreatedEvent(data.carIds[carIndex], data.loanIds[eventIndexInType], vuId, iteration, eventIndexInType);
+        payload = generateLoanCreatedEvent(data.carIds[carIndex], data.loanIds[eventIndexInType], vuId, globalIteration, eventIndexInType);
         eventType = "LoanCreated";
     } else if (eventTypeIndex === 2) {
         // Loan Payment Submitted
         const loanIndex = eventIndexInType; // Link to corresponding loan
-        payload = generateLoanPaymentEvent(data.loanIds[loanIndex], data.monthlyPayments[eventIndexInType], vuId, iteration, eventIndexInType);
+        payload = generateLoanPaymentEvent(data.loanIds[loanIndex], data.monthlyPayments[eventIndexInType], vuId, globalIteration, eventIndexInType);
         eventType = "LoanPaymentSubmitted";
     } else {
         // Car Service Done
         const carIndex = eventIndexInType; // Link to corresponding car
-        payload = generateCarServiceEvent(data.carIds[carIndex], data.serviceIds[eventIndexInType], vuId, iteration, eventIndexInType);
+        payload = generateCarServiceEvent(data.carIds[carIndex], data.serviceIds[eventIndexInType], vuId, globalIteration, eventIndexInType);
         eventType = "CarServiceDone";
     }
     
@@ -541,6 +621,8 @@ export default function (data) {
         serviceEventDuration.add(duration);
     }
     
+    // Use iterationWithinEventType for logging (defined earlier in function)
+    
     // Check response (use longer timeout for Lambda APIs)
     const isLambda = apiUrl.includes('execute-api') || apiUrl.includes('amazonaws.com');
     const timeout = isLambda ? 30000 : 5000; // 30s for Lambda, 5s for regular API
@@ -553,6 +635,17 @@ export default function (data) {
             return body.includes('successfully') || body.includes('processed') || body.includes('Event processed') || r.status === 200;
         },
     });
+    
+    // Track successful events for sequential mode dependencies
+    if (SEQUENTIAL_MODE && success && res.status === 200) {
+        if (eventType === "CarCreated") {
+            if (!data.successfulCars) data.successfulCars = {};
+            data.successfulCars[eventIndexInType] = true;
+        } else if (eventType === "LoanCreated") {
+            if (!data.successfulLoans) data.successfulLoans = {};
+            data.successfulLoans[eventIndexInType] = true;
+        }
+    }
     
     // Check for schema errors in response and abort immediately
     const responseBody = res.body || '';
@@ -593,10 +686,10 @@ export default function (data) {
     // Log errors immediately for visibility
     if (!success || res.status !== 200) {
         const errorMsg = res.status >= 400 ? `HTTP ${res.status}: ${res.body?.substring(0, 200) || 'No response body'}` : 'Request failed checks';
-        console.error(`[ERROR] [VU ${vuId}] ${eventType} event failed (event ${eventIndexInType + 1}/${EVENTS_PER_TYPE}, iteration ${iteration + 1}/${options.iterations}): ${errorMsg}`);
+        console.error(`[ERROR] [VU ${vuId}] ${eventType} event failed (event ${eventIndexInType + 1}/${EVENTS_PER_TYPE}, global iteration ${globalIteration}): ${errorMsg}`);
         
         // Log first few errors in detail, then summarize
-        if (iteration < 5) {
+        if (eventIndexInType < 5) {
             console.error(`  Full response: ${JSON.stringify(res.body).substring(0, 500)}`);
         }
     }
@@ -616,9 +709,9 @@ export default function (data) {
     }
     
     // Log progress periodically (every 10% or every 100 events, whichever is smaller)
-    const logInterval = Math.max(1, Math.min(Math.floor(EVENTS_PER_VU / 10), 100));
-    if (iteration % logInterval === 0 || iteration === options.iterations - 1) {
-        console.log(`[VU ${vuId}] Sent ${eventType} event (${eventIndexInType + 1}/${EVENTS_PER_TYPE} for this type, iteration ${iteration + 1}/${options.iterations})`);
+    const logInterval = Math.max(1, Math.min(Math.floor(EVENTS_PER_TYPE / 10), 100));
+    if (eventIndexInType % logInterval === 0 || eventIndexInType === EVENTS_PER_TYPE - 1) {
+        console.log(`[VU ${vuId}] Sent ${eventType} event (${eventIndexInType + 1}/${EVENTS_PER_TYPE} for this type, global iteration ${globalIteration})`);
     }
     
     // Small delay between events
@@ -689,13 +782,17 @@ export function handleSummary(data) {
     Loan Payment Submitted: ${paymentSent}/${EVENTS_PER_TYPE}
     Car Service Done: ${serviceSent}/${EVENTS_PER_TYPE}`;
     
+    // Determine DB type for summary
+    const dbTypeDisplay = dbType ? ` (${dbType.toUpperCase()})` : '';
+    const modeDisplay = SEQUENTIAL_MODE ? ' (Sequential Mode)' : ' (Parallel Mode)';
+    
     return {
         'stdout': `
     ========================================
     k6 Batch Events Test Summary
     ========================================
 
-    API Endpoint: ${apiUrl}
+    API Endpoint: ${apiUrl}${dbTypeDisplay}${modeDisplay}
     Events Sent: ${eventsSummary}
     Total Events: ${EVENTS_PER_TYPE * NUM_EVENT_TYPES}
     Event Types: ${NUM_EVENT_TYPES}

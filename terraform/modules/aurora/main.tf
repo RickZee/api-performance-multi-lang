@@ -81,6 +81,7 @@ resource "aws_security_group_rule" "aurora_from_additional_sg" {
 }
 
 # Parameter Group for Aurora Cluster (enables logical replication)
+# Note: If parameter group already exists, import it: terraform import 'module.aurora[0].aws_rds_cluster_parameter_group.this' producer-api-aurora-cluster-pg
 resource "aws_rds_cluster_parameter_group" "this" {
   name        = "${var.project_name}-aurora-cluster-pg"
   family      = var.parameter_group_family

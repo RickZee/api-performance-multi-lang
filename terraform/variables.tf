@@ -228,8 +228,8 @@ variable "lambda_timeout" {
   default     = 15
 }
 
-variable "enable_python_lambda" {
-  description = "Enable Python Lambda function"
+variable "enable_python_lambda_pg" {
+  description = "Enable Python Lambda function for PostgreSQL (regular Aurora)"
   type        = bool
   default     = false
 }
@@ -342,5 +342,35 @@ variable "dsql_test_runner_instance_type" {
   description = "EC2 instance type for DSQL test runner"
   type        = string
   default     = "t3.small"
+}
+
+variable "enable_bastion_host" {
+  description = "Enable bastion host for database access"
+  type        = bool
+  default     = false
+}
+
+variable "bastion_instance_type" {
+  description = "EC2 instance type for bastion host"
+  type        = string
+  default     = "t3.micro"
+}
+
+variable "bastion_ssh_public_key" {
+  description = "SSH public key for bastion host access (optional, can use SSM instead)"
+  type        = string
+  default     = ""
+}
+
+variable "bastion_ssh_allowed_cidr_blocks" {
+  description = "CIDR blocks allowed to SSH to bastion host"
+  type        = list(string)
+  default     = ["0.0.0.0/0"]
+}
+
+variable "bastion_allocate_elastic_ip" {
+  description = "Whether to allocate an Elastic IP for the bastion host"
+  type        = bool
+  default     = false
 }
 

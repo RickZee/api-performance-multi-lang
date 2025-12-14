@@ -1,5 +1,7 @@
 # Terraform Setup for Serverless APIs
 
+> ⚠️ **IMPORTANT**: See [`IMPORTANT_DSQL_CONNECTOR_DEPLOYMENT.md`](./IMPORTANT_DSQL_CONNECTOR_DEPLOYMENT.md) for complete documentation of the DSQL connector deployment, infrastructure migration, and troubleshooting. **DO NOT DELETE** that file.
+
 This directory contains Terraform configuration to deploy the Python REST Lambda function with API Gateway HTTP API, using S3 for Lambda code deployment.
 
 ## Overview

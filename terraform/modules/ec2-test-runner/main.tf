@@ -48,6 +48,7 @@ resource "aws_iam_role_policy_attachment" "ssm_managed_instance_core" {
 }
 
 # IAM policy for DSQL database authentication (IAM database user)
+# DSQL uses dsql:DbConnect action, not rds-db:connect
 resource "aws_iam_role_policy" "dsql_auth" {
   name = "${var.project_name}-dsql-test-runner-dsql-auth"
   role = aws_iam_role.test_runner.id
@@ -58,9 +59,9 @@ resource "aws_iam_role_policy" "dsql_auth" {
       {
         Effect = "Allow"
         Action = [
-          "rds-db:connect"
+          "dsql:DbConnect"
         ]
-        Resource = "arn:aws:rds-db:${var.aws_region}:${data.aws_caller_identity.current.account_id}:dbuser:${var.aurora_dsql_cluster_resource_id}/${var.iam_database_user}"
+        Resource = "arn:aws:dsql:${var.aws_region}:${data.aws_caller_identity.current.account_id}:cluster/${var.aurora_dsql_cluster_resource_id}"
       }
     ]
   })
