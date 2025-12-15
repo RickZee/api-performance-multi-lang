@@ -187,16 +187,26 @@ def retry_on_oc000(stop_after: int = 5, min_wait: float = 0.1, max_wait: float =
         """Check if exception should be retried."""
         is_retryable, error_type, sqlstate = classify_dsql_error(exception)
         
-        logger.info(
+        # Extract additional error context
+        error_details = {
+            'exception_type': type(exception).__name__,
+            'is_retryable': is_retryable,
+            'error_type': error_type,
+            'sqlstate': sqlstate,
+            'exception_str': str(exception)[:500],  # Increased length for better debugging
+        }
+        
+        # Add sqlstate and error code if available
+        if isinstance(exception, asyncpg.PostgresError):
+            if hasattr(exception, 'sqlstate'):
+                error_details['sqlstate'] = exception.sqlstate
+            if hasattr(exception, 'code'):
+                error_details['error_code'] = exception.code
+        
+        logger.warning(
             f"Retry condition check: exception={type(exception).__name__}, "
             f"is_retryable={is_retryable}, error_type={error_type}, sqlstate={sqlstate}",
-            extra={
-                'exception_type': type(exception).__name__,
-                'is_retryable': is_retryable,
-                'error_type': error_type,
-                'sqlstate': sqlstate,
-                'exception_str': str(exception)[:200],
-            }
+            extra=error_details
         )
         
         # Only retry OC000 conflicts and connection errors
@@ -204,9 +214,15 @@ def retry_on_oc000(stop_after: int = 5, min_wait: float = 0.1, max_wait: float =
         should_retry = is_retryable and error_type in ('OC000_TRANSACTION_CONFLICT', 'CONNECTION_ERROR')
         
         if should_retry:
-            logger.warning(f"Exception is retryable: {error_type}")
+            logger.warning(
+                f"Exception is retryable: {error_type}",
+                extra=error_details
+            )
         else:
-            logger.warning(f"Exception is NOT retryable: {error_type} (is_retryable={is_retryable})")
+            logger.warning(
+                f"Exception is NOT retryable: {error_type} (is_retryable={is_retryable})",
+                extra=error_details
+            )
         
         return should_retry
     
@@ -217,14 +233,27 @@ def retry_on_oc000(stop_after: int = 5, min_wait: float = 0.1, max_wait: float =
             is_retryable, error_type, sqlstate = classify_dsql_error(exception)
             wait_time = retry_state.next_action.sleep if retry_state.next_action else 0
             
+            error_details = {
+                'error_type': error_type,
+                'sqlstate': sqlstate,
+                'attempt': retry_state.attempt_number,
+                'max_attempts': stop_after,
+                'wait_time': wait_time,
+                'exception_str': str(exception)[:500],
+            }
+            
+            # Add detailed error context
+            if isinstance(exception, asyncpg.PostgresError):
+                if hasattr(exception, 'sqlstate'):
+                    error_details['sqlstate'] = exception.sqlstate
+                if hasattr(exception, 'code'):
+                    error_details['error_code'] = exception.code
+                if hasattr(exception, 'message'):
+                    error_details['error_message'] = exception.message[:200]
+            
             logger.warning(
-                f"Retrying after {wait_time:.3f}s (attempt {retry_state.attempt_number}/{stop_after})",
-                extra={
-                    'error_type': error_type,
-                    'sqlstate': sqlstate,
-                    'attempt': retry_state.attempt_number,
-                    'wait_time': wait_time,
-                }
+                f"OC000 retry: Waiting {wait_time:.3f}s before attempt {retry_state.attempt_number}/{stop_after}",
+                extra=error_details
             )
     
     def after_retry_handler(retry_state: RetryCallState):

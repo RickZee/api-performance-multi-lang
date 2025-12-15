@@ -51,33 +51,32 @@ echo ""
 echo -e "${BLUE}Running k6 batch test...${NC}"
 cd "$PROJECT_ROOT/load-test/k6"
 
-# Calculate iterations: total events divided by VUs (each VU processes its share)
+# Calculate iterations: using per-vu-iterations executor
+# Each VU processes EVENTS_PER_TYPE * NUM_EVENT_TYPES / VUS iterations
+# Total events = EVENTS_PER_TYPE * NUM_EVENT_TYPES (e.g., 50 * 4 = 200)
 TOTAL_EVENTS=$((EVENTS_PER_TYPE * 4))
-ITERATIONS_PER_VU=$((TOTAL_EVENTS / VUS))
-# Ensure we have enough iterations
-if [ $ITERATIONS_PER_VU -lt 1 ]; then
-    ITERATIONS_PER_VU=1
-fi
-TOTAL_ITERATIONS=$((ITERATIONS_PER_VU * VUS))
+ITERATIONS_PER_VU=$(( (EVENTS_PER_TYPE * 4 + VUS - 1) / VUS ))  # Ceiling division
+# With per-vu-iterations, each VU runs ITERATIONS_PER_VU iterations
+# Total iterations across all VUs = ITERATIONS_PER_VU * VUS
 
 echo "Test Configuration:"
-echo "  Total Events: $TOTAL_EVENTS"
+echo "  Total Events Expected: $TOTAL_EVENTS"
 echo "  VUs: $VUS"
 echo "  Iterations per VU: $ITERATIONS_PER_VU"
-echo "  Total Iterations: $TOTAL_ITERATIONS"
+echo "  Total Iterations (across all VUs): $((ITERATIONS_PER_VU * VUS))"
 echo ""
 
 # Record start time
 START_TIME=$(date +%s)
 
 # Run k6 and extract events from output
-# Save output to temp file, then extract events and display
+# With scenario-based per-vu-iterations, we don't pass --iterations or --vus
+# The script's export const options handles the configuration
 TEMP_OUTPUT="/tmp/k6-output-$$.log"
 k6 run \
-    --vus $VUS \
-    --iterations $TOTAL_ITERATIONS \
     --env DB_TYPE=$DB_TYPE \
     --env EVENTS_PER_TYPE=$EVENTS_PER_TYPE \
+    --env TOTAL_VUS=$VUS \
     --env EVENTS_FILE="$EVENTS_FILE" \
     --env API_URL="$API_URL" \
     send-batch-events.js 2>&1 | tee "$TEMP_OUTPUT" | "$SCRIPT_DIR/extract-events-from-k6-output.py" "$EVENTS_FILE" 2>&1 | tail -50

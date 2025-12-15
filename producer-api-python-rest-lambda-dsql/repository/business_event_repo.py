@@ -134,6 +134,9 @@ class BusinessEventRepository:
             event_data: Event data as dict
             skip_diagnostics: If True, skip diagnostic queries (useful when in transaction)
         """
+        import time
+        step_start = time.time()
+        
         try:
             # Diagnostic: Check current database and schema (skip when in transaction for performance)
             if not skip_diagnostics:
@@ -147,7 +150,15 @@ class BusinessEventRepository:
                     );
                 """, current_schema)
                 
-                logger.info(f"Database context - DB: {current_db}, Schema: {current_schema}, business_events exists: {table_exists}")
+                logger.debug(
+                    f"Database context check",
+                    extra={
+                        'event_id': event_id,
+                        'database': current_db,
+                        'schema': current_schema,
+                        'table_exists': table_exists,
+                    }
+                )
                 
                 if not table_exists:
                     # List available tables for debugging
@@ -158,8 +169,16 @@ class BusinessEventRepository:
                         ORDER BY tablename;
                     """, current_schema)
                     table_list = [t['tablename'] for t in tables]
-                    logger.warning(f"business_events table not found in schema '{current_schema}'. Available tables: {table_list}")
+                    logger.warning(
+                        f"business_events table not found",
+                        extra={
+                            'event_id': event_id,
+                            'schema': current_schema,
+                            'available_tables': table_list,
+                        }
+                    )
             
+            insert_start = time.time()
             await conn.execute(
                 """
                 INSERT INTO business_events (id, event_name, event_type, created_date, saved_date, event_data)
@@ -172,7 +191,55 @@ class BusinessEventRepository:
                 saved_date,
                 json.dumps(event_data),
             )
+            insert_duration = int((time.time() - insert_start) * 1000)
+            total_duration = int((time.time() - step_start) * 1000)
+            
+            logger.debug(
+                f"Business event inserted",
+                extra={
+                    'event_id': event_id,
+                    'event_type': event_type,
+                    'insert_duration_ms': insert_duration,
+                    'total_duration_ms': total_duration,
+                }
+            )
         except asyncpg.UniqueViolationError as e:
             # Raise custom exception for duplicate key violations
-            logger.warning(f"Duplicate event ID detected: {event_id}")
+            duration = int((time.time() - step_start) * 1000)
+            logger.warning(
+                f"Duplicate event ID detected: {event_id}",
+                extra={
+                    'event_id': event_id,
+                    'error_type': 'UniqueViolationError',
+                    'duration_ms': duration,
+                }
+            )
             raise DuplicateEventError(event_id, f"Event with ID '{event_id}' already exists") from e
+        except asyncpg.SerializationError as e:
+            # OC000 transaction conflict
+            duration = int((time.time() - step_start) * 1000)
+            sqlstate = getattr(e, 'sqlstate', None)
+            logger.warning(
+                f"OC000 transaction conflict during business_event insert",
+                extra={
+                    'event_id': event_id,
+                    'error_type': 'SerializationError',
+                    'sqlstate': sqlstate,
+                    'duration_ms': duration,
+                    'error': str(e)[:200],
+                }
+            )
+            raise
+        except Exception as e:
+            duration = int((time.time() - step_start) * 1000)
+            logger.error(
+                f"Error inserting business event",
+                extra={
+                    'event_id': event_id,
+                    'error_type': type(e).__name__,
+                    'duration_ms': duration,
+                    'error': str(e)[:200],
+                },
+                exc_info=True
+            )
+            raise

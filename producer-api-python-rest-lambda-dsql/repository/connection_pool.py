@@ -12,7 +12,7 @@ logger = logging.getLogger(__name__)
 
 async def get_connection(database_url_or_config: Union[str, LambdaConfig]) -> asyncpg.Connection:
     """
-    Get a direct database connection (no pooling).
+    Get a direct database connection (no pooling) with detailed logging.
     
     For Lambda workloads with single-event-per-invocation patterns, direct connections
     are simpler and avoid DSQL compatibility issues (e.g., pg_advisory_unlock_all).
@@ -25,6 +25,10 @@ async def get_connection(database_url_or_config: Union[str, LambdaConfig]) -> as
     Returns:
         asyncpg.Connection: Direct database connection
     """
+    import time
+    connection_start = time.time()
+    
+    logger.debug("Creating database connection...")
     config = database_url_or_config if isinstance(database_url_or_config, LambdaConfig) else None
     
     if config and config.use_iam_auth:
@@ -40,11 +44,25 @@ async def get_connection(database_url_or_config: Union[str, LambdaConfig]) -> as
         
         # Generate IAM token (uses cache, valid for 14 minutes)
         try:
+            import time
+            connection_start = time.time()
+            
+            token_start = time.time()
             iam_token = generate_iam_auth_token(
                 endpoint=dsql_endpoint,
                 port=config.aurora_dsql_port,
                 iam_username=config.iam_username,
                 region=config.aws_region
+            )
+            token_duration = int((time.time() - token_start) * 1000)
+            
+            logger.debug(
+                f"IAM token generated",
+                extra={
+                    'token_duration_ms': token_duration,
+                    'token_length': len(iam_token),
+                    'endpoint': dsql_endpoint,
+                }
             )
             
             # Use dsql_host for connection - ensures correct SNI and private DNS resolution
@@ -52,9 +70,18 @@ async def get_connection(database_url_or_config: Union[str, LambdaConfig]) -> as
             if not dsql_host:
                 raise ValueError("DSQL_HOST or AURORA_DSQL_ENDPOINT must be set for DSQL connections")
             
-            logger.info(f"Creating direct DSQL connection: host={dsql_host}, user={config.iam_username}, database={config.database_name}, token_length={len(iam_token)}")
+            logger.info(
+                f"Creating direct DSQL connection",
+                extra={
+                    'host': dsql_host,
+                    'user': config.iam_username,
+                    'database': config.database_name,
+                    'port': config.aurora_dsql_port,
+                }
+            )
             
             # Create direct connection (no pooling)
+            connect_start = time.time()
             conn = await asyncpg.connect(
                 host=dsql_host,  # Use direct endpoint - asyncpg will use this for SNI
                 port=config.aurora_dsql_port,
@@ -64,12 +91,32 @@ async def get_connection(database_url_or_config: Union[str, LambdaConfig]) -> as
                 ssl='require',  # DSQL requires SSL
                 command_timeout=30
             )
+            connect_duration = int((time.time() - connect_start) * 1000)
+            total_duration = int((time.time() - connection_start) * 1000)
             
-            logger.info("Direct DSQL connection created successfully")
+            logger.info(
+                f"Direct DSQL connection created successfully",
+                extra={
+                    'connection_id': id(conn),
+                    'connect_duration_ms': connect_duration,
+                    'total_duration_ms': total_duration,
+                    'host': dsql_host,
+                }
+            )
             return conn
             
         except Exception as e:
-            logger.error(f"Failed to create DSQL connection: {e}", exc_info=True)
+            total_duration = int((time.time() - connection_start) * 1000) if 'connection_start' in locals() else 0
+            logger.error(
+                f"Failed to create DSQL connection",
+                extra={
+                    'error': str(e),
+                    'error_type': type(e).__name__,
+                    'duration_ms': total_duration,
+                    'host': dsql_host if 'dsql_host' in locals() else 'unknown',
+                },
+                exc_info=True
+            )
             raise
     else:
         # Legacy password-based authentication

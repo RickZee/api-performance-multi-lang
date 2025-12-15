@@ -30,24 +30,6 @@ logger = logging.getLogger(__name__)
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Manage application lifespan - initialize and cleanup resources."""
-    print("LIFESPAN: Starting lifespan context manager", flush=True)
-    # #region agent log - Hypothesis F
-    import json
-    try:
-        lifespan_startup_loop = asyncio.get_running_loop()
-        print(f"LIFESPAN: Got loop {id(lifespan_startup_loop)}", flush=True)
-        with open('/Users/rickzakharov/dev/github/api-performance-multi-lang/.cursor/debug.log', 'a') as f:
-            f.write(json.dumps({"sessionId":"debug-session","runId":"run2","hypothesisId":"F,G,H,I","location":"app.py:lifespan","message":"Lifespan startup - entering","data":{"loop_id":id(lifespan_startup_loop),"loop_type":type(lifespan_startup_loop).__name__},"timestamp":int(__import__('time').time()*1000)})+'\n')
-        print("LIFESPAN: Instrumentation written", flush=True)
-    except Exception as e:
-        print(f"LIFESPAN: Error in instrumentation: {e}", flush=True)
-        try:
-            with open('/Users/rickzakharov/dev/github/api-performance-multi-lang/.cursor/debug.log', 'a') as f:
-                f.write(json.dumps({"sessionId":"debug-session","runId":"run2","hypothesisId":"ERROR","location":"app.py:lifespan","message":"Lifespan startup instrumentation error","data":{"error":str(e)},"timestamp":int(__import__('time').time()*1000)})+'\n')
-        except Exception as e2:
-            print(f"LIFESPAN: Failed to write error log: {e2}", flush=True)
-    # #endregion
-
     # Startup: Initialize service and connection pool in the application's event loop
     global _service
     try:
@@ -55,25 +37,12 @@ async def lifespan(app: FastAPI):
         startup_loop = asyncio.get_running_loop()
         logger.info(f"{API_NAME} Lifespan startup - event loop: {id(startup_loop)}")
 
-        # #region agent log - Hypothesis F
-        try:
-            with open('/Users/rickzakharov/dev/github/api-performance-multi-lang/.cursor/debug.log', 'a') as f:
-                f.write(json.dumps({"sessionId":"debug-session","runId":"run2","hypothesisId":"F","location":"app.py:lifespan","message":"Before get_service call","data":{"loop_id":id(startup_loop)},"timestamp":int(__import__('time').time()*1000)})+'\n')
-        except: pass
-        # #endregion
-
         _service = await get_service()
 
         # Store service in app.state for access
         app.state.service = _service
 
         logger.info(f"{API_NAME} Service initialized on startup (using direct connections)")
-        # #region agent log - Hypothesis F
-        try:
-            with open('/Users/rickzakharov/dev/github/api-performance-multi-lang/.cursor/debug.log', 'a') as f:
-                f.write(json.dumps({"sessionId":"debug-session","runId":"run2","hypothesisId":"F","location":"app.py:lifespan","message":"Lifespan startup complete","data":{"loop_id":id(startup_loop)},"timestamp":int(__import__('time').time()*1000)})+'\n')
-        except: pass
-        # #endregion
     except Exception as e:
         logger.error(f"{API_NAME} Failed to initialize service on startup: {e}", exc_info=True)
         raise
@@ -81,14 +50,6 @@ async def lifespan(app: FastAPI):
     yield
 
     # Shutdown: Clean up resources
-    # #region agent log - Hypothesis F
-    try:
-        lifespan_shutdown_loop = asyncio.get_running_loop()
-        with open('/Users/rickzakharov/dev/github/api-performance-multi-lang/.cursor/debug.log', 'a') as f:
-            f.write(json.dumps({"sessionId":"debug-session","runId":"run2","hypothesisId":"F","location":"app.py:lifespan","message":"Lifespan shutdown - entering","data":{"loop_id":id(lifespan_shutdown_loop)},"timestamp":int(__import__('time').time()*1000)})+'\n')
-    except: pass
-    # #endregion
-
     # No pool to close (using direct connections)
     _service = None
     logger.info(f"{API_NAME} Service cleaned up")
@@ -112,16 +73,6 @@ _service: EventProcessingService | None = None
 async def get_service() -> EventProcessingService:
     """Get or initialize service with connection pool (singleton pattern)."""
     global _service
-    
-    # #region agent log
-    import json
-    try:
-        current_loop = asyncio.get_running_loop()
-        loop_id = id(current_loop)
-        with open('/Users/rickzakharov/dev/github/api-performance-multi-lang/.cursor/debug.log', 'a') as f:
-            f.write(json.dumps({"sessionId":"debug-session","runId":"run1","hypothesisId":"A,B,C","location":"app.py:41","message":"get_service entry","data":{"loop_id":loop_id,"has_service":_service is not None},"timestamp":int(__import__('time').time()*1000)})+'\n')
-    except: pass
-    # #endregion
     
     if _service is None:
         _config = load_lambda_config()
@@ -182,16 +133,6 @@ async def process_event(event: Event):
             raise HTTPException(status_code=422, detail="Entity ID cannot be empty")
     
     logger.info(f"{API_NAME} Received event: {event.event_header.event_name}")
-    
-    # #region agent log
-    import json
-    try:
-        current_loop = asyncio.get_running_loop()
-        loop_id = id(current_loop)
-        with open('/Users/rickzakharov/dev/github/api-performance-multi-lang/.cursor/debug.log', 'a') as f:
-            f.write(json.dumps({"sessionId":"debug-session","runId":"run1","hypothesisId":"A,C","location":"app.py:107","message":"process_event handler entry","data":{"loop_id":loop_id,"event_name":event.event_header.event_name},"timestamp":int(__import__('time').time()*1000)})+'\n')
-    except: pass
-    # #endregion
     
     # Process event
     try:
