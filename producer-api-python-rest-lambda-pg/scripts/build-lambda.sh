@@ -16,12 +16,12 @@ rm -rf "$BUILD_DIR"
 mkdir -p "$PACKAGE_DIR"
 
 # Install dependencies to package directory
-# Use --platform to ensure Linux-compatible binaries for Lambda (runs on Amazon Linux)
-echo "Installing Python dependencies (Linux x86_64 for Lambda)..."
+# Use --platform to ensure Linux-compatible binaries for Lambda (runs on Amazon Linux ARM64)
+echo "Installing Python dependencies (Linux ARM64 for Lambda)..."
 # Create a temporary requirements file without editable installs
 TEMP_REQUIREMENTS=$(mktemp)
 grep -v "^-e" "$PROJECT_ROOT/requirements.txt" > "$TEMP_REQUIREMENTS" || cp "$PROJECT_ROOT/requirements.txt" "$TEMP_REQUIREMENTS"
-pip install -r "$TEMP_REQUIREMENTS" -t "$PACKAGE_DIR" --upgrade --platform manylinux2014_x86_64 --only-binary=:all: --python-version 3.11 --implementation cp || \
+pip install -r "$TEMP_REQUIREMENTS" -t "$PACKAGE_DIR" --upgrade --platform manylinux2014_aarch64 --only-binary=:all: --python-version 3.11 --implementation cp || \
 pip install -r "$TEMP_REQUIREMENTS" -t "$PACKAGE_DIR" --upgrade --no-binary=:all: || \
 pip install -r "$TEMP_REQUIREMENTS" -t "$PACKAGE_DIR" --upgrade
 rm -f "$TEMP_REQUIREMENTS"

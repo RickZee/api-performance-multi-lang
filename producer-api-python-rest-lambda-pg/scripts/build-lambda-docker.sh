@@ -16,12 +16,12 @@ rm -rf "$BUILD_DIR"
 mkdir -p "$PACKAGE_DIR"
 
 # Use Docker to build with Linux-compatible binaries
-# Use standard Python image to ensure we get Linux x86_64 binaries
-echo "Installing Python dependencies in Docker (Linux x86_64)..."
-docker run --rm --platform linux/amd64 -v "$PROJECT_ROOT:/var/task" -v "$PACKAGE_DIR:/package" \
+# Use standard Python image to ensure we get Linux ARM64 binaries
+echo "Installing Python dependencies in Docker (Linux ARM64)..."
+docker run --rm --platform linux/arm64 -v "$PROJECT_ROOT:/var/task" -v "$PACKAGE_DIR:/package" \
   python:3.11-slim \
   /bin/bash -c "
-    pip install -r /var/task/requirements.txt -t /package --upgrade --no-cache-dir --platform manylinux2014_x86_64 --only-binary=:all: || \
+    pip install -r /var/task/requirements.txt -t /package --upgrade --no-cache-dir --platform manylinux2014_aarch64 --only-binary=:all: || \
     pip install -r /var/task/requirements.txt -t /package --upgrade --no-cache-dir
   "
 

@@ -76,7 +76,7 @@ Resources:
       Handler: lambda_handler.handler
       Runtime: python3.11
       Architectures:
-        - x86_64
+        - arm64  # ARM64 (Graviton2) for 20% cost savings and better performance
       MemorySize: 512
       Timeout: 30
       Environment:

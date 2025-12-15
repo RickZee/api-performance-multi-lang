@@ -326,16 +326,17 @@ locals {
   )
 
   # Aurora instance class: db.t3.medium for dev (db.t3.small not supported for 15.14), db.r5.large for test
+  # Note: Can be overridden in terraform.tfvars (e.g., db.t4g.medium for ARM-based cost savings)
   aurora_instance_class = var.aurora_instance_class != null ? var.aurora_instance_class : (
     local.is_dev ? "db.t3.medium" : "db.r5.large"
   )
 }
 
-# Aurora Auto-Start Lambda (only for test environment, not dev)
+# Aurora Auto-Start Lambda (enabled for test and dev environments)
 # Starts Aurora cluster when invoked by API Lambda on connection failure
 # Defined before Python Lambda so it can be referenced in environment variables
 module "aurora_auto_start" {
-  count  = var.enable_aurora && local.is_test && var.enable_python_lambda_pg ? 1 : 0
+  count  = var.enable_aurora && (local.is_test || local.is_dev) && var.enable_python_lambda_pg ? 1 : 0
   source = "./modules/aurora-auto-start"
 
   function_name                  = "${var.project_name}-aurora-auto-start"
@@ -357,7 +358,7 @@ module "python_rest_lambda_pg" {
   s3_key                         = "python-rest-pg/lambda-deployment.zip"
   handler                        = "lambda_handler.handler"
   runtime                        = "python3.11"
-  architectures                  = ["x86_64"]
+  architectures                  = ["arm64"]  # ARM64 (Graviton2) for 20% cost savings and better performance
   memory_size                    = var.lambda_memory_size
   timeout                        = var.lambda_timeout
   log_level                      = var.log_level
@@ -375,7 +376,7 @@ module "python_rest_lambda_pg" {
   iam_database_user               = var.iam_database_user
   aurora_dsql_cluster_resource_id = var.aurora_dsql_cluster_resource_id
 
-  additional_environment_variables = var.enable_aurora && local.is_test && var.enable_python_lambda_pg ? {
+  additional_environment_variables = var.enable_aurora && (local.is_test || local.is_dev) && var.enable_python_lambda_pg ? {
     AURORA_AUTO_START_FUNCTION_NAME = module.aurora_auto_start[0].function_name
   } : {}
 
@@ -399,10 +400,10 @@ module "python_rest_lambda_pg" {
   tags = local.common_tags
 }
 
-# Aurora Auto-Stop Lambda (only for test environment, not dev)
+# Aurora Auto-Stop Lambda (enabled for test and dev environments)
 # Monitors API Gateway invocations and stops Aurora if no activity for 3 hours
 module "aurora_auto_stop" {
-  count  = var.enable_aurora && local.is_test && var.enable_python_lambda_pg ? 1 : 0
+  count  = var.enable_aurora && (local.is_test || local.is_dev) && var.enable_python_lambda_pg ? 1 : 0
   source = "./modules/aurora-auto-stop"
 
   function_name                  = "${var.project_name}-aurora-auto-stop"
@@ -418,7 +419,7 @@ module "aurora_auto_stop" {
 
 # IAM policy to allow Python Lambda to invoke auto-start Lambda
 resource "aws_iam_role_policy" "python_lambda_auto_start" {
-  count = var.enable_aurora && local.is_test && var.enable_python_lambda_pg ? 1 : 0
+  count = var.enable_aurora && (local.is_test || local.is_dev) && var.enable_python_lambda_pg ? 1 : 0
   name  = "${var.project_name}-python-lambda-auto-start-policy"
   role  = module.python_rest_lambda_pg[0].role_name
 
@@ -438,7 +439,7 @@ resource "aws_iam_role_policy" "python_lambda_auto_start" {
 
 # Lambda permission to allow Python Lambda to invoke auto-start Lambda
 resource "aws_lambda_permission" "aurora_auto_start_python_lambda" {
-  count         = var.enable_aurora && local.is_test && var.enable_python_lambda_pg ? 1 : 0
+  count         = var.enable_aurora && (local.is_test || local.is_dev) && var.enable_python_lambda_pg ? 1 : 0
   statement_id  = "AllowExecutionFromPythonLambda"
   action        = "lambda:InvokeFunction"
   function_name = module.aurora_auto_start[0].function_name
@@ -456,7 +457,7 @@ module "python_rest_lambda_dsql" {
   s3_key                         = "python-rest-dsql/lambda-deployment.zip"
   handler                        = "lambda_handler.handler"
   runtime                        = "python3.11"
-  architectures                  = ["x86_64"]
+  architectures                  = ["arm64"]  # ARM64 (Graviton2) for 20% cost savings and better performance
   memory_size                    = var.lambda_memory_size
   timeout                        = var.lambda_timeout
   log_level                      = var.log_level
