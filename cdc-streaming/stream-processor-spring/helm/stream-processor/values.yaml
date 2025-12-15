@@ -1,0 +1,126 @@
+replicaCount: 2
+
+image:
+  repository: stream-processor-spring
+  pullPolicy: IfNotPresent
+  tag: "1.0.0"
+
+imagePullSecrets: []
+nameOverride: ""
+fullnameOverride: ""
+
+serviceAccount:
+  create: true
+  annotations: {}
+  name: ""
+
+podAnnotations: {}
+
+podSecurityContext: {}
+  # fsGroup: 2000
+
+securityContext: {}
+  # capabilities:
+  #   drop:
+  #   - ALL
+  # readOnlyRootFilesystem: true
+  # runAsNonRoot: true
+  # runAsUser: 1000
+
+service:
+  type: ClusterIP
+  port: 8080
+  targetPort: 8080
+
+ingress:
+  enabled: false
+  className: ""
+  annotations: {}
+  hosts:
+    - host: stream-processor.local
+      paths:
+        - path: /
+          pathType: Prefix
+  tls: []
+
+resources:
+  limits:
+    cpu: 1000m
+    memory: 1Gi
+  requests:
+    cpu: 500m
+    memory: 512Mi
+
+autoscaling:
+  enabled: true
+  minReplicas: 2
+  maxReplicas: 5
+  targetCPUUtilizationPercentage: 70
+  targetMemoryUtilizationPercentage: 80
+
+nodeSelector: {}
+
+tolerations: []
+
+affinity: {}
+
+# Kafka configuration
+kafka:
+  bootstrapServers: ""
+  apiKey: ""
+  apiSecret: ""
+  securityProtocol: "SASL_SSL"
+  saslMechanism: "PLAIN"
+  sourceTopic: "raw-event-headers"
+
+# Environment variables
+env: []
+  # - name: CUSTOM_VAR
+  #   value: "custom-value"
+
+# ConfigMap for application configuration
+configMap:
+  enabled: true
+  data:
+    application.yml: |
+      spring:
+        kafka:
+          streams:
+            application-id: event-stream-processor
+            bootstrap-servers: ${KAFKA_BOOTSTRAP_SERVERS}
+            source-topic: ${SPRING_KAFKA_STREAMS_SOURCE_TOPIC}
+            properties:
+              security.protocol: ${KAFKA_SECURITY_PROTOCOL}
+              sasl.mechanism: ${KAFKA_SASL_MECHANISM}
+              sasl.jaas.config: >
+                org.apache.kafka.common.security.plain.PlainLoginModule required
+                username="${KAFKA_API_KEY}" password="${KAFKA_API_SECRET}";
+              processing.guarantee: exactly_once_v2
+              acks: all
+              retries: 2147483647
+              max.in.flight.requests.per.connection: 5
+              enable.idempotence: true
+              state.dir: /tmp/kafka-streams
+              replication.factor: 3
+              min.insync.replicas: 2
+      management:
+        endpoints:
+          web:
+            exposure:
+              include: health,info,metrics
+        endpoint:
+          health:
+            show-details: always
+        health:
+          kafka:
+            enabled: true
+          kafkastreams:
+            enabled: true
+
+# Secrets (should be created separately and referenced)
+secrets:
+  enabled: true
+  name: stream-processor-secrets
+  # Create secret with: kubectl create secret generic stream-processor-secrets \
+  #   --from-literal=kafka-api-key=xxx --from-literal=kafka-api-secret=yyy
+

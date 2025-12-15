@@ -4,9 +4,9 @@ import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
 from datetime import datetime
 
-from producer_api_shared.models import Event
-from producer_api_shared.service import EventProcessingService
-from producer_api_shared.repository import BusinessEventRepository, EntityRepository, EventHeaderRepository
+from producer_api_python_rest_lambda_shared.models import Event
+from producer_api_python_rest_lambda_shared.service import EventProcessingService
+from producer_api_python_rest_lambda_shared.repository import BusinessEventRepository, EntityRepository, EventHeaderRepository
 
 
 @pytest.fixture
@@ -89,7 +89,7 @@ class TestEventProcessingService:
     @pytest.mark.asyncio
     async def test_process_entity_update_new_entity(self, service, mock_connection):
         """Test processing a new entity (doesn't exist)."""
-        from producer_api_shared.models.event import EntityUpdate
+        from producer_api_python_rest_lambda_shared.models.event import EntityUpdate
         
         entity_update = EntityUpdate(
             entityType="Car",
@@ -115,7 +115,7 @@ class TestEventProcessingService:
     @pytest.mark.asyncio
     async def test_process_entity_update_existing_entity(self, service, mock_connection):
         """Test processing an existing entity (update)."""
-        from producer_api_shared.models.event import EntityUpdate
+        from producer_api_python_rest_lambda_shared.models.event import EntityUpdate
         
         entity_update = EntityUpdate(
             entityType="Car",
@@ -137,7 +137,7 @@ class TestEventProcessingService:
     @pytest.mark.asyncio
     async def test_create_new_entity_extracts_data(self, service, mock_connection):
         """Test create_new_entity extracts entity data correctly."""
-        from producer_api_shared.models.event import EntityUpdate
+        from producer_api_python_rest_lambda_shared.models.event import EntityUpdate
         
         entity_update = EntityUpdate(
             entityType="Car",
@@ -162,7 +162,7 @@ class TestEventProcessingService:
     @pytest.mark.asyncio
     async def test_update_existing_entity_extracts_data(self, service, mock_connection):
         """Test update_existing_entity extracts entity data correctly."""
-        from producer_api_shared.models.event import EntityUpdate
+        from producer_api_python_rest_lambda_shared.models.event import EntityUpdate
         
         entity_update = EntityUpdate(
             entityType="Car",

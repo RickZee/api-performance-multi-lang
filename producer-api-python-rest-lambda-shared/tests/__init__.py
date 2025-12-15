@@ -1,1 +1,1 @@
-"""Tests for producer-api-shared package."""
+"""Tests for producer-api-python-rest-lambda-shared package."""

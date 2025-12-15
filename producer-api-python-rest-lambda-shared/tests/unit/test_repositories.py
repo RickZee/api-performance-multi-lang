@@ -5,12 +5,12 @@ import json
 from unittest.mock import AsyncMock
 from datetime import datetime
 
-from producer_api_shared.repository import (
+from producer_api_python_rest_lambda_shared.repository import (
     EntityRepository,
     BusinessEventRepository,
     EventHeaderRepository
 )
-from producer_api_shared.exceptions import DuplicateEventError
+from producer_api_python_rest_lambda_shared.exceptions import DuplicateEventError
 
 
 class TestEntityRepository:

@@ -35,16 +35,16 @@ cp -r "$PROJECT_ROOT/models" "$PACKAGE_DIR/" 2>/dev/null || true
 cp -r "$PROJECT_ROOT/repository" "$PACKAGE_DIR/" 2>/dev/null || true
 cp -r "$PROJECT_ROOT/service" "$PACKAGE_DIR/" 2>/dev/null || true
 
-# Copy shared library (producer-api-shared)
-SHARED_LIB_DIR="$PROJECT_ROOT/../producer-api-shared"
+# Copy shared library (producer-api-python-rest-lambda-shared)
+SHARED_LIB_DIR="$PROJECT_ROOT/../producer-api-python-rest-lambda-shared"
 if [ -d "$SHARED_LIB_DIR" ]; then
-    echo "Copying shared library (producer-api-shared)..."
-    # Copy the producer_api_shared package directory
-    if [ -d "$SHARED_LIB_DIR/producer_api_shared" ]; then
-        cp -r "$SHARED_LIB_DIR/producer_api_shared" "$PACKAGE_DIR/" 2>/dev/null || true
-        echo "  Copied producer_api_shared package"
+    echo "Copying shared library (producer-api-python-rest-lambda-shared)..."
+    # Copy the producer_api_python_rest_lambda_shared package directory
+    if [ -d "$SHARED_LIB_DIR/producer_api_python_rest_lambda_shared" ]; then
+        cp -r "$SHARED_LIB_DIR/producer_api_python_rest_lambda_shared" "$PACKAGE_DIR/" 2>/dev/null || true
+        echo "  Copied producer_api_python_rest_lambda_shared package"
     else
-        echo "  Warning: producer_api_shared directory not found in $SHARED_LIB_DIR"
+        echo "  Warning: producer_api_python_rest_lambda_shared directory not found in $SHARED_LIB_DIR"
     fi
 else
     echo "Warning: Shared library directory not found: $SHARED_LIB_DIR"

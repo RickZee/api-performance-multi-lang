@@ -13,10 +13,10 @@ from fastapi.responses import JSONResponse
 
 from config import load_lambda_config
 from constants import API_NAME
-from producer_api_shared.models import Event
-from producer_api_shared.repository import BusinessEventRepository
-from producer_api_shared.exceptions import DuplicateEventError
-from producer_api_shared.service import EventProcessingService
+from producer_api_python_rest_lambda_shared.models import Event
+from producer_api_python_rest_lambda_shared.repository import BusinessEventRepository
+from producer_api_python_rest_lambda_shared.exceptions import DuplicateEventError
+from producer_api_python_rest_lambda_shared.service import EventProcessingService
 from repository import get_connection
 
 # Configure logging

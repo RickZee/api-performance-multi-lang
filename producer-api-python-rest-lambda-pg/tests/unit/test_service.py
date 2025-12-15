@@ -4,9 +4,9 @@ import pytest
 from unittest.mock import AsyncMock, MagicMock
 from datetime import datetime
 
-from producer_api_shared.models import Event
-from producer_api_shared.service import EventProcessingService
-from producer_api_shared.repository import BusinessEventRepository, EntityRepository
+from producer_api_python_rest_lambda_shared.models import Event
+from producer_api_python_rest_lambda_shared.service import EventProcessingService
+from producer_api_python_rest_lambda_shared.repository import BusinessEventRepository, EntityRepository
 
 
 @pytest.fixture

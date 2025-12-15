@@ -1,0 +1,52 @@
+spring:
+  application:
+    name: stream-processor-spring
+  
+  kafka:
+    streams:
+      application-id: event-stream-processor
+      bootstrap-servers: ${KAFKA_BOOTSTRAP_SERVERS:localhost:9092}
+      source-topic: ${SPRING_KAFKA_STREAMS_SOURCE_TOPIC:raw-event-headers}
+      properties:
+        # Confluent Cloud SASL_SSL configuration
+        security.protocol: ${KAFKA_SECURITY_PROTOCOL:SASL_SSL}
+        sasl.mechanism: ${KAFKA_SASL_MECHANISM:PLAIN}
+        sasl.jaas.config: >
+          org.apache.kafka.common.security.plain.PlainLoginModule required
+          username="${KAFKA_API_KEY:}" password="${KAFKA_API_SECRET:}";
+        # Exactly-once semantics
+        processing.guarantee: exactly_once_v2
+        # Consumer settings
+        default.key.serde: org.apache.kafka.common.serialization.Serdes$StringSerde
+        default.value.serde: com.example.streamprocessor.serde.EventHeaderSerde
+        # Producer settings
+        acks: all
+        retries: 2147483647
+        max.in.flight.requests.per.connection: 5
+        enable.idempotence: true
+        # State store settings
+        state.dir: /tmp/kafka-streams
+        # Replication factor for internal topics
+        replication.factor: 3
+        min.insync.replicas: 2
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics
+  endpoint:
+    health:
+      show-details: always
+  health:
+    kafka:
+      enabled: true
+    kafkastreams:
+      enabled: true
+
+logging:
+  level:
+    com.example.streamprocessor: INFO
+    org.apache.kafka: WARN
+    org.springframework.kafka: INFO
+

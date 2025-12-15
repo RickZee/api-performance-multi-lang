@@ -4,7 +4,7 @@ import pytest
 from datetime import datetime
 from pydantic import ValidationError
 
-from producer_api_shared.models import Event, EventHeader
+from producer_api_python_rest_lambda_shared.models import Event, EventHeader
 
 
 class TestEventHeader:

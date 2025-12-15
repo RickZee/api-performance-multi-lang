@@ -7,7 +7,7 @@ uvicorn[standard]>=0.24.0
 tenacity>=8.2.0  # Retry library with exponential backoff and jitter
 
 # Shared library (editable install for local development)
--e ../producer-api-shared
+-e ../producer-api-python-rest-lambda-shared
 
 # Testing dependencies
 pytest>=7.4.0

@@ -21,9 +21,9 @@ import os
 from datetime import datetime
 from typing import Optional
 
-from producer_api_shared.models import Event
-from producer_api_shared.service import EventProcessingService
-from producer_api_shared.repository import BusinessEventRepository
+from producer_api_python_rest_lambda_shared.models import Event
+from producer_api_python_rest_lambda_shared.service import EventProcessingService
+from producer_api_python_rest_lambda_shared.repository import BusinessEventRepository
 from repository import get_connection
 
 pytestmark = pytest.mark.database

@@ -11,7 +11,7 @@ This package contains common business logic, models, repositories, and services 
 ## Structure
 
 ```
-producer_api_shared/
+producer_api_python_rest_lambda_shared/
 ├── models/           # Pydantic models (Event, EventHeader, EventBody, CarEntity)
 ├── exceptions.py    # Shared exceptions (DuplicateEventError)
 ├── constants.py     # Shared constants (ENTITY_TABLE_MAP, retry configs)
@@ -55,19 +55,19 @@ The service automatically handles cleanup:
 For local development, install as an editable package:
 
 ```bash
-pip install -e ../producer-api-shared
+pip install -e ../producer-api-python-rest-lambda-shared
 ```
 
 Or add to `requirements.txt`:
 ```
--e ../producer-api-shared
+-e ../producer-api-python-rest-lambda-shared
 ```
 
 ## Usage
 
 ### Models
 ```python
-from producer_api_shared.models import Event, EventHeader, EventBody
+from producer_api_python_rest_lambda_shared.models import Event, EventHeader, EventBody
 
 event = Event(
     eventHeader=EventHeader(eventName="CarCreated", ...),
@@ -77,7 +77,7 @@ event = Event(
 
 ### Repositories
 ```python
-from producer_api_shared.repository import BusinessEventRepository
+from producer_api_python_rest_lambda_shared.repository import BusinessEventRepository
 
 repo = BusinessEventRepository()
 await repo.create(
@@ -90,8 +90,8 @@ await repo.create(
 
 ### Service
 ```python
-from producer_api_shared.service import EventProcessingService
-from producer_api_shared.repository import BusinessEventRepository
+from producer_api_python_rest_lambda_shared.service import EventProcessingService
+from producer_api_python_rest_lambda_shared.repository import BusinessEventRepository
 
 # Create connection factory
 async def connection_factory():

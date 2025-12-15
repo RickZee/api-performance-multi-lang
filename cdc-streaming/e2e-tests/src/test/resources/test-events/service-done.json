@@ -1,0 +1,12 @@
+{
+  "id": "test-service-001",
+  "event_name": "CarServiceDone",
+  "event_type": "CarServiceDone",
+  "created_date": "2024-01-15T10:30:00Z",
+  "saved_date": "2024-01-15T10:30:05Z",
+  "header_data": "{\"uuid\":\"test-service-001\",\"eventName\":\"CarServiceDone\",\"eventType\":\"CarServiceDone\",\"createdDate\":\"2024-01-15T10:30:00Z\",\"savedDate\":\"2024-01-15T10:30:05Z\"}",
+  "__op": "c",
+  "__table": "event_headers",
+  "__ts_ms": 1705312205000
+}
+

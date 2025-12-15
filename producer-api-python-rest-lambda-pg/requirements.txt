@@ -6,4 +6,4 @@ uvicorn[standard]>=0.24.0
 httpx>=0.25.0
 
 # Shared library (editable install for local development)
--e ../producer-api-shared
+-e ../producer-api-python-rest-lambda-shared

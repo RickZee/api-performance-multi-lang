@@ -65,25 +65,45 @@ fi
 
 print_info "Using S3 bucket: $BUCKET_NAME"
 
-# Build Python REST Lambda function
-print_info "Building Python REST Lambda function..."
+# Build Python REST Lambda PG function
+print_info "Building Python REST Lambda PG function..."
 cd "$PROJECT_ROOT/producer-api-python-rest-lambda-pg"
 if [ -f "scripts/build-lambda.sh" ]; then
     bash scripts/build-lambda.sh
     if [ -f "lambda-deployment.zip" ]; then
-        print_info "Uploading Python REST Lambda to S3..."
+        print_info "Uploading Python REST Lambda PG to S3..."
         aws s3 cp lambda-deployment.zip "s3://${BUCKET_NAME}/python-rest-pg/lambda-deployment.zip"
-        print_info "Python REST Lambda uploaded successfully"
+        print_info "Python REST Lambda PG uploaded successfully"
         # Clean up local zip file
         rm -f lambda-deployment.zip
     else
-        print_error "Python REST Lambda deployment package not found"
+        print_error "Python REST Lambda PG deployment package not found"
         exit 1
     fi
 else
-    print_error "Python REST Lambda build script not found"
+    print_error "Python REST Lambda PG build script not found"
     exit 1
 fi
 
-print_info "Python REST Lambda function built and uploaded successfully!"
+# Build Python REST Lambda DSQL function
+print_info "Building Python REST Lambda DSQL function..."
+cd "$PROJECT_ROOT/producer-api-python-rest-lambda-dsql"
+if [ -f "scripts/build-lambda.sh" ]; then
+    bash scripts/build-lambda.sh
+    if [ -f "lambda-deployment.zip" ]; then
+        print_info "Uploading Python REST Lambda DSQL to S3..."
+        aws s3 cp lambda-deployment.zip "s3://${BUCKET_NAME}/python-rest-dsql/lambda-deployment.zip"
+        print_info "Python REST Lambda DSQL uploaded successfully"
+        # Clean up local zip file
+        rm -f lambda-deployment.zip
+    else
+        print_error "Python REST Lambda DSQL deployment package not found"
+        exit 1
+    fi
+else
+    print_error "Python REST Lambda DSQL build script not found"
+    exit 1
+fi
+
+print_info "All Python REST Lambda functions built and uploaded successfully!"
 

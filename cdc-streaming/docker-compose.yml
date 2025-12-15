@@ -64,6 +64,36 @@ services:
     networks:
       - cdc-network
 
+  # Spring Boot Stream Processor
+  # Alternative to Flink for event filtering and routing
+  stream-processor:
+    build:
+      context: ./stream-processor-spring
+      dockerfile: Dockerfile
+    container_name: cdc-stream-processor
+    hostname: stream-processor
+    environment:
+      # Set KAFKA_BOOTSTRAP_SERVERS to your Confluent Cloud bootstrap servers
+      # Example: pkc-xxxxx.us-east-1.aws.confluent.cloud:9092
+      KAFKA_BOOTSTRAP_SERVERS: ${KAFKA_BOOTSTRAP_SERVERS}
+      KAFKA_API_KEY: ${KAFKA_API_KEY:-}
+      KAFKA_API_SECRET: ${KAFKA_API_SECRET:-}
+      KAFKA_SECURITY_PROTOCOL: ${KAFKA_SECURITY_PROTOCOL:-SASL_SSL}
+      KAFKA_SASL_MECHANISM: ${KAFKA_SASL_MECHANISM:-PLAIN}
+      # Spring Kafka Streams configuration
+      SPRING_KAFKA_STREAMS_SOURCE_TOPIC: raw-event-headers
+    ports:
+      - "8083:8080"  # Actuator health endpoint
+    networks:
+      - cdc-network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/actuator/health"]
+      interval: 30s
+      timeout: 3s
+      start_period: 40s
+      retries: 3
+
   # Loan Consumer
   loan-consumer:
     build:

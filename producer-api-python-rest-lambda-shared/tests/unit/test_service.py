@@ -4,9 +4,9 @@ import pytest
 from unittest.mock import AsyncMock, MagicMock
 from datetime import datetime
 
-from producer_api_shared.models import Event
-from producer_api_shared.service import EventProcessingService
-from producer_api_shared.repository import BusinessEventRepository, EntityRepository
+from producer_api_python_rest_lambda_shared.models import Event
+from producer_api_python_rest_lambda_shared.service import EventProcessingService
+from producer_api_python_rest_lambda_shared.repository import BusinessEventRepository, EntityRepository
 
 
 @pytest.fixture
@@ -99,7 +99,7 @@ class TestEventProcessingService:
     @pytest.mark.asyncio
     async def test_process_entity_update_new_entity(self, service, mock_connection):
         """Test processing a new entity (doesn't exist)."""
-        from producer_api_shared.models.event import EntityUpdate
+        from producer_api_python_rest_lambda_shared.models.event import EntityUpdate
         
         entity_update = EntityUpdate(
             entityType="Car",
@@ -122,7 +122,7 @@ class TestEventProcessingService:
     @pytest.mark.asyncio
     async def test_process_entity_update_existing_entity(self, service, mock_connection):
         """Test processing an existing entity (update)."""
-        from producer_api_shared.models.event import EntityUpdate
+        from producer_api_python_rest_lambda_shared.models.event import EntityUpdate
         
         entity_update = EntityUpdate(
             entityType="Car",
