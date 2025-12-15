@@ -42,3 +42,14 @@ variable "tags" {
   default     = {}
 }
 
+variable "admin_email" {
+  description = "Admin email address for Aurora auto-stop notifications (optional, leave empty to disable notifications)"
+  type        = string
+  default     = ""
+
+  validation {
+    condition     = var.admin_email == "" || can(regex("^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,}$", var.admin_email))
+    error_message = "Admin email must be a valid email address or empty string to disable notifications."
+  }
+}
+

@@ -80,6 +80,23 @@ log_level    = "info"
 # lambda_memory_size = 512
 # lambda_timeout     = 30
 
+# Aurora Auto-Stop Email Notifications
+# =====================================
+# Optional: Receive email notifications when Aurora cluster is automatically stopped
+# due to inactivity. Leave empty or omit to disable email notifications.
+#
+# aurora_auto_stop_admin_email = "admin@example.com"
+#
+# Important: After setting this and running terraform apply, AWS SNS will send
+# a confirmation email to the provided address. You must click the confirmation
+# link in that email before notifications will be sent. This is a one-time setup.
+#
+# The notification email will include:
+# - Cluster ID
+# - Timestamp when stopped
+# - Reason (inactivity duration)
+# - AWS region
+
 # S3 bucket name (optional, will be auto-generated if not provided)
 # s3_bucket_name = ""
 
