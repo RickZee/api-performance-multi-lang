@@ -104,7 +104,10 @@ async def get_connection(database_url_or_config: Union[str, LambdaConfig]) -> as
                     'connect_duration_ms': connect_duration,
                     'total_duration_ms': total_duration,
                     'host': dsql_host,
+<<<<<<< HEAD
                     'search_path': 'car_entities_schema',
+=======
+>>>>>>> 437618cdc0389cc9af0651cecbab072c0888a1cb
                 }
             )
             return conn

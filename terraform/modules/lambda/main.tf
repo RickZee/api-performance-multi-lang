@@ -187,6 +187,12 @@ resource "aws_lambda_function" "this" {
     target_arn = var.enable_dlq ? aws_sqs_queue.lambda_dlq[0].arn : null
   }
 
+  reserved_concurrent_executions = var.reserved_concurrent_executions
+
+  dead_letter_config {
+    target_arn = var.enable_dlq ? aws_sqs_queue.lambda_dlq[0].arn : null
+  }
+
   environment {
     variables = merge(
       {
