@@ -12,10 +12,18 @@
 -- Uses IF NOT EXISTS to avoid dropping/recreating tables
 
 -- ============================================================================
+-- Create Schema
+-- ============================================================================
+CREATE SCHEMA IF NOT EXISTS car_entities_schema;
+
+-- Set search path to use car_entities_schema
+SET search_path TO car_entities_schema;
+
+-- ============================================================================
 -- Business Events Table
 -- Stores complete events with eventHeader fields as columns and full event JSON
 -- ============================================================================
-CREATE TABLE IF NOT EXISTS business_events (
+CREATE TABLE IF NOT EXISTS car_entities_schema.business_events (
     id VARCHAR(255) PRIMARY KEY,  -- from eventHeader.uuid
     event_name VARCHAR(255) NOT NULL,  -- from eventHeader.eventName
     event_type VARCHAR(255),  -- from eventHeader.eventType
@@ -29,7 +37,7 @@ CREATE TABLE IF NOT EXISTS business_events (
 -- Stores event header data with hybrid structure (relational columns + TEXT JSON)
 -- Note: Foreign key removed - DSQL doesn't support FOREIGN KEY constraints
 -- ============================================================================
-CREATE TABLE IF NOT EXISTS event_headers (
+CREATE TABLE IF NOT EXISTS car_entities_schema.event_headers (
     id VARCHAR(255) PRIMARY KEY,  -- from eventHeader.uuid (same as business_events.id)
     event_name VARCHAR(255) NOT NULL,  -- from eventHeader.eventName
     event_type VARCHAR(255),  -- from eventHeader.eventType
@@ -46,7 +54,7 @@ CREATE TABLE IF NOT EXISTS event_headers (
 -- ============================================================================
 
 -- Car Entities Table
-CREATE TABLE IF NOT EXISTS car_entities (
+CREATE TABLE IF NOT EXISTS car_entities_schema.car_entities (
     entity_id VARCHAR(255) PRIMARY KEY,  -- from entityHeader.entityId
     entity_type VARCHAR(255) NOT NULL,  -- from entityHeader.entityType
     created_at TIMESTAMP WITH TIME ZONE,  -- from entityHeader.createdAt
@@ -56,7 +64,7 @@ CREATE TABLE IF NOT EXISTS car_entities (
 );
 
 -- Loan Entities Table
-CREATE TABLE IF NOT EXISTS loan_entities (
+CREATE TABLE IF NOT EXISTS car_entities_schema.loan_entities (
     entity_id VARCHAR(255) PRIMARY KEY,  -- from entityHeader.entityId
     entity_type VARCHAR(255) NOT NULL,  -- from entityHeader.entityType
     created_at TIMESTAMP WITH TIME ZONE,  -- from entityHeader.createdAt
@@ -66,7 +74,7 @@ CREATE TABLE IF NOT EXISTS loan_entities (
 );
 
 -- Loan Payment Entities Table
-CREATE TABLE IF NOT EXISTS loan_payment_entities (
+CREATE TABLE IF NOT EXISTS car_entities_schema.loan_payment_entities (
     entity_id VARCHAR(255) PRIMARY KEY,  -- from entityHeader.entityId
     entity_type VARCHAR(255) NOT NULL,  -- from entityHeader.entityType
     created_at TIMESTAMP WITH TIME ZONE,  -- from entityHeader.createdAt
@@ -76,7 +84,7 @@ CREATE TABLE IF NOT EXISTS loan_payment_entities (
 );
 
 -- Service Record Entities Table
-CREATE TABLE IF NOT EXISTS service_record_entities (
+CREATE TABLE IF NOT EXISTS car_entities_schema.service_record_entities (
     entity_id VARCHAR(255) PRIMARY KEY,  -- from entityHeader.entityId
     entity_type VARCHAR(255) NOT NULL,  -- from entityHeader.entityType
     created_at TIMESTAMP WITH TIME ZONE,  -- from entityHeader.createdAt
@@ -88,4 +96,5 @@ CREATE TABLE IF NOT EXISTS service_record_entities (
 -- Grant permissions to lambda_dsql_user
 -- Note: User must be created separately via admin connection
 -- DSQL doesn't support ALTER DEFAULT PRIVILEGES, so we only grant on existing tables
-GRANT ALL PRIVILEGES ON ALL TABLES IN SCHEMA public TO lambda_dsql_user;
+GRANT ALL PRIVILEGES ON ALL TABLES IN SCHEMA car_entities_schema TO lambda_dsql_user;
+GRANT USAGE ON SCHEMA car_entities_schema TO lambda_dsql_user;

@@ -89,7 +89,10 @@ async def get_connection(database_url_or_config: Union[str, LambdaConfig]) -> as
                 password=iam_token,  # Presigned URL query string (pass directly, no encoding/decoding)
                 database=config.database_name,
                 ssl='require',  # DSQL requires SSL
-                command_timeout=30
+                command_timeout=30,
+                server_settings={
+                    'search_path': 'car_entities_schema'
+                }
             )
             connect_duration = int((time.time() - connect_start) * 1000)
             total_duration = int((time.time() - connection_start) * 1000)
@@ -101,6 +104,7 @@ async def get_connection(database_url_or_config: Union[str, LambdaConfig]) -> as
                     'connect_duration_ms': connect_duration,
                     'total_duration_ms': total_duration,
                     'host': dsql_host,
+                    'search_path': 'car_entities_schema',
                 }
             )
             return conn
