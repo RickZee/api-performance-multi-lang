@@ -194,37 +194,38 @@ if [ -f "$PROJECT_ROOT/scripts/query-dsql.sh" ]; then
                         --region "$AWS_REGION" 2>&1 | jq -r '.StandardErrorContent // .Status' 2>&1)
                     # Check if it's the transaction row limit error
                     if echo "$ERROR" | grep -q "transaction row limit exceeded"; then
-                        echo -e "    ${YELLOW}⚠️  $TABLE has too many rows, deleting in batches...${NC}"
-                        # Delete in batches of 1000 rows
-                        BATCH_SIZE=1000
-                        TOTAL_DELETED=0
-                        while true; do
-                            BATCH_COMMANDS_JSON=$(jq -n \
-                                --arg dsql_host "$DSQL_HOST" \
-                                --arg aws_region "$AWS_REGION" \
-                                --arg table "$TABLE" \
-                                --arg batch_size "$BATCH_SIZE" \
-                                '[
-                                    "export DSQL_HOST=" + $dsql_host,
-                                    "export AWS_REGION=" + $aws_region,
-                                    "TOKEN=$(aws dsql generate-db-connect-admin-auth-token --region $AWS_REGION --hostname $DSQL_HOST)",
-                                    "export PGPASSWORD=$TOKEN",
-                                    "psql -h $DSQL_HOST -U admin -d postgres -p 5432 -c \"DELETE FROM " + $table + " WHERE ctid IN (SELECT ctid FROM " + $table + " LIMIT " + $batch_size + ");\""
-                                ]')
-                            
-                            BATCH_COMMAND_ID=$(aws ssm send-command \
-                                --instance-ids "$BASTION_INSTANCE_ID" \
-                                --region "$AWS_REGION" \
-                                --document-name "AWS-RunShellScript" \
-                                --parameters "{\"commands\":$BATCH_COMMANDS_JSON}" \
-                                --output json 2>&1 | jq -r '.Command.CommandId' 2>&1)
-                            
-                            if [ -z "$BATCH_COMMAND_ID" ] || [ "$BATCH_COMMAND_ID" = "null" ]; then
-                                echo -e "      ${RED}❌ Failed to send batch delete command${NC}"
-                                break
-                            fi
-                            
-                            sleep 10
+                        echo -e "    ${YELLOW}⚠️  $TABLE has too many rows, deleting in batches using DO block...${NC}"
+                        # Use DO block with id-based deletion (DSQL doesn't support ctid)
+                        # Delete in batches of 500 rows (well under 3000 limit)
+                        BATCH_SIZE=500
+                        BATCH_DELETE_SQL="DO \$\$ DECLARE deleted_count INTEGER := 1; total_deleted INTEGER := 0; batch_size INTEGER := $BATCH_SIZE; BEGIN WHILE deleted_count > 0 LOOP EXECUTE format('DELETE FROM %I WHERE id IN (SELECT id FROM %I LIMIT %s)', '$TABLE', '$TABLE', batch_size); GET DIAGNOSTICS deleted_count = ROW_COUNT; total_deleted := total_deleted + deleted_count; EXIT WHEN deleted_count = 0; IF total_deleted > 1000000 THEN RAISE NOTICE 'Deleted % rows, stopping', total_deleted; EXIT; END IF; END LOOP; RAISE NOTICE 'Total rows deleted: %', total_deleted; END \$\$;"
+                        
+                        # Escape the SQL properly for JSON
+                        ESCAPED_BATCH_SQL=$(echo "$BATCH_DELETE_SQL" | sed "s/'/'\"'\"'/g" | sed 's/\$/\\$/g' | tr '\n' ' ')
+                        
+                        BATCH_COMMANDS_JSON=$(jq -n \
+                            --arg dsql_host "$DSQL_HOST" \
+                            --arg aws_region "$AWS_REGION" \
+                            --arg sql "$ESCAPED_BATCH_SQL" \
+                            '[
+                                "export DSQL_HOST=" + $dsql_host,
+                                "export AWS_REGION=" + $aws_region,
+                                "TOKEN=$(aws dsql generate-db-connect-admin-auth-token --region $AWS_REGION --hostname $DSQL_HOST)",
+                                "export PGPASSWORD=$TOKEN",
+                                "psql -h $DSQL_HOST -U admin -d postgres -p 5432 -c \u0027" + $sql + "\u0027"
+                            ]')
+                        
+                        BATCH_COMMAND_ID=$(aws ssm send-command \
+                            --instance-ids "$BASTION_INSTANCE_ID" \
+                            --region "$AWS_REGION" \
+                            --document-name "AWS-RunShellScript" \
+                            --parameters "{\"commands\":$BATCH_COMMANDS_JSON}" \
+                            --output json 2>&1 | jq -r '.Command.CommandId' 2>&1)
+                        
+                        if [ -z "$BATCH_COMMAND_ID" ] || [ "$BATCH_COMMAND_ID" = "null" ]; then
+                            echo -e "      ${RED}❌ Failed to send batch delete command${NC}"
+                        else
+                            sleep 30  # Give more time for batch operations
                             
                             BATCH_STATUS=$(aws ssm get-command-invocation \
                                 --command-id "$BATCH_COMMAND_ID" \
@@ -240,33 +241,15 @@ if [ -f "$PROJECT_ROOT/scripts/query-dsql.sh" ]; then
                                     --region "$AWS_REGION" \
                                     --query "StandardOutputContent" \
                                     --output text 2>&1)
-                                BATCH_DELETED=$(echo "$BATCH_OUTPUT" | sed -n 's/.*DELETE \([0-9]*\).*/\1/p' | head -1 || echo "0")
-                                if [ "$BATCH_DELETED" = "0" ]; then
-                                    break  # No more rows to delete
-                                fi
-                                TOTAL_DELETED=$((TOTAL_DELETED + BATCH_DELETED))
-                                echo "      Deleted batch: $BATCH_DELETED rows (total: $TOTAL_DELETED)"
+                                TOTAL_DELETED=$(echo "$BATCH_OUTPUT" | sed -n 's/.*Total rows deleted: \([0-9]*\).*/\1/p' | head -1 || echo "unknown")
+                                echo -e "    ${GREEN}✅ Cleared $TABLE ($TOTAL_DELETED rows)${NC}"
                             else
                                 BATCH_ERROR=$(aws ssm get-command-invocation \
                                     --command-id "$BATCH_COMMAND_ID" \
                                     --instance-id "$BASTION_INSTANCE_ID" \
                                     --region "$AWS_REGION" 2>&1 | jq -r '.StandardErrorContent // .Status' 2>&1)
-                                if echo "$BATCH_ERROR" | grep -q "transaction row limit exceeded"; then
-                                    echo -e "      ${YELLOW}⚠️  Batch too large, reducing batch size...${NC}"
-                                    BATCH_SIZE=$((BATCH_SIZE / 2))
-                                    if [ "$BATCH_SIZE" -lt 100 ]; then
-                                        echo -e "      ${RED}❌ Cannot clear $TABLE (batch size too small)${NC}"
-                                        break
-                                    fi
-                                    continue
-                                else
-                                    echo -e "      ${RED}❌ Batch delete failed: $BATCH_ERROR${NC}"
-                                    break
-                                fi
+                                echo -e "    ${YELLOW}⚠️  Batch delete had issues: $BATCH_ERROR${NC}"
                             fi
-                        done
-                        if [ "$TOTAL_DELETED" -gt 0 ]; then
-                            echo -e "    ${GREEN}✅ Cleared $TABLE ($TOTAL_DELETED total rows)${NC}"
                         fi
                     else
                         echo -e "    ${RED}❌ Failed to clear $TABLE: $ERROR${NC}"

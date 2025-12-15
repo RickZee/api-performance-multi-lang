@@ -48,7 +48,7 @@ Globals:
     MemorySize: 512
     Runtime: provided.al2023
     Architectures:
-      - x86_64
+      - arm64  # ARM64 (Graviton2) for 20% cost savings and better performance
     Environment:
       Variables:
         LOG_LEVEL: !Ref LogLevel

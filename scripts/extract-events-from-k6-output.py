@@ -29,22 +29,54 @@ def extract_events(input_file=None, output_file=None):
             start_idx = line.find('K6_EVENT: ')
             if start_idx != -1:
                 json_start = start_idx + len('K6_EVENT: ')
-                source_idx = line.find('" source', json_start)
-                if source_idx != -1:
-                    event_json = line[json_start:source_idx].strip().rstrip('"')
+                # Try to find the end of JSON - look for common patterns
+                # k6 might append " source=..." or just end the line
+                event_json = None
+                
+                # Try to find end markers
+                for end_marker in ['" source', ' source=', '\n', '\r']:
+                    end_idx = line.find(end_marker, json_start)
+                    if end_idx != -1:
+                        event_json = line[json_start:end_idx].strip().rstrip('"').rstrip("'")
+                        break
+                
+                # If no end marker found, take the rest of the line
+                if event_json is None:
+                    event_json = line[json_start:].strip().rstrip('"').rstrip("'")
+                
+                # Try parsing the JSON
+                if event_json:
                     try:
                         # Try parsing directly first
                         event = json.loads(event_json)
-                        events.append(event)
+                        # Only include successful events (status 200) for validation
+                        # Other statuses (409, 500, etc.) are logged but not validated
+                        if event.get('success', event.get('status') == 200):
+                            events.append(event)
                     except json.JSONDecodeError:
                         # If that fails, try unescaping (for escaped quotes)
                         try:
                             decoded = codecs.decode(event_json, 'unicode_escape')
                             event = json.loads(decoded)
-                            events.append(event)
+                            # Only include successful events (status 200) for validation
+                            if event.get('success', event.get('status') == 200):
+                                events.append(event)
                         except (json.JSONDecodeError, UnicodeDecodeError):
-                            # Skip invalid JSON
-                            pass
+                            # Try removing any trailing non-JSON text
+                            try:
+                                # Find the last } and take everything up to it
+                                last_brace = event_json.rfind('}')
+                                if last_brace != -1:
+                                    event_json_clean = event_json[:last_brace + 1]
+                                    event = json.loads(event_json_clean)
+                                    # Only include successful events (status 200) for validation
+                                    if event.get('success', event.get('status') == 200):
+                                        events.append(event)
+                            except (json.JSONDecodeError, ValueError):
+                                # Skip invalid JSON - log for debugging
+                                if input_file:  # Only log when reading from file to avoid spam
+                                    print(f"⚠️  Skipped invalid JSON: {event_json[:100]}...", file=sys.stderr)
+                                pass
     
     # Write events to file
     if output_file:
@@ -52,7 +84,13 @@ def extract_events(input_file=None, output_file=None):
             json.dump(events, f, indent=2)
         
         if events:
-            print(f"✅ Extracted {len(events)} events to: {output_file}", file=sys.stderr)
+            # Count successful vs total if status info is available
+            successful = sum(1 for e in events if e.get('success', e.get('status') == 200))
+            total_in_file = len(events)
+            if successful < total_in_file:
+                print(f"✅ Extracted {successful} successful events (filtered from {total_in_file} total) to: {output_file}", file=sys.stderr)
+            else:
+                print(f"✅ Extracted {len(events)} events to: {output_file}", file=sys.stderr)
         else:
             print("⚠️  No valid events found in output", file=sys.stderr)
     

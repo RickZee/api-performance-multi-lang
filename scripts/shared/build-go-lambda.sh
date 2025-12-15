@@ -61,9 +61,9 @@ if [ "$GENERATE_PROTO" = true ]; then
     fi
 fi
 
-# Build for Linux (Lambda runs on Amazon Linux)
-echo "Compiling Go binary for Linux..."
-GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build \
+# Build for Linux ARM64 (Lambda runs on Amazon Linux ARM64/Graviton2)
+echo "Compiling Go binary for Linux ARM64..."
+GOOS=linux GOARCH=arm64 CGO_ENABLED=0 go build \
   -tags lambda.norpc \
   -o "$BUILD_DIR/bootstrap" \
   "$LAMBDA_DIR/main.go"

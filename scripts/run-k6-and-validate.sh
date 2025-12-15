@@ -14,6 +14,31 @@ YELLOW='\033[1;33m'
 BLUE='\033[0;34m'
 NC='\033[0m'
 
+# Helper Functions
+format_duration() {
+    local seconds=$1
+    local hours=$((seconds / 3600))
+    local minutes=$(((seconds % 3600) / 60))
+    local secs=$((seconds % 60))
+    local result=""
+    [ $hours -gt 0 ] && result="${hours}h "
+    [ $minutes -gt 0 ] && result="${result}${minutes}m "
+    [ $secs -gt 0 ] && result="${result}${secs}s"
+    echo "${result:-0s}"
+}
+
+log_with_timestamp() {
+    local message="$1"
+    local timestamp=$(date '+%Y-%m-%d %H:%M:%S')
+    echo -e "[$timestamp] $message"
+}
+
+log_progress() {
+    local message="$1"
+    local color="${2:-$BLUE}"
+    log_with_timestamp "$(echo -e "${color}${message}${NC}")"
+}
+
 # Configuration
 DB_TYPE=${1:-pg}
 EVENTS_PER_TYPE=${2:-10}
@@ -79,14 +104,16 @@ k6 run \
     --env TOTAL_VUS=$VUS \
     --env EVENTS_FILE="$EVENTS_FILE" \
     --env API_URL="$API_URL" \
-    send-batch-events.js 2>&1 | tee "$TEMP_OUTPUT" | "$SCRIPT_DIR/extract-events-from-k6-output.py" "$EVENTS_FILE" 2>&1 | tail -50
+    send-batch-events.js 2>&1 | tee "$TEMP_OUTPUT" | "$SCRIPT_DIR/extract-events-from-k6-output.py" "$EVENTS_FILE" 2>&1 | grep -v "^K6_EVENT:" | tail -100
 
 # Record end time
 END_TIME=$(date +%s)
 TEST_DURATION=$((END_TIME - START_TIME))
 
-# Also try extracting from saved output
-python3 "$SCRIPT_DIR/extract-events-from-k6-output.py" "$EVENTS_FILE" --input-file "$TEMP_OUTPUT" 2>&1 | grep -E "(Extracted|events)" || true
+# Extract all events from saved output (this is the primary source)
+echo -e "${BLUE}Extracting events from k6 output...${NC}"
+EXTRACTION_OUTPUT=$(python3 "$SCRIPT_DIR/extract-events-from-k6-output.py" "$EVENTS_FILE" --input-file "$TEMP_OUTPUT" 2>&1)
+echo "$EXTRACTION_OUTPUT" | grep -E "(Extracted|events|⚠️)" || true
 rm -f "$TEMP_OUTPUT"
 
 echo ""
@@ -98,13 +125,55 @@ if [ ! -f "$EVENTS_FILE" ]; then
 fi
 
 EVENT_COUNT=$(python3 -c "import json; f=open('$EVENTS_FILE'); data=json.load(f); print(len(data))" 2>/dev/null || echo "0")
+EXPECTED_COUNT=$((EVENTS_PER_TYPE * 4))
+
+# Count events by status if available
+STATUS_BREAKDOWN=$(python3 -c "
+import json
+try:
+    with open('$EVENTS_FILE') as f:
+        events = json.load(f)
+    status_counts = {}
+    for e in events:
+        status = e.get('status', 'unknown')
+        status_counts[status] = status_counts.get(status, 0) + 1
+    if status_counts:
+        print(' | '.join([f'{k}:{v}' for k, v in sorted(status_counts.items())]))
+except:
+    pass
+" 2>/dev/null || echo "")
+
 echo ""
 if [ "$EVENT_COUNT" -gt 0 ]; then
-    echo -e "${GREEN}✅ k6 test completed. Saved $EVENT_COUNT events to: $EVENTS_FILE${NC}"
+    if [ "$EVENT_COUNT" -lt "$EXPECTED_COUNT" ]; then
+        echo -e "${YELLOW}⚠️  k6 test completed. Extracted $EVENT_COUNT/$EXPECTED_COUNT successful events to: $EVENTS_FILE${NC}"
+        if [ -n "$STATUS_BREAKDOWN" ]; then
+            echo -e "${YELLOW}   Status breakdown: $STATUS_BREAKDOWN${NC}"
+        fi
+        echo -e "${YELLOW}   Some events may have failed (409 conflicts, timeouts, etc.) or were not logged.${NC}"
+        echo -e "${YELLOW}   Check k6 output for error details.${NC}"
+    else
+        echo -e "${GREEN}✅ k6 test completed. Saved $EVENT_COUNT events to: $EVENTS_FILE${NC}"
+        if [ -n "$STATUS_BREAKDOWN" ]; then
+            echo -e "${BLUE}   Status breakdown: $STATUS_BREAKDOWN${NC}"
+        fi
+    fi
 else
-    echo -e "${YELLOW}⚠️  k6 test completed but no events were extracted. Check k6 output.${NC}"
+    echo -e "${RED}❌ k6 test completed but no successful events were extracted.${NC}"
+    echo -e "${RED}   All events may have failed (409 conflicts, timeouts, etc.). Check k6 output.${NC}"
+    exit 1
 fi
 echo ""
+
+# Wait a bit for database propagation before validation
+# DSQL may need more time for eventual consistency
+if [ "$DB_TYPE" = "dsql" ]; then
+    echo -e "${BLUE}Waiting 10 seconds for DSQL eventual consistency...${NC}"
+    sleep 10
+else
+    echo -e "${BLUE}Waiting 5 seconds for database propagation...${NC}"
+    sleep 5
+fi
 
 # Validate databases
 echo -e "${BLUE}========================================${NC}"
@@ -127,35 +196,38 @@ if [ -f "terraform/terraform.tfvars" ]; then
     AURORA_PASSWORD=$(echo "$RAW_PASSWORD" | tr -d '\n\r' | head -c 32)
 fi
 
-# Validate Aurora
-if [ -n "$AURORA_ENDPOINT" ] && [ -n "$AURORA_PASSWORD" ]; then
-    echo -e "${BLUE}Validating Aurora PostgreSQL...${NC}"
-    export AURORA_ENDPOINT
-    export AURORA_PASSWORD
-    python3 scripts/validate-against-sent-events.py \
-        --events-file "$EVENTS_FILE" \
-        --aurora \
-        --aurora-endpoint "$AURORA_ENDPOINT" \
-        --aurora-password "$AURORA_PASSWORD" || {
-        echo -e "${YELLOW}⚠️  Aurora validation had issues${NC}"
-    }
+# Validate only the target database (no CDC between DSQL and PostgreSQL)
+if [ "$DB_TYPE" = "pg" ]; then
+    # Validate Aurora PostgreSQL (target database for PG API)
+    if [ -n "$AURORA_ENDPOINT" ] && [ -n "$AURORA_PASSWORD" ]; then
+        echo -e "${BLUE}Validating Aurora PostgreSQL...${NC}"
+        export AURORA_ENDPOINT
+        export AURORA_PASSWORD
+        python3 scripts/validate-against-sent-events.py \
+            --events-file "$EVENTS_FILE" \
+            --aurora \
+            --aurora-endpoint "$AURORA_ENDPOINT" \
+            --aurora-password "$AURORA_PASSWORD" || {
+            echo -e "${YELLOW}⚠️  Aurora validation had issues${NC}"
+        }
+    else
+        echo -e "${YELLOW}⚠️  Skipping Aurora validation (endpoint/password not found)${NC}"
+    fi
+elif [ "$DB_TYPE" = "dsql" ]; then
+    # Validate DSQL (target database for DSQL API)
+    if [ -f "scripts/query-dsql.sh" ]; then
+        echo -e "${BLUE}Validating DSQL...${NC}"
+        python3 scripts/validate-against-sent-events.py \
+            --events-file "$EVENTS_FILE" \
+            --dsql \
+            --query-dsql-script scripts/query-dsql.sh || {
+            echo -e "${YELLOW}⚠️  DSQL validation had issues${NC}"
+        }
+    else
+        echo -e "${YELLOW}⚠️  Skipping DSQL validation (query-dsql.sh not found)${NC}"
+    fi
 else
-    echo -e "${YELLOW}⚠️  Skipping Aurora validation (endpoint/password not found)${NC}"
-fi
-
-echo ""
-
-# Validate DSQL
-if [ -f "scripts/query-dsql.sh" ]; then
-    echo -e "${BLUE}Validating DSQL...${NC}"
-    python3 scripts/validate-against-sent-events.py \
-        --events-file "$EVENTS_FILE" \
-        --dsql \
-        --query-dsql-script scripts/query-dsql.sh || {
-        echo -e "${YELLOW}⚠️  DSQL validation had issues${NC}"
-    }
-else
-    echo -e "${YELLOW}⚠️  Skipping DSQL validation (query-dsql.sh not found)${NC}"
+    echo -e "${YELLOW}⚠️  Unknown DB_TYPE: $DB_TYPE, skipping validation${NC}"
 fi
 
 VALIDATION_END=$(date +%s)

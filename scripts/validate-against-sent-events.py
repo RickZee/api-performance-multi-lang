@@ -111,40 +111,64 @@ def validate_dsql(events: List[Dict], query_script: str) -> Dict:
             return results
         
         # Query DSQL for event headers - use IN clause with proper escaping
-        # Build query with UUIDs
-        uuid_list = "','".join(sent_uuids)
-        query = f"""
-        SELECT id, event_name, event_type 
-        FROM event_headers 
-        WHERE id IN ('{uuid_list}')
-        """
-        
-        # Run query via bastion host
-        result = subprocess.run(
-            [query_script, query],
-            capture_output=True,
-            text=True,
-            timeout=60
-        )
-        
-        if result.returncode != 0:
-            results['errors'].append(f"DSQL query failed: {result.stderr}")
-            return results
-        
-        # Parse results
-        output = result.stdout.strip()
-        if not output:
-            results['errors'].append("DSQL query returned no results")
-            return results
-        
-        # Extract UUIDs from query results
+        # DSQL has transaction row limits, so we may need to query in batches
+        # Split into batches of 1000 UUIDs to avoid issues
+        batch_size = 1000
         found_uuids = set()
-        for line in output.split('\n'):
-            if line.strip() and '|' in line:
-                # Parse line format: uuid | event_name | event_type
-                parts = [p.strip() for p in line.split('|')]
-                if len(parts) >= 1 and parts[0]:
-                    found_uuids.add(parts[0])
+        uuid_list = list(sent_uuids)
+        
+        for i in range(0, len(uuid_list), batch_size):
+            batch = uuid_list[i:i + batch_size]
+            uuid_list_str = "','".join(batch)
+            query = f"""
+            SELECT id, event_name, event_type 
+            FROM event_headers 
+            WHERE id IN ('{uuid_list_str}')
+            """
+        
+            # Run query via bastion host with retry for eventual consistency
+            max_retries = 2
+            batch_found = set()
+            for retry in range(max_retries):
+                result = subprocess.run(
+                    [query_script, query],
+                    capture_output=True,
+                    text=True,
+                    timeout=90  # Increased timeout for large batches
+                )
+                
+                if result.returncode != 0:
+                    if retry < max_retries - 1:
+                        # Retry on error (might be temporary)
+                        import time
+                        time.sleep(2)
+                        continue
+                    results['errors'].append(f"DSQL query failed (batch {i//batch_size + 1}): {result.stderr}")
+                    break
+                
+                # Parse results
+                output = result.stdout.strip()
+                if output:
+                    # Extract UUIDs from query results
+                    for line in output.split('\n'):
+                        if line.strip() and '|' in line:
+                            # Parse line format: uuid | event_name | event_type
+                            parts = [p.strip() for p in line.split('|')]
+                            if len(parts) >= 1 and parts[0]:
+                                batch_found.add(parts[0])
+                    
+                    # If we found results, add them and break retry loop
+                    if batch_found:
+                        found_uuids.update(batch_found)
+                        break
+                elif retry < max_retries - 1:
+                    # No results but might be eventual consistency - retry
+                    import time
+                    time.sleep(2)
+                    continue
+        
+        if not found_uuids and not results['errors']:
+            results['errors'].append("DSQL query returned no results for any batch (may be eventual consistency issue)")
         
         # Validate each sent event
         for event in events:
