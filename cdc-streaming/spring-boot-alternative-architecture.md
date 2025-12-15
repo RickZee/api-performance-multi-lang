@@ -7,26 +7,26 @@ The existing CDC streaming system ([ARCHITECTURE.md](ARCHITECTURE.md)) uses:
 ```mermaid
 flowchart LR
     subgraph Source["Source"]
-        PG[("PostgreSQL<br/>business_events")]
+        PG(("PostgreSQL\nbusiness_events"))
     end
-    
+
     subgraph ConfluentCloud["Confluent Cloud"]
-        DC[Debezium<br/>Connector]
-        KR[raw-business-events<br/>Topic]
-        Flink[Flink SQL<br/>Statements]
+        DC[Debezium Connector]
+        KR["raw-business-events\nTopic"]
+        Flink["Flink SQL\nStatements"]
         KF1[filtered-loan-events]
         KF2[filtered-car-events]
         KF3[filtered-service-events]
         KF4[filtered-payment-events]
     end
-    
+
     subgraph Consumers["Python Consumers"]
         C1[loan-consumer]
         C2[car-consumer]
         C3[service-consumer]
         C4[payment-consumer]
     end
-    
+
     PG --> DC --> KR --> Flink
     Flink --> KF1 & KF2 & KF3 & KF4
     KF1 --> C1
@@ -49,20 +49,20 @@ flowchart LR
 ```mermaid
 flowchart LR
     subgraph Source["Source"]
-        PG[("PostgreSQL<br/>business_events")]
+        PG(("PostgreSQL\nbusiness_events"))
     end
-    
+
     subgraph EKS["AWS EKS Cluster"]
-        CDC[Spring Boot<br/>CDC Service<br/>Debezium Embedded]
-        SP[Spring Boot<br/>Stream Processor<br/>Kafka Streams]
-        C1[Spring Boot<br/>Consumer Services]
+        SP["Spring Boot\nStream Processor\nKafka Streams"]
+        C1["Spring Boot\nConsumer Services"]
     end
-    
+
     subgraph Kafka["Amazon MSK / Confluent"]
+        CDC["Confluent Cloud\nDebezium Connector v2\n(managed)"]
         KR[raw-business-events]
-        KF[filtered-*-events]
+        KF["filtered-*-events"]
     end
-    
+
     PG --> CDC --> KR --> SP --> KF --> C1
 ```
 
@@ -70,7 +70,7 @@ flowchart LR
 
 | Service | Technology | Purpose |
 |---------|------------|---------|
-| CDC Service | Spring Boot + Debezium Embedded Engine | Capture PostgreSQL WAL changes |
+| CDC Connector | Confluent Cloud Debezium Connector v2 (managed) | Capture PostgreSQL WAL changes (managed by Confluent, offsets stored in Kafka) |
 | Stream Processor | Spring Boot + Kafka Streams | Filter and route events to topics |
 | Consumer Services | Spring Boot + Spring Kafka | Process filtered events |
 
@@ -85,7 +85,7 @@ flowchart LR
 | **Infrastructure** | | |
 | Kafka Broker | ~$1,200-3,000/mo (CKU-based) | ~$400-800/mo (MSK m5.large x3) |
 | Flink Compute | ~$800-2,000/mo (4-8 CFU) | Included in EKS nodes |
-| Connectors | ~$200-400/mo (managed) | Included in CDC service |
+| Connectors | ~$200-400/mo (managed) | ~$200-400/mo (Confluent managed connector v2) |
 | Schema Registry | ~$100/mo | ~$50/mo (Glue) or self-hosted |
 | EKS Cluster | N/A | ~$72/mo (control plane) |
 | EC2 Nodes | N/A | ~$300-600/mo (3x m5.large) |
@@ -224,22 +224,19 @@ stages:
 
 ## Implementation Components
 
-### 1. Spring Boot CDC Service
+### 1. CDC Connector (Confluent Cloud - Debezium v2)
 
-```java
-// Key dependencies
-spring-boot-starter
-debezium-embedded
-debezium-connector-postgres
-spring-kafka
+```text
+// Managed connector running in Confluent Cloud
 ```
 
 **Features:**
 
-- Embedded Debezium engine capturing PostgreSQL WAL
+- Confluent-managed Debezium v2 Postgres connector capturing PostgreSQL WAL
 - Publishes to `raw-business-events` topic
-- Stores offsets in Kafka topic (not file-based)
-- Health checks and metrics
+- Offsets and connector state stored in Kafka topics (managed)
+- Built-in HA, automatic restarts, and monitoring via Confluent Cloud
+- Minimal engineering overhead compared to self-hosted CDC
 
 ### 2. Spring Boot Stream Processor
 
