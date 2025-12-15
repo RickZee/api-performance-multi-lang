@@ -72,8 +72,11 @@ fi
 echo "API URL: $API_URL"
 echo ""
 
+# Record script start time
+SCRIPT_START_TIME=$(date +%s)
+
 # Run k6 test and extract events
-echo -e "${BLUE}Running k6 batch test...${NC}"
+log_progress "Starting k6 batch test..." "$BLUE"
 cd "$PROJECT_ROOT/load-test/k6"
 
 # Calculate iterations: using per-vu-iterations executor
@@ -91,8 +94,9 @@ echo "  Iterations per VU: $ITERATIONS_PER_VU"
 echo "  Total Iterations (across all VUs): $((ITERATIONS_PER_VU * VUS))"
 echo ""
 
-# Record start time
-START_TIME=$(date +%s)
+# Record k6 start time
+K6_START_TIME=$(date +%s)
+log_progress "k6 test execution started..." "$BLUE"
 
 # Run k6 and extract events from output
 # With scenario-based per-vu-iterations, we don't pass --iterations or --vus
@@ -106,18 +110,20 @@ k6 run \
     --env API_URL="$API_URL" \
     send-batch-events.js 2>&1 | tee "$TEMP_OUTPUT" | "$SCRIPT_DIR/extract-events-from-k6-output.py" "$EVENTS_FILE" 2>&1 | grep -v "^K6_EVENT:" | tail -100
 
-# Record end time
-END_TIME=$(date +%s)
-TEST_DURATION=$((END_TIME - START_TIME))
+# Record k6 end time
+K6_END_TIME=$(date +%s)
+TEST_DURATION=$((K6_END_TIME - K6_START_TIME))
+log_progress "k6 test execution completed (duration: $(format_duration $TEST_DURATION))" "$GREEN"
 
 # Extract all events from saved output (this is the primary source)
-echo -e "${BLUE}Extracting events from k6 output...${NC}"
+EXTRACTION_START_TIME=$(date +%s)
+log_progress "Extracting events from k6 output..." "$BLUE"
 EXTRACTION_OUTPUT=$(python3 "$SCRIPT_DIR/extract-events-from-k6-output.py" "$EVENTS_FILE" --input-file "$TEMP_OUTPUT" 2>&1)
 echo "$EXTRACTION_OUTPUT" | grep -E "(Extracted|events|⚠️)" || true
 rm -f "$TEMP_OUTPUT"
 
-echo ""
-echo -e "${BLUE}Test Duration: ${TEST_DURATION}s${NC}"
+EXTRACTION_END_TIME=$(date +%s)
+EXTRACTION_DURATION=$((EXTRACTION_END_TIME - EXTRACTION_START_TIME))
 
 if [ ! -f "$EVENTS_FILE" ]; then
     echo -e "${RED}Error: Events file not created: $EVENTS_FILE${NC}"
@@ -126,6 +132,7 @@ fi
 
 EVENT_COUNT=$(python3 -c "import json; f=open('$EVENTS_FILE'); data=json.load(f); print(len(data))" 2>/dev/null || echo "0")
 EXPECTED_COUNT=$((EVENTS_PER_TYPE * 4))
+log_progress "Event extraction completed: $EVENT_COUNT events extracted (duration: $(format_duration $EXTRACTION_DURATION))" "$GREEN"
 
 # Count events by status if available
 STATUS_BREAKDOWN=$(python3 -c "
@@ -167,13 +174,17 @@ echo ""
 
 # Wait a bit for database propagation before validation
 # DSQL may need more time for eventual consistency
+WAIT_START_TIME=$(date +%s)
 if [ "$DB_TYPE" = "dsql" ]; then
-    echo -e "${BLUE}Waiting 10 seconds for DSQL eventual consistency...${NC}"
-    sleep 10
+    log_progress "Waiting 20 seconds for DSQL eventual consistency..." "$BLUE"
+    sleep 20
+    WAIT_DURATION=20
 else
-    echo -e "${BLUE}Waiting 5 seconds for database propagation...${NC}"
+    log_progress "Waiting 5 seconds for database propagation..." "$BLUE"
     sleep 5
+    WAIT_DURATION=5
 fi
+WAIT_END_TIME=$(date +%s)
 
 # Validate databases
 echo -e "${BLUE}========================================${NC}"
@@ -183,6 +194,7 @@ echo ""
 
 # Record validation start time
 VALIDATION_START=$(date +%s)
+log_progress "Starting database validation..." "$BLUE"
 
 cd "$PROJECT_ROOT"
 
@@ -232,6 +244,11 @@ fi
 
 VALIDATION_END=$(date +%s)
 VALIDATION_DURATION=$((VALIDATION_END - VALIDATION_START))
+log_progress "Validation completed (duration: $(format_duration $VALIDATION_DURATION))" "$GREEN"
+
+# Record script end time
+SCRIPT_END_TIME=$(date +%s)
+TOTAL_DURATION=$((SCRIPT_END_TIME - SCRIPT_START_TIME))
 
 echo ""
 echo -e "${GREEN}========================================${NC}"
@@ -239,11 +256,27 @@ echo -e "${GREEN}Validation Complete${NC}"
 echo -e "${GREEN}========================================${NC}"
 echo ""
 echo -e "${BLUE}Time Metrics:${NC}"
-echo "  k6 Test Duration: ${TEST_DURATION}s"
-echo "  Validation Duration: ${VALIDATION_DURATION}s"
-echo "  Total Duration: $((TEST_DURATION + VALIDATION_DURATION))s"
+echo "  k6 Test Duration: $(format_duration $TEST_DURATION)"
+echo "  Event Extraction Duration: $(format_duration $EXTRACTION_DURATION)"
+echo "  Database Propagation Wait: $(format_duration $WAIT_DURATION)"
+echo "  Validation Duration: $(format_duration $VALIDATION_DURATION)"
+echo "  Total Duration: $(format_duration $TOTAL_DURATION)"
+echo ""
+if [ $TOTAL_DURATION -gt 0 ]; then
+    echo -e "${BLUE}Time Breakdown (percentage):${NC}"
+    K6_PERCENT=$(echo "scale=1; $TEST_DURATION * 100 / $TOTAL_DURATION" | bc 2>/dev/null || echo "0")
+    EXTRACTION_PERCENT=$(echo "scale=1; $EXTRACTION_DURATION * 100 / $TOTAL_DURATION" | bc 2>/dev/null || echo "0")
+    WAIT_PERCENT=$(echo "scale=1; $WAIT_DURATION * 100 / $TOTAL_DURATION" | bc 2>/dev/null || echo "0")
+    VALIDATION_PERCENT=$(echo "scale=1; $VALIDATION_DURATION * 100 / $TOTAL_DURATION" | bc 2>/dev/null || echo "0")
+    echo "  k6 Test: ${K6_PERCENT}%"
+    echo "  Event Extraction: ${EXTRACTION_PERCENT}%"
+    echo "  Database Propagation Wait: ${WAIT_PERCENT}%"
+    echo "  Validation: ${VALIDATION_PERCENT}%"
+    echo ""
+fi
 if [ $TEST_DURATION -gt 0 ]; then
     EVENTS_PER_SECOND=$(echo "scale=2; $TOTAL_EVENTS / $TEST_DURATION" | bc 2>/dev/null || echo "N/A")
+    echo -e "${BLUE}Throughput:${NC}"
     echo "  Events per Second: $EVENTS_PER_SECOND"
 fi
 echo ""

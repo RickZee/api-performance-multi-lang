@@ -4,6 +4,7 @@ import asyncio
 import json
 import logging
 from typing import Any, Dict, Optional
+from datetime import datetime
 
 import sys
 import os
@@ -466,10 +467,18 @@ async def _handle_bulk_events(event_body: str) -> Dict[str, Any]:
             },
         )
     
-    logger.info(f"{API_NAME} Received bulk request with {len(events)} events")
+    bulk_start_time = time.time()
+    logger.info(
+        f"{API_NAME} Received bulk request with {len(events)} events",
+        extra={
+            'bulk_event_count': len(events),
+            'bulk_start_timestamp_utc': datetime.utcnow().isoformat() + 'Z',
+        }
+    )
     
     processed_count = 0
     failed_count = 0
+    conflict_count = 0
     db_connection_error = False
     db_start_attempted = False
     
@@ -493,7 +502,11 @@ async def _handle_bulk_events(event_body: str) -> Dict[str, Any]:
             )
         raise
     
-    for event in events:
+    for idx, event in enumerate(events):
+        event_start_time = time.time()
+        event_id = event.event_header.uuid or f"bulk-event-{idx}"
+        event_type = event.event_header.event_type or "unknown"
+        
         try:
             # Validate event
             if not event.event_header.event_name:
@@ -517,10 +530,35 @@ async def _handle_bulk_events(event_body: str) -> Dict[str, Any]:
             
             await service.process_event(event)
             processed_count += 1
+            event_duration = int((time.time() - event_start_time) * 1000)
+            
+            logger.debug(
+                f"{API_NAME} Bulk event {idx+1}/{len(events)} processed successfully",
+                extra={
+                    'bulk_index': idx,
+                    'event_id': event_id,
+                    'event_type': event_type,
+                    'duration_ms': event_duration,
+                    'cumulative_success': processed_count,
+                    'cumulative_failed': failed_count,
+                }
+            )
         except DuplicateEventError as e:
             # Handle duplicate event ID (409 Conflict) - count as failed
-            logger.warning(f"{API_NAME} Duplicate event ID in bulk: {e.event_id}")
+            conflict_count += 1
             failed_count += 1
+            event_duration = int((time.time() - event_start_time) * 1000)
+            logger.warning(
+                f"{API_NAME} Duplicate event ID in bulk: {e.event_id}",
+                extra={
+                    'bulk_index': idx,
+                    'event_id': event_id,
+                    'event_type': event_type,
+                    'duration_ms': event_duration,
+                    'error_type': 'DUPLICATE_EVENT',
+                    'cumulative_conflicts': conflict_count,
+                }
+            )
         except Exception as e:
             if _is_database_connection_error(e):
                 logger.warning(f"{API_NAME} Database connection error processing event: {e}")
@@ -529,8 +567,34 @@ async def _handle_bulk_events(event_body: str) -> Dict[str, Any]:
                 if not db_start_attempted:
                     db_start_attempted = True
                     await _try_start_database()
-            logger.error(f"{API_NAME} Error processing event in bulk: {e}", exc_info=True)
+            event_duration = int((time.time() - event_start_time) * 1000)
+            logger.error(
+                f"{API_NAME} Error processing event in bulk: {e}",
+                extra={
+                    'bulk_index': idx,
+                    'event_id': event_id,
+                    'event_type': event_type,
+                    'duration_ms': event_duration,
+                    'error_type': type(e).__name__,
+                },
+                exc_info=True
+            )
             failed_count += 1
+    
+    bulk_duration = int((time.time() - bulk_start_time) * 1000)
+    logger.info(
+        f"{API_NAME} Bulk processing complete",
+        extra={
+            'total_events': len(events),
+            'success_count': processed_count,
+            'failure_count': failed_count,
+            'conflict_count': conflict_count,
+            'total_duration_ms': bulk_duration,
+            'avg_duration_ms': int(bulk_duration / len(events)) if events else 0,
+            'success_rate': f"{(processed_count / len(events) * 100):.1f}%" if events else "0%",
+            'bulk_end_timestamp_utc': datetime.utcnow().isoformat() + 'Z',
+        }
+    )
     
     # If we had database connection errors, return appropriate message
     if db_connection_error and processed_count == 0:

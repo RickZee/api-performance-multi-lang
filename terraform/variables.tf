@@ -374,3 +374,18 @@ variable "bastion_allocate_elastic_ip" {
   default     = false
 }
 
+variable "aurora_auto_stop_admin_email" {
+  description = <<-EOT
+    Admin email address for Aurora auto-stop notifications.
+    
+    When provided, an email will be sent when the Aurora cluster is automatically stopped due to inactivity.
+    Leave empty (default) to disable email notifications.
+    
+    Note: AWS SNS requires email confirmation. After setting this variable and running terraform apply,
+    you will receive a confirmation email at the provided address. You must click the confirmation link
+    before notifications will be sent.
+  EOT
+  type        = string
+  default     = ""
+}
+

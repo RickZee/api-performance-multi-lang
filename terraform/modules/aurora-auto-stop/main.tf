@@ -83,12 +83,53 @@ resource "aws_iam_role_policy" "aurora_auto_stop_cloudwatch" {
   })
 }
 
+# IAM policy for SNS notifications
+resource "aws_iam_role_policy" "aurora_auto_stop_sns" {
+  count = var.admin_email != "" ? 1 : 0
+  name  = "${var.function_name}-sns-policy"
+  role  = aws_iam_role.aurora_auto_stop.id
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect = "Allow"
+        Action = [
+          "sns:Publish"
+        ]
+        Resource = aws_sns_topic.aurora_auto_stop_notifications[0].arn
+      }
+    ]
+  })
+}
+
 # CloudWatch Log Group
 resource "aws_cloudwatch_log_group" "aurora_auto_stop" {
   name              = "/aws/lambda/${var.function_name}"
   retention_in_days = var.cloudwatch_logs_retention_days
 
   tags = var.tags
+}
+
+# SNS Topic for Aurora auto-stop notifications
+resource "aws_sns_topic" "aurora_auto_stop_notifications" {
+  count = var.admin_email != "" ? 1 : 0
+  name  = "${var.function_name}-notifications"
+
+  tags = merge(
+    var.tags,
+    {
+      Name = "${var.function_name}-notifications"
+    }
+  )
+}
+
+# SNS Email Subscription (requires confirmation)
+resource "aws_sns_topic_subscription" "aurora_auto_stop_email" {
+  count     = var.admin_email != "" ? 1 : 0
+  topic_arn = aws_sns_topic.aurora_auto_stop_notifications[0].arn
+  protocol  = "email"
+  endpoint  = var.admin_email
 }
 
 # Lambda function code (inline)
@@ -110,9 +151,11 @@ def handler(event, context):
     region = os.environ['AWS_REGION']
     api_gateway_id = os.environ.get('API_GATEWAY_ID', '')
     inactivity_hours = int(os.environ.get('INACTIVITY_HOURS', '3'))
+    sns_topic_arn = os.environ.get('SNS_TOPIC_ARN', '')
     
     rds = boto3.client('rds', region_name=region)
     cloudwatch = boto3.client('cloudwatch', region_name=region)
+    sns = boto3.client('sns', region_name=region) if sns_topic_arn else None
     
     # Check current cluster status
     try:
@@ -177,6 +220,31 @@ def handler(event, context):
         print(f"No activity detected for {inactivity_hours} hours, stopping cluster {cluster_id}")
         rds.stop_db_cluster(DBClusterIdentifier=cluster_id)
         
+        # Send email notification if SNS topic is configured
+        if sns and sns_topic_arn:
+            try:
+                timestamp = datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S UTC')
+                subject = f"Aurora Cluster Stopped - {cluster_id}"
+                message = f"""The Aurora PostgreSQL cluster '{cluster_id}' has been automatically stopped due to inactivity.
+
+Details:
+- Cluster ID: {cluster_id}
+- Stopped at: {timestamp}
+- Reason: No API Gateway invocations detected for {inactivity_hours} hours
+- Region: {region}
+
+The cluster will automatically start when API requests are received."""
+                
+                sns.publish(
+                    TopicArn=sns_topic_arn,
+                    Subject=subject,
+                    Message=message
+                )
+                print(f"Notification sent to SNS topic: {sns_topic_arn}")
+            except Exception as e:
+                # Log error but don't fail the Lambda execution
+                print(f"Warning: Failed to send notification: {str(e)}")
+        
         return {
             'statusCode': 200,
             'body': json.dumps({
@@ -215,12 +283,17 @@ resource "aws_lambda_function" "aurora_auto_stop" {
   source_code_hash = data.archive_file.aurora_auto_stop_zip.output_base64sha256
 
   environment {
-    variables = {
-      AURORA_CLUSTER_ID = var.aurora_cluster_id
-      # AWS_REGION is automatically provided by Lambda runtime, no need to set it
-      API_GATEWAY_ID   = var.api_gateway_id
-      INACTIVITY_HOURS = var.inactivity_hours
-    }
+    variables = merge(
+      {
+        AURORA_CLUSTER_ID = var.aurora_cluster_id
+        # AWS_REGION is automatically provided by Lambda runtime, no need to set it
+        API_GATEWAY_ID   = var.api_gateway_id
+        INACTIVITY_HOURS = var.inactivity_hours
+      },
+      var.admin_email != "" ? {
+        SNS_TOPIC_ARN = aws_sns_topic.aurora_auto_stop_notifications[0].arn
+      } : {}
+    )
   }
 
   depends_on = [

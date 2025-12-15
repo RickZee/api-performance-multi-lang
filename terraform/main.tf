@@ -413,6 +413,7 @@ module "aurora_auto_stop" {
   aws_region                     = var.aws_region
   inactivity_hours               = 3
   cloudwatch_logs_retention_days = local.cloudwatch_logs_retention
+  admin_email                    = var.aurora_auto_stop_admin_email
 
   tags = local.common_tags
 }

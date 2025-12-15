@@ -163,6 +163,10 @@ class EventProcessingService:
             commit_duration = int((time.time() - tx_commit_start) * 1000)
             total_duration = int((time.time() - tx_start_time) * 1000)
             
+            # Explicit write confirmation timestamp for eventual consistency tracking
+            commit_timestamp_utc = datetime.utcnow().isoformat() + 'Z'
+            commit_timestamp_epoch = time.time()
+            
             self._log_persisted_event_count()
             logger.info(
                 f"{API_NAME} Successfully processed event in transaction: {event_id}",
@@ -175,6 +179,23 @@ class EventProcessingService:
                     'transaction_duration_ms': tx_duration,
                     'commit_duration_ms': commit_duration,
                     'total_duration_ms': total_duration,
+                }
+            )
+            
+            # Explicit write confirmation log for eventual consistency correlation
+            logger.info(
+                f"{API_NAME} Event committed to database - ready for validation",
+                extra={
+                    'event_id': event_id,
+                    'event_type': event.event_header.event_type,
+                    'event_name': event.event_header.event_name,
+                    'transaction_id': transaction_id,
+                    'commit_timestamp_utc': commit_timestamp_utc,
+                    'commit_timestamp_epoch': commit_timestamp_epoch,
+                    'transaction_duration_ms': tx_duration,
+                    'commit_duration_ms': commit_duration,
+                    'entity_count': entity_count,
+                    'validation_ready': True,  # Flag for eventual consistency tracking
                 }
             )
         except Exception as e:

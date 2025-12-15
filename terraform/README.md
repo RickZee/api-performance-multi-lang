@@ -446,6 +446,17 @@ The Aurora auto-stop Lambda function automatically monitors API Gateway invocati
 - Only works when Python Lambda is enabled
 - Checks CloudWatch metrics for API Gateway invocations
 - Fails safely (won't stop if metrics can't be checked)
+- **Email Notifications**: Optionally sends email notifications when the cluster is stopped (configure via `aurora_auto_stop_admin_email`)
+
+**Email Notifications for Auto-Stop:**
+To receive email notifications when Aurora is automatically stopped, set the `aurora_auto_stop_admin_email` variable in `terraform.tfvars`:
+```hcl
+aurora_auto_stop_admin_email = "admin@example.com"
+```
+
+**Important**: After setting the email address and running `terraform apply`, AWS SNS will send a confirmation email to the provided address. You must click the confirmation link in that email before notifications will be sent. This is a one-time setup step required by AWS SNS.
+
+To disable email notifications, leave the variable empty (default) or remove it from your configuration.
 
 **Production Configuration:**
 For production, override defaults in `terraform.tfvars`:
