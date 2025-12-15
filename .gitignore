@@ -90,3 +90,9 @@ terraform/debezium-connector-dsql/connect.env
 **/*.egg-info/
 *.egg
 dist/
+
+# Lambda deployment packages
+lambda-deployment.zip
+**/lambda-deployment.zip
+*.zip
+!**/*.proto.zip

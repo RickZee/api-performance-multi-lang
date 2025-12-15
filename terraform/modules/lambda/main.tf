@@ -161,6 +161,12 @@ resource "aws_iam_role_policy" "lambda_dlq" {
   })
 }
 
+# Data source to track S3 object changes (ETag)
+data "aws_s3_object" "lambda_package" {
+  bucket = var.s3_bucket
+  key    = var.s3_key
+}
+
 # Lambda function
 resource "aws_lambda_function" "this" {
   function_name = var.function_name
@@ -173,6 +179,7 @@ resource "aws_lambda_function" "this" {
 
   s3_bucket = var.s3_bucket
   s3_key    = var.s3_key
+  source_code_hash = data.aws_s3_object.lambda_package.etag
 
   reserved_concurrent_executions = var.reserved_concurrent_executions
 
