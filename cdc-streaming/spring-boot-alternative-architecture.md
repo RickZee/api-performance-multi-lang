@@ -69,13 +69,9 @@ flowchart LR
 ### Service Components
 
 | Service | Technology | Purpose |
-
 |---------|------------|---------|
-
 | CDC Service | Spring Boot + Debezium Embedded Engine | Capture PostgreSQL WAL changes |
-
 | Stream Processor | Spring Boot + Kafka Streams | Filter and route events to topics |
-
 | Consumer Services | Spring Boot + Spring Kafka | Process filtered events |
 
 ---
@@ -85,29 +81,17 @@ flowchart LR
 ### 1. Cost Analysis
 
 | Category | Current (Confluent Cloud) | Spring Boot (AWS EKS) |
-
 |----------|---------------------------|------------------------|
-
 | **Infrastructure** | | |
-
 | Kafka Broker | ~$1,200-3,000/mo (CKU-based) | ~$400-800/mo (MSK m5.large x3) |
-
 | Flink Compute | ~$800-2,000/mo (4-8 CFU) | Included in EKS nodes |
-
 | Connectors | ~$200-400/mo (managed) | Included in CDC service |
-
 | Schema Registry | ~$100/mo | ~$50/mo (Glue) or self-hosted |
-
 | EKS Cluster | N/A | ~$72/mo (control plane) |
-
 | EC2 Nodes | N/A | ~$300-600/mo (3x m5.large) |
-
 | **Engineering** | | |
-
 | Initial Build | Low (managed services) | High (3-4 weeks) |
-
 | Ongoing Maintenance | Low | Medium-High |
-
 | **Total Estimated** | **$2,300-5,500/mo** | **$800-1,500/mo + eng time** |
 
 **Cost Verdict:** Spring Boot is ~60-70% cheaper on infrastructure but requires significant engineering investment upfront and ongoing.
@@ -115,17 +99,11 @@ flowchart LR
 ### 2. Maintainability
 
 | Aspect | Current | Spring Boot Alternative |
-
 |--------|---------|-------------------------|
-
 | Code Ownership | Flink SQL files, Python consumers | Full Java codebase |
-
 | Debugging | Confluent Cloud Console | Application logs, distributed tracing |
-
 | Updates | Managed by Confluent | Manual dependency updates |
-
 | Team Skills | SQL, Python | Java/Kotlin required |
-
 | Configuration | JSON connector configs, SQL | Spring YAML, Java code |
 
 **Assessment:**
@@ -136,19 +114,12 @@ flowchart LR
 ### 3. Risk Assessment
 
 | Risk | Current | Spring Boot |
-
 |------|---------|-------------|
-
 | **Vendor Lock-in** | High (Confluent Cloud) | Lower (OSS stack) |
-
 | **Single Point of Failure** | Managed HA by Confluent | Requires proper K8s setup |
-
 | **Data Loss** | Managed replication | Manual checkpoint mgmt |
-
 | **CDC Offset Management** | Automatic | Custom implementation |
-
 | **Scaling Bottlenecks** | Auto-scaling | Manual HPA tuning |
-
 | **Connector Failures** | Auto-restart | Custom error handling |
 
 **Risk Mitigations for Spring Boot:**
@@ -161,17 +132,11 @@ flowchart LR
 ### 4. CI/CD Complexity
 
 | Aspect | Current | Spring Boot |
-
 |--------|---------|-------------|
-
 | **Deployment Model** | SQL statements, connector JSON | Container images, Helm charts |
-
 | **Testing** | Limited (SQL validation) | Full unit/integration tests |
-
 | **Rollback** | Statement versioning | K8s rollout undo |
-
 | **Pipeline Stages** | Deploy SQL, register connector | Build, test, push image, deploy |
-
 | **Environment Parity** | Different configs per env | Same images, different configs |
 
 **CI/CD Pipeline for Spring Boot:**
@@ -190,17 +155,11 @@ stages:
 ### 5. Schema Evolution
 
 | Aspect | Current | Spring Boot |
-
 |--------|---------|-------------|
-
 | **Registry** | Confluent Schema Registry | Glue Schema Registry or Confluent |
-
 | **Compatibility** | BACKWARD, FORWARD, FULL | Same options available |
-
 | **Validation** | Automatic (JSON Schema) | Manual or with libraries |
-
 | **Breaking Changes** | Blocked by registry | Same with proper config |
-
 | **Code Generation** | Not used (JSON) | Avro codegen possible |
 
 **Implementation for Spring Boot:**
@@ -212,21 +171,13 @@ stages:
 ### 6. Security and Compliance
 
 | Aspect | Current | Spring Boot |
-
 |--------|---------|-------------|
-
 | **Authentication** | SASL_SSL (managed) | SASL_SSL (self-managed) |
-
 | **Authorization** | Confluent RBAC | MSK IAM or Kafka ACLs |
-
 | **Encryption** | TLS in transit | TLS + optional at-rest |
-
 | **Secrets Management** | Confluent Cloud | AWS Secrets Manager / K8s secrets |
-
 | **Audit Logging** | Confluent audit logs | CloudWatch, custom logging |
-
 | **Network Isolation** | PrivateLink | VPC, Security Groups |
-
 | **Compliance** | SOC 2, HIPAA (Confluent) | Self-managed compliance |
 
 **Security Implementation:**
@@ -239,17 +190,11 @@ stages:
 ### 7. Monitoring and Observability
 
 | Aspect | Current | Spring Boot |
-
 |--------|---------|-------------|
-
 | **Metrics** | Confluent Cloud Console | Prometheus + Grafana |
-
 | **Logs** | Confluent Cloud | CloudWatch / ELK |
-
 | **Tracing** | Limited | OpenTelemetry + X-Ray/Jaeger |
-
 | **Alerting** | Built-in alerts | CloudWatch Alarms / PagerDuty |
-
 | **Dashboards** | Pre-built | Custom Grafana dashboards |
 
 **Implementation Stack:**
@@ -262,17 +207,11 @@ stages:
 ### 8. Performance
 
 | Metric | Current (Flink) | Spring Boot (Kafka Streams) |
-
 |--------|-----------------|------------------------------|
-
 | **Throughput** | 100K+ events/sec | 50K-100K events/sec |
-
 | **Latency** | 10-50ms | 5-20ms (lower for simple filtering) |
-
 | **State Management** | RocksDB, managed | RocksDB, self-managed |
-
 | **Exactly-Once** | Supported | Supported (EOS) |
-
 | **Parallelism** | Auto-scaling | Partition-based |
 
 **Performance Considerations:**
@@ -337,25 +276,15 @@ spring-boot-starter-actuator
 ## Recommendation Summary
 
 | Dimension | Winner | Notes |
-
 |-----------|--------|-------|
-
 | **Infrastructure Cost** | Spring Boot | 60-70% cheaper |
-
 | **Engineering Cost** | Current | Lower initial and ongoing |
-
 | **Maintainability** | Tie | Depends on team skills |
-
 | **Risk** | Current | Managed HA, auto-recovery |
-
 | **CI/CD** | Spring Boot | Better testing, but more complex |
-
 | **Schema Evolution** | Tie | Both support well |
-
 | **Security** | Current | Managed compliance |
-
 | **Monitoring** | Current | Pre-built dashboards |
-
 | **Performance** | Current | Flink auto-scales better |
 
 **Overall Recommendation:**
