@@ -113,7 +113,11 @@ class EventHeaderRepository:
                             event_type: Optional[str], created_date: Optional[datetime],
                             saved_date: Optional[datetime], header_data: dict) -> None:
         """Insert event header into database."""
+        import time
+        step_start = time.time()
+        
         try:
+            insert_start = time.time()
             await conn.execute(
                 """
                 INSERT INTO event_headers (id, event_name, event_type, created_date, saved_date, header_data)
@@ -126,8 +130,56 @@ class EventHeaderRepository:
                 saved_date,
                 json.dumps(header_data),
             )
+            insert_duration = int((time.time() - insert_start) * 1000)
+            total_duration = int((time.time() - step_start) * 1000)
+            
+            logger.debug(
+                f"Event header inserted",
+                extra={
+                    'event_id': event_id,
+                    'event_type': event_type,
+                    'insert_duration_ms': insert_duration,
+                    'total_duration_ms': total_duration,
+                }
+            )
         except asyncpg.UniqueViolationError as e:
             # Raise custom exception for duplicate key violations
-            logger.warning(f"Duplicate event header ID detected: {event_id}")
+            duration = int((time.time() - step_start) * 1000)
+            logger.warning(
+                f"Duplicate event header ID detected: {event_id}",
+                extra={
+                    'event_id': event_id,
+                    'error_type': 'UniqueViolationError',
+                    'duration_ms': duration,
+                }
+            )
             raise DuplicateEventError(event_id, f"Event header with ID '{event_id}' already exists") from e
+        except asyncpg.SerializationError as e:
+            # OC000 transaction conflict
+            duration = int((time.time() - step_start) * 1000)
+            sqlstate = getattr(e, 'sqlstate', None)
+            logger.warning(
+                f"OC000 transaction conflict during event_header insert",
+                extra={
+                    'event_id': event_id,
+                    'error_type': 'SerializationError',
+                    'sqlstate': sqlstate,
+                    'duration_ms': duration,
+                    'error': str(e)[:200],
+                }
+            )
+            raise
+        except Exception as e:
+            duration = int((time.time() - step_start) * 1000)
+            logger.error(
+                f"Error inserting event header",
+                extra={
+                    'event_id': event_id,
+                    'error_type': type(e).__name__,
+                    'duration_ms': duration,
+                    'error': str(e)[:200],
+                },
+                exc_info=True
+            )
+            raise
 

@@ -283,14 +283,46 @@ async def _handle_process_event(event_body: str) -> Dict[str, Any]:
                 },
             )
     
-    logger.info(f"{API_NAME} Received event: {event.event_header.event_name}")
+    event_id = event.event_header.uuid or "unknown"
+    event_type = event.event_header.event_type or "unknown"
+    event_name = event.event_header.event_name or "unknown"
+    
+    logger.info(
+        f"{API_NAME} Received event: {event_name}",
+        extra={
+            'event_id': event_id,
+            'event_type': event_type,
+            'event_name': event_name,
+            'entity_count': len(event.event_body.entities) if event.event_body.entities else 0,
+            'entity_types': [e.entity_type for e in event.event_body.entities] if event.event_body.entities else [],
+        }
+    )
     
     # Process event
     try:
         service = await _initialize_service()
         start_time = time.time()
+        
+        logger.debug(
+            f"{API_NAME} Starting event processing",
+            extra={
+                'event_id': event_id,
+                'event_type': event_type,
+                'timestamp': start_time,
+            }
+        )
+        
         await service.process_event(event)
         duration_ms = int((time.time() - start_time) * 1000)
+        
+        logger.info(
+            f"{API_NAME} Event processed successfully in {duration_ms}ms",
+            extra={
+                'event_id': event_id,
+                'event_type': event_type,
+                'duration_ms': duration_ms,
+            }
+        )
         
         # Emit CloudWatch metric (non-blocking)
         try:

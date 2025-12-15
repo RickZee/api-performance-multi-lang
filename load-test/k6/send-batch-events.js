@@ -73,10 +73,11 @@ const NUM_EVENT_TYPES = 4; // Always 4: Car, Loan, Payment, Service
 // Parallelism configuration - configurable VUs per event type
 // Default: 1 VU per event type (sequential)
 // Set VUS_PER_EVENT_TYPE to enable parallelism (e.g., --env VUS_PER_EVENT_TYPE=10)
-// Total VUs = VUS_PER_EVENT_TYPE * NUM_EVENT_TYPES
-// Each VU handles EVENTS_PER_TYPE / VUS_PER_EVENT_TYPE events of its assigned type
+// Or set TOTAL_VUS directly (e.g., --env TOTAL_VUS=2)
+// Total VUs = VUS_PER_EVENT_TYPE * NUM_EVENT_TYPES (if VUS_PER_EVENT_TYPE is set)
+// Or TOTAL_VUS (if TOTAL_VUS is set directly)
 const VUS_PER_EVENT_TYPE = parseInt(__ENV.VUS_PER_EVENT_TYPE || '1', 10);
-const TOTAL_VUS = VUS_PER_EVENT_TYPE * NUM_EVENT_TYPES;
+const TOTAL_VUS = parseInt(__ENV.TOTAL_VUS || (VUS_PER_EVENT_TYPE * NUM_EVENT_TYPES).toString(), 10);
 const EVENTS_PER_VU = Math.ceil(EVENTS_PER_TYPE / VUS_PER_EVENT_TYPE);
 
 // Sequential processing mode: wait for dependencies to succeed
@@ -84,10 +85,21 @@ const EVENTS_PER_VU = Math.ceil(EVENTS_PER_TYPE / VUS_PER_EVENT_TYPE);
 // When enabled: Car → Loan → Payment → Service (each waits for previous to complete)
 const SEQUENTIAL_MODE = __ENV.SEQUENTIAL_MODE === 'true' || __ENV.SEQUENTIAL_MODE === '1';
 
+// Calculate iterations per VU for per-vu-iterations executor
+// Each VU processes EVENTS_PER_TYPE * NUM_EVENT_TYPES / TOTAL_VUS iterations
+const ITERATIONS_PER_VU = SEQUENTIAL_MODE 
+    ? EVENTS_PER_TYPE * NUM_EVENT_TYPES 
+    : Math.ceil((EVENTS_PER_TYPE * NUM_EVENT_TYPES) / TOTAL_VUS);
+
 export const options = {
-    vus: SEQUENTIAL_MODE ? 1 : TOTAL_VUS, // Sequential mode uses 1 VU to process events in order
-    iterations: SEQUENTIAL_MODE ? EVENTS_PER_TYPE * NUM_EVENT_TYPES : EVENTS_PER_TYPE * TOTAL_VUS, // Sequential: 5*4=20, Parallel: 5*4*1=20
-    maxDuration: '10m',
+    scenarios: {
+        batch_events: {
+            executor: 'per-vu-iterations',
+            vus: SEQUENTIAL_MODE ? 1 : TOTAL_VUS,
+            iterations: ITERATIONS_PER_VU,
+            maxDuration: '10m',
+        },
+    },
     thresholds: {
         // Abort if error rate exceeds 50% (half of requests failing)
         'http_req_failed': ['rate<0.5'],
@@ -204,7 +216,8 @@ function generateTimestamp() {
 // Generate event payloads based on samples
 function generateCarCreatedEvent(carId = null, vuId = null, iteration = null, eventIndex = null) {
     const timestamp = generateTimestamp();
-    const id = carId || `CAR-${new Date().toISOString().split('T')[0].replace(/-/g, '')}-${randomIntBetween(1, 9999)}`;
+    // Use provided carId (UUID) or generate a new UUID
+    const id = carId || generateUUID(vuId || 1, (iteration || 0) * 4 + 0, (eventIndex || 0) + 20000);
     const uuid = generateUUID(vuId, iteration, eventIndex);
     
     return JSON.stringify({
@@ -239,7 +252,8 @@ function generateCarCreatedEvent(carId = null, vuId = null, iteration = null, ev
 
 function generateLoanCreatedEvent(carId, loanId = null, vuId = null, iteration = null, eventIndex = null) {
     const timestamp = generateTimestamp();
-    const id = loanId || `LOAN-${new Date().toISOString().split('T')[0].replace(/-/g, '')}-${randomIntBetween(1, 9999)}`;
+    // Use provided loanId (UUID) or generate a new UUID
+    const id = loanId || generateUUID(vuId || 1, (iteration || 0) * 4 + 1, (eventIndex || 0) + 20000);
     const uuid = generateUUID(vuId, iteration, eventIndex);
     const loanAmount = randomIntBetween(10000, 100000);
     const interestRate = (2.5 + Math.random() * 5).toFixed(2); // 2.5% - 7.5%
@@ -278,7 +292,8 @@ function generateLoanCreatedEvent(carId, loanId = null, vuId = null, iteration =
 
 function generateLoanPaymentEvent(loanId, amount = null, vuId = null, iteration = null, eventIndex = null) {
     const timestamp = generateTimestamp();
-    const paymentId = `PAYMENT-${new Date().toISOString().split('T')[0].replace(/-/g, '')}-${randomIntBetween(1, 9999)}`;
+    // Generate UUID for payment entity
+    const paymentId = generateUUID(vuId || 1, (iteration || 0) * 4 + 2, (eventIndex || 0) + 20000);
     const uuid = generateUUID(vuId, iteration, eventIndex);
     const paymentAmount = amount || (500 + Math.random() * 1500).toFixed(2); // $500-$2000
     
@@ -307,7 +322,8 @@ function generateLoanPaymentEvent(loanId, amount = null, vuId = null, iteration 
 
 function generateCarServiceEvent(carId, serviceId = null, vuId = null, iteration = null, eventIndex = null) {
     const timestamp = generateTimestamp();
-    const id = serviceId || `SERVICE-${new Date().toISOString().split('T')[0].replace(/-/g, '')}-${randomIntBetween(1, 9999)}`;
+    // Use provided serviceId (UUID) or generate a new UUID
+    const id = serviceId || generateUUID(vuId || 1, (iteration || 0) * 4 + 3, (eventIndex || 0) + 20000);
     const uuid = generateUUID(vuId, iteration, eventIndex);
     const amountPaid = (100 + Math.random() * 1000).toFixed(2); // $100-$1100
     const mileageAtService = randomIntBetween(1000, 100000);
@@ -468,18 +484,20 @@ export function setup() {
     // ============================================================================
     // Generate Test Data
     // ============================================================================
-    const timestamp = new Date().toISOString().split('T')[0].replace(/-/g, '');
     const carIds = [];
     const loanIds = [];
     const monthlyPayments = [];
     const serviceIds = [];
     
-    // Generate linked IDs for all events
+    // Generate linked UUIDs for all events
+    // Use a base VU ID and iteration offset to ensure uniqueness
     for (let i = 0; i < EVENTS_PER_TYPE; i++) {
-        carIds.push(`CAR-${timestamp}-${i}-${randomIntBetween(1000, 9999)}`);
-        loanIds.push(`LOAN-${timestamp}-${i}-${randomIntBetween(1000, 9999)}`);
+        // Generate UUIDs for entities using a deterministic approach
+        // Use a large offset (10000) to avoid conflicts with event UUIDs
+        carIds.push(generateUUID(1, i * 4 + 0, 10000 + i)); // Car entities
+        loanIds.push(generateUUID(1, i * 4 + 1, 10000 + i)); // Loan entities
         monthlyPayments.push((500 + Math.random() * 1500).toFixed(2));
-        serviceIds.push(`SERVICE-${timestamp}-${i}-${randomIntBetween(1000, 9999)}`);
+        serviceIds.push(generateUUID(1, i * 4 + 2, 10000 + i)); // Service entities
     }
     
     return {
@@ -495,18 +513,21 @@ export function setup() {
 
 export default function (data) {
     const vuId = __VU; // Virtual User ID (1 to TOTAL_VUS)
-    const globalIteration = __ITER; // Global iteration (0 to TOTAL_ITERATIONS-1)
+    const iteration = __ITER; // Per-VU iteration (0 to ITERATIONS_PER_VU-1)
+    let globalIteration = iteration; // Will be updated for parallel mode
     let payload;
     let eventType;
     let success;
     let eventIndexInType; // Event index within the event type (0 to EVENTS_PER_TYPE-1)
+    let eventTypeIndex; // Event type index (0=Car, 1=Loan, 2=Payment, 3=Service)
     
     // Sequential mode: process events in order (Car → Loan → Payment → Service)
     // Each event type waits for previous to complete before starting
     if (SEQUENTIAL_MODE) {
         // In sequential mode, iterations are: 0-4: Car, 5-9: Loan, 10-14: Payment, 15-19: Service
-        const eventTypeIndex = Math.floor(globalIteration / EVENTS_PER_TYPE);
-        eventIndexInType = globalIteration - (eventTypeIndex * EVENTS_PER_TYPE);
+        eventTypeIndex = Math.floor(iteration / EVENTS_PER_TYPE);
+        eventIndexInType = iteration - (eventTypeIndex * EVENTS_PER_TYPE);
+        globalIteration = iteration; // For consistency
         
         // Ensure we don't exceed the number of event types
         if (eventTypeIndex >= NUM_EVENT_TYPES) {
@@ -529,27 +550,41 @@ export default function (data) {
             }
         }
     } else {
-        // Parallel mode: original logic
-        // Determine which event type this iteration should send based on global iteration
-        // Iterations 0-9: Car, 10-19: Loan, 20-29: Payment, 30-39: Service
-        const eventTypeIndex = Math.floor(globalIteration / EVENTS_PER_TYPE);
+        // Parallel mode with per-vu-iterations executor
+        // Strategy: Each VU processes a fixed number of iterations
+        // Calculate global iteration by adding VU offset to per-VU iteration
+        // This ensures each VU processes unique event indices
         
-        // Ensure we don't exceed the number of event types
-        if (eventTypeIndex >= NUM_EVENT_TYPES) {
-            return; // This iteration is beyond our event types
+        // Calculate how many events each VU should process
+        const eventsPerVu = Math.ceil((EVENTS_PER_TYPE * NUM_EVENT_TYPES) / TOTAL_VUS);
+        
+        // Calculate VU offset: VU 1 starts at 0, VU 2 starts at eventsPerVu, etc.
+        const vuOffset = (vuId - 1) * eventsPerVu;
+        
+        // Calculate global iteration: VU offset + per-VU iteration
+        // VU 1: globalIteration = 0 + __ITER (0-99)
+        // VU 2: globalIteration = 100 + __ITER (100-199)
+        const globalIterationForEvent = vuOffset + iteration;
+        
+        // Calculate event type using modulo (cycles: 0,1,2,3,0,1,2,3,...)
+        eventTypeIndex = globalIterationForEvent % NUM_EVENT_TYPES;
+        
+        // Calculate event index within the event type
+        // Iterations 0-3: index 0 (one of each type)
+        // Iterations 4-7: index 1 (one of each type)
+        // etc.
+        eventIndexInType = Math.floor(globalIterationForEvent / NUM_EVENT_TYPES);
+        
+        // Ensure we don't exceed EVENTS_PER_TYPE
+        if (eventIndexInType >= EVENTS_PER_TYPE) {
+            return; // This iteration is beyond our event count
         }
         
-        // Calculate the event index within the event type (0 to EVENTS_PER_TYPE-1)
-        // For Car (iterations 0-9): eventIndexInType = 0-9
-        // For Loan (iterations 10-19): eventIndexInType = 0-9
-        // etc.
-        eventIndexInType = globalIteration - (eventTypeIndex * EVENTS_PER_TYPE);
+        // Update globalIteration for UUID generation and logging
+        globalIteration = globalIterationForEvent;
     }
     
-    // Determine event type index for payload generation
-    const eventTypeIndex = SEQUENTIAL_MODE 
-        ? Math.floor(globalIteration / EVENTS_PER_TYPE)
-        : Math.floor(globalIteration / EVENTS_PER_TYPE);
+    // eventTypeIndex is already calculated above in both modes (sequential and parallel)
     
     // Determine which VU should handle this event type
     // VU assignment: VU 1-VUS_PER_EVENT_TYPE handle Car, 
@@ -564,24 +599,27 @@ export default function (data) {
     
     // Generate the appropriate event based on event type
     // Pass VU ID, globalIteration, and event index to ensure unique UUIDs
+    // Use globalIteration directly for UUID generation (already unique across all VUs)
+    const globalIterationForUuid = globalIteration;
+    
     if (eventTypeIndex === 0) {
         // Car Created
-        payload = generateCarCreatedEvent(data.carIds[eventIndexInType], vuId, globalIteration, eventIndexInType);
+        payload = generateCarCreatedEvent(data.carIds[eventIndexInType], vuId, globalIterationForUuid, eventIndexInType);
         eventType = "CarCreated";
     } else if (eventTypeIndex === 1) {
         // Loan Created
         const carIndex = eventIndexInType; // Link to corresponding car
-        payload = generateLoanCreatedEvent(data.carIds[carIndex], data.loanIds[eventIndexInType], vuId, globalIteration, eventIndexInType);
+        payload = generateLoanCreatedEvent(data.carIds[carIndex], data.loanIds[eventIndexInType], vuId, globalIterationForUuid, eventIndexInType);
         eventType = "LoanCreated";
     } else if (eventTypeIndex === 2) {
         // Loan Payment Submitted
         const loanIndex = eventIndexInType; // Link to corresponding loan
-        payload = generateLoanPaymentEvent(data.loanIds[loanIndex], data.monthlyPayments[eventIndexInType], vuId, globalIteration, eventIndexInType);
+        payload = generateLoanPaymentEvent(data.loanIds[loanIndex], data.monthlyPayments[eventIndexInType], vuId, globalIterationForUuid, eventIndexInType);
         eventType = "LoanPaymentSubmitted";
     } else {
         // Car Service Done
         const carIndex = eventIndexInType; // Link to corresponding car
-        payload = generateCarServiceEvent(data.carIds[carIndex], data.serviceIds[eventIndexInType], vuId, globalIteration, eventIndexInType);
+        payload = generateCarServiceEvent(data.carIds[carIndex], data.serviceIds[eventIndexInType], vuId, globalIterationForUuid, eventIndexInType);
         eventType = "CarServiceDone";
     }
     
@@ -701,7 +739,7 @@ export default function (data) {
     // Log errors immediately for visibility
     if (!success || res.status !== 200) {
         const errorMsg = res.status >= 400 ? `HTTP ${res.status}: ${res.body?.substring(0, 200) || 'No response body'}` : 'Request failed checks';
-        console.error(`[ERROR] [VU ${vuId}] ${eventType} event failed (event ${eventIndexInType + 1}/${EVENTS_PER_TYPE}, global iteration ${globalIteration}): ${errorMsg}`);
+        console.error(`[ERROR] [VU ${vuId}] ${eventType} event failed (event ${eventIndexInType + 1}/${EVENTS_PER_TYPE}, iteration ${globalIteration}): ${errorMsg}`);
         
         // Log first few errors in detail, then summarize
         if (eventIndexInType < 5) {
@@ -757,7 +795,7 @@ export default function (data) {
     // Log progress periodically (every 10% or every 100 events, whichever is smaller)
     const logInterval = Math.max(1, Math.min(Math.floor(EVENTS_PER_TYPE / 10), 100));
     if (eventIndexInType % logInterval === 0 || eventIndexInType === EVENTS_PER_TYPE - 1) {
-        console.log(`[VU ${vuId}] Sent ${eventType} event (${eventIndexInType + 1}/${EVENTS_PER_TYPE} for this type, global iteration ${globalIteration})`);
+        console.log(`[VU ${vuId}] Sent ${eventType} event (${eventIndexInType + 1}/${EVENTS_PER_TYPE} for this type, iteration ${globalIteration})`);
     }
     
     // Small delay between events
