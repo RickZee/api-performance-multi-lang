@@ -58,7 +58,7 @@ function generateTimestamp() {
     return new Date().toISOString();
 }
 
-// Base templates from samples - adapted for Lambda API format (eventBody.entities)
+// Base templates from samples - adapted for new schema format
 const carCreatedTemplate = {
     eventHeader: {
         uuid: "",
@@ -67,25 +67,25 @@ const carCreatedTemplate = {
         createdDate: "",
         savedDate: ""
     },
-    eventBody: {
-        entities: [{
-            entityType: "Car",
+    entities: [{
+        entityHeader: {
             entityId: "",
-            updatedAttributes: {
-                id: "",
-                vin: "",
-                make: "Tesla",
-                model: "Model S",
-                year: 2025,
-                color: "Midnight Silver",
-                mileage: 0,
-                lastServiceDate: "",
-                totalBalance: 0.0,
-                lastLoanPaymentDate: "",
-                owner: ""
-            }
-        }]
-    }
+            entityType: "Car",
+            createdAt: "",
+            updatedAt: ""
+        },
+        id: "",
+        vin: "",
+        make: "Tesla",
+        model: "Model S",
+        year: 2025,
+        color: "Midnight Silver",
+        mileage: 0,
+        lastServiceDate: "",
+        totalBalance: 0.0,
+        lastLoanPaymentDate: "",
+        owner: ""
+    }]
 };
 
 const loanCreatedTemplate = {
@@ -96,25 +96,25 @@ const loanCreatedTemplate = {
         createdDate: "",
         savedDate: ""
     },
-    eventBody: {
-        entities: [{
-            entityType: "Loan",
+    entities: [{
+        entityHeader: {
             entityId: "",
-            updatedAttributes: {
-                id: "",
-                carId: "",
-                financialInstitution: "First National Bank",
-                balance: 45000.00,
-                lastPaidDate: "",
-                loanAmount: 50000.00,
-                interestRate: 0.045,
-                termMonths: 60,
-                startDate: "",
-                status: "active",
-                monthlyPayment: 932.16
-            }
-        }]
-    }
+            entityType: "Loan",
+            createdAt: "",
+            updatedAt: ""
+        },
+        id: "",
+        carId: "",
+        financialInstitution: "First National Bank",
+        balance: 45000.00,
+        lastPaidDate: "",
+        loanAmount: 50000.00,
+        interestRate: 0.045,
+        termMonths: 60,
+        startDate: "",
+        status: "active",
+        monthlyPayment: 932.16
+    }]
 };
 
 const loanPaymentTemplate = {
@@ -125,18 +125,18 @@ const loanPaymentTemplate = {
         createdDate: "",
         savedDate: ""
     },
-    eventBody: {
-        entities: [{
-            entityType: "LoanPayment",
+    entities: [{
+        entityHeader: {
             entityId: "",
-            updatedAttributes: {
-                id: "",
-                loanId: "",
-                amount: 932.16,
-                paymentDate: ""
-            }
-        }]
-    }
+            entityType: "LoanPayment",
+            createdAt: "",
+            updatedAt: ""
+        },
+        id: "",
+        loanId: "",
+        amount: 932.16,
+        paymentDate: ""
+    }]
 };
 
 // Generate event from template
@@ -149,16 +149,18 @@ function generateCarCreatedEvent(carId = null) {
     event.eventHeader.uuid = uuid;
     event.eventHeader.createdDate = timestamp;
     event.eventHeader.savedDate = timestamp;
-    event.eventBody.entities[0].entityId = id;
-    event.eventBody.entities[0].updatedAttributes.id = id;
-    event.eventBody.entities[0].updatedAttributes.vin = randomString(17).toUpperCase();
-    event.eventBody.entities[0].updatedAttributes.make = ["Tesla", "Toyota", "Honda", "Ford", "BMW", "Mercedes", "Audi", "Lexus"][randomIntBetween(0, 7)];
-    event.eventBody.entities[0].updatedAttributes.model = ["Model S", "Camry", "Accord", "F-150", "3 Series", "C-Class", "A4", "ES"][randomIntBetween(0, 7)];
-    event.eventBody.entities[0].updatedAttributes.year = randomIntBetween(2020, 2025);
-    event.eventBody.entities[0].updatedAttributes.color = ["Red", "Blue", "Black", "White", "Silver", "Gray"][randomIntBetween(0, 5)];
-    event.eventBody.entities[0].updatedAttributes.mileage = randomIntBetween(0, 50000);
-    event.eventBody.entities[0].updatedAttributes.lastServiceDate = timestamp;
-    event.eventBody.entities[0].updatedAttributes.owner = `${randomString(8)} ${randomString(10)}`;
+    event.entities[0].entityHeader.entityId = id;
+    event.entities[0].entityHeader.createdAt = timestamp;
+    event.entities[0].entityHeader.updatedAt = timestamp;
+    event.entities[0].id = id;
+    event.entities[0].vin = randomString(17).toUpperCase();
+    event.entities[0].make = ["Tesla", "Toyota", "Honda", "Ford", "BMW", "Mercedes", "Audi", "Lexus"][randomIntBetween(0, 7)];
+    event.entities[0].model = ["Model S", "Camry", "Accord", "F-150", "3 Series", "C-Class", "A4", "ES"][randomIntBetween(0, 7)];
+    event.entities[0].year = randomIntBetween(2020, 2025);
+    event.entities[0].color = ["Red", "Blue", "Black", "White", "Silver", "Gray"][randomIntBetween(0, 5)];
+    event.entities[0].mileage = randomIntBetween(0, 50000);
+    event.entities[0].lastServiceDate = timestamp;
+    event.entities[0].owner = `${randomString(8)} ${randomString(10)}`;
     
     return JSON.stringify(event);
 }
@@ -176,17 +178,19 @@ function generateLoanCreatedEvent(carId, loanId = null) {
     event.eventHeader.uuid = uuid;
     event.eventHeader.createdDate = timestamp;
     event.eventHeader.savedDate = timestamp;
-    event.eventBody.entities[0].entityId = id;
-    event.eventBody.entities[0].updatedAttributes.id = id;
-    event.eventBody.entities[0].updatedAttributes.carId = carId;
-    event.eventBody.entities[0].updatedAttributes.financialInstitution = ["First National Bank", "Chase Bank", "Wells Fargo", "Bank of America", "Citibank"][randomIntBetween(0, 4)];
-    event.eventBody.entities[0].updatedAttributes.balance = loanAmount.toFixed(2);
-    event.eventBody.entities[0].updatedAttributes.lastPaidDate = timestamp;
-    event.eventBody.entities[0].updatedAttributes.loanAmount = loanAmount.toFixed(2);
-    event.eventBody.entities[0].updatedAttributes.interestRate = parseFloat(interestRate.toFixed(4));
-    event.eventBody.entities[0].updatedAttributes.termMonths = termMonths;
-    event.eventBody.entities[0].updatedAttributes.startDate = timestamp;
-    event.eventBody.entities[0].updatedAttributes.monthlyPayment = monthlyPayment;
+    event.entities[0].entityHeader.entityId = id;
+    event.entities[0].entityHeader.createdAt = timestamp;
+    event.entities[0].entityHeader.updatedAt = timestamp;
+    event.entities[0].id = id;
+    event.entities[0].carId = carId;
+    event.entities[0].financialInstitution = ["First National Bank", "Chase Bank", "Wells Fargo", "Bank of America", "Citibank"][randomIntBetween(0, 4)];
+    event.entities[0].balance = loanAmount.toFixed(2);
+    event.entities[0].lastPaidDate = timestamp;
+    event.entities[0].loanAmount = loanAmount.toFixed(2);
+    event.entities[0].interestRate = parseFloat(interestRate.toFixed(4));
+    event.entities[0].termMonths = termMonths;
+    event.entities[0].startDate = timestamp;
+    event.entities[0].monthlyPayment = monthlyPayment;
     
     return JSON.stringify(event);
 }
@@ -201,11 +205,13 @@ function generateLoanPaymentEvent(loanId, amount = null) {
     event.eventHeader.uuid = uuid;
     event.eventHeader.createdDate = timestamp;
     event.eventHeader.savedDate = timestamp;
-    event.eventBody.entities[0].entityId = paymentId;
-    event.eventBody.entities[0].updatedAttributes.id = paymentId;
-    event.eventBody.entities[0].updatedAttributes.loanId = loanId;
-    event.eventBody.entities[0].updatedAttributes.amount = parseFloat(paymentAmount);
-    event.eventBody.entities[0].updatedAttributes.paymentDate = timestamp;
+    event.entities[0].entityHeader.entityId = paymentId;
+    event.entities[0].entityHeader.createdAt = timestamp;
+    event.entities[0].entityHeader.updatedAt = timestamp;
+    event.entities[0].id = paymentId;
+    event.entities[0].loanId = loanId;
+    event.entities[0].amount = parseFloat(paymentAmount);
+    event.entities[0].paymentDate = timestamp;
     
     return JSON.stringify(event);
 }

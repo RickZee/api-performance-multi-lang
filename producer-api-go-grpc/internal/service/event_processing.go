@@ -93,7 +93,7 @@ func (s *EventProcessingService) ProcessEvent(ctx context.Context, event *models
 	}
 
 	// 3. Extract and save entities to their respective tables
-	for _, entityUpdate := range event.EventBody.Entities {
+	for _, entityUpdate := range event.Entities {
 		if err := s.processEntityUpdate(ctx, entityUpdate, *eventID, tx); err != nil {
 			return fmt.Errorf("failed to process entity update: %w", err)
 		}
@@ -191,32 +191,32 @@ func (s *EventProcessingService) saveEventHeader(
 
 func (s *EventProcessingService) processEntityUpdate(
 	ctx context.Context,
-	entityUpdate models.EntityUpdate,
+	entity models.Entity,
 	eventID string,
 	tx pgx.Tx,
 ) error {
 	s.logger.Info(fmt.Sprintf("%s Processing entity for type: %s and id: %s",
-		constants.APIName(), entityUpdate.EntityType, entityUpdate.EntityID))
+		constants.APIName(), entity.EntityHeader.EntityType, entity.EntityHeader.EntityID))
 
-	entityRepo := s.getEntityRepository(entityUpdate.EntityType)
+	entityRepo := s.getEntityRepository(entity.EntityHeader.EntityType)
 	if entityRepo == nil {
 		s.logger.Warn(fmt.Sprintf("%s Skipping entity with unknown type: %s",
-			constants.APIName(), entityUpdate.EntityType))
+			constants.APIName(), entity.EntityHeader.EntityType))
 		return nil
 	}
 
-	exists, err := entityRepo.ExistsByEntityID(ctx, entityUpdate.EntityID, tx)
+	exists, err := entityRepo.ExistsByEntityID(ctx, entity.EntityHeader.EntityID, tx)
 	if err != nil {
 		return fmt.Errorf("failed to check if entity exists: %w", err)
 	}
 
 	if exists {
 		s.logger.Warn(fmt.Sprintf("%s Entity already exists, updating: %s",
-			constants.APIName(), entityUpdate.EntityID))
+			constants.APIName(), entity.EntityHeader.EntityID))
 		return s.updateExistingEntity(ctx, entityRepo, entityUpdate, eventID, tx)
 	} else {
 		s.logger.Info(fmt.Sprintf("%s Entity does not exist, creating new: %s",
-			constants.APIName(), entityUpdate.EntityID))
+			constants.APIName(), entity.EntityHeader.EntityID))
 		return s.createNewEntity(ctx, entityRepo, entityUpdate, eventID, tx)
 	}
 }
@@ -224,34 +224,20 @@ func (s *EventProcessingService) processEntityUpdate(
 func (s *EventProcessingService) createNewEntity(
 	ctx context.Context,
 	entityRepo *repository.EntityRepository,
-	entityUpdate models.EntityUpdate,
+	entity models.Entity,
 	eventID string,
 	tx pgx.Tx,
 ) error {
-	entityID := entityUpdate.EntityID
-	entityType := entityUpdate.EntityType
+	entityID := entity.EntityHeader.EntityID
+	entityType := entity.EntityHeader.EntityType
 	now := time.Now()
 
-	// Parse updatedAttributes to extract entity data
-	var updatedAttrs map[string]interface{}
-	if err := json.Unmarshal(entityUpdate.UpdatedAttributes, &updatedAttrs); err != nil {
-		return fmt.Errorf("failed to parse updated attributes: %w", err)
-	}
+	// Extract entity data from entity properties
+	entityData := entity.Properties
 
-	// Make a copy to avoid modifying the original
-	entityData := make(map[string]interface{})
-	for k, v := range updatedAttrs {
-		entityData[k] = v
-	}
-
-	// Remove entityHeader from entity_data if it exists (nested structure)
-	var entityHeader map[string]interface{}
-	if header, ok := entityData["entityHeader"].(map[string]interface{}); ok {
-		entityHeader = header
-		delete(entityData, "entityHeader")
-	} else if header, ok := entityData["entity_header"].(map[string]interface{}); ok {
-		entityHeader = header
-		delete(entityData, "entity_header")
+	// Use createdAt and updatedAt from entityHeader
+	createdAt := &entity.EntityHeader.CreatedAt
+	updatedAt := &entity.EntityHeader.UpdatedAt
 	}
 
 	// Extract createdAt and updatedAt from entityHeader if present, otherwise from entity_data, otherwise use now
@@ -325,28 +311,19 @@ func (s *EventProcessingService) createNewEntity(
 func (s *EventProcessingService) updateExistingEntity(
 	ctx context.Context,
 	entityRepo *repository.EntityRepository,
-	entityUpdate models.EntityUpdate,
+	entity models.Entity,
 	eventID string,
 	tx pgx.Tx,
 ) error {
-	entityID := entityUpdate.EntityID
+	entityID := entity.EntityHeader.EntityID
 	updatedAt := time.Now()
 
-	// Parse updatedAttributes to extract entity data
-	var updatedAttrs map[string]interface{}
-	if err := json.Unmarshal(entityUpdate.UpdatedAttributes, &updatedAttrs); err != nil {
-		return fmt.Errorf("failed to parse updated attributes: %w", err)
-	}
+	// Extract entity data from entity properties
+	entityData := entity.Properties
 
-	// Make a copy to avoid modifying the original
-	entityData := make(map[string]interface{})
-	for k, v := range updatedAttrs {
-		entityData[k] = v
-	}
-
-	// Remove entityHeader from entity_data if it exists
-	delete(entityData, "entityHeader")
-	delete(entityData, "entity_header")
+	// Use createdAt and updatedAt from entityHeader
+	createdAt := &entity.EntityHeader.CreatedAt
+	updatedAt := &entity.EntityHeader.UpdatedAt
 
 	// Remove entityHeader fields that might be at top level
 	delete(entityData, "createdAt")

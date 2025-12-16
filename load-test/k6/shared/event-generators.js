@@ -39,25 +39,25 @@ export function generateCarCreatedEvent(carId = null) {
             createdDate: timestamp,
             savedDate: timestamp
         },
-        eventBody: {
-            entities: [{
-                entityType: "Car",
+        entities: [{
+            entityHeader: {
                 entityId: id,
-                updatedAttributes: {
-                    id: id,
-                    vin: `${randomString(17).toUpperCase()}`,
-                    make: ["Tesla", "Toyota", "Honda", "Ford", "BMW"][randomIntBetween(0, 4)],
-                    model: ["Model S", "Camry", "Accord", "F-150", "3 Series"][randomIntBetween(0, 4)],
-                    year: randomIntBetween(2020, 2025),
-                    color: ["Midnight Silver", "Pearl White", "Deep Blue", "Red", "Black"][randomIntBetween(0, 4)],
-                    mileage: randomIntBetween(0, 50000),
-                    lastServiceDate: timestamp,
-                    totalBalance: 0.0,
-                    lastLoanPaymentDate: timestamp,
-                    owner: `${randomString(8)} ${randomString(10)}`
-                }
-            }]
-        }
+                entityType: "Car",
+                createdAt: timestamp,
+                updatedAt: timestamp
+            },
+            id: id,
+            vin: `${randomString(17).toUpperCase()}`,
+            make: ["Tesla", "Toyota", "Honda", "Ford", "BMW"][randomIntBetween(0, 4)],
+            model: ["Model S", "Camry", "Accord", "F-150", "3 Series"][randomIntBetween(0, 4)],
+            year: randomIntBetween(2020, 2025),
+            color: ["Midnight Silver", "Pearl White", "Deep Blue", "Red", "Black"][randomIntBetween(0, 4)],
+            mileage: randomIntBetween(0, 50000),
+            lastServiceDate: timestamp,
+            totalBalance: 0.0,
+            lastLoanPaymentDate: timestamp,
+            owner: `${randomString(8)} ${randomString(10)}`
+        }]
     });
 }
 
@@ -82,25 +82,25 @@ export function generateLoanCreatedEvent(carId, loanId = null) {
             createdDate: timestamp,
             savedDate: timestamp
         },
-        eventBody: {
-            entities: [{
-                entityType: "Loan",
+        entities: [{
+            entityHeader: {
                 entityId: id,
-                updatedAttributes: {
-                    id: id,
-                    carId: carId,
-                    financialInstitution: ["First National Bank", "Chase Bank", "Wells Fargo", "Bank of America"][randomIntBetween(0, 3)],
-                    balance: loanAmount.toFixed(2),
-                    lastPaidDate: timestamp,
-                    loanAmount: loanAmount.toFixed(2),
-                    interestRate: parseFloat(interestRate),
-                    termMonths: termMonths,
-                    startDate: timestamp,
-                    status: "active",
-                    monthlyPayment: monthlyPayment.toFixed(2)
-                }
-            }]
-        }
+                entityType: "Loan",
+                createdAt: timestamp,
+                updatedAt: timestamp
+            },
+            id: id,
+            carId: carId,
+            financialInstitution: ["First National Bank", "Chase Bank", "Wells Fargo", "Bank of America"][randomIntBetween(0, 3)],
+            balance: loanAmount.toFixed(2),
+            lastPaidDate: timestamp,
+            loanAmount: loanAmount.toFixed(2),
+            interestRate: parseFloat(interestRate),
+            termMonths: termMonths,
+            startDate: timestamp,
+            status: "active",
+            monthlyPayment: monthlyPayment.toFixed(2)
+        }]
     });
 }
 
@@ -121,18 +121,18 @@ export function generateLoanPaymentEvent(loanId, amount = null) {
             createdDate: timestamp,
             savedDate: timestamp
         },
-        eventBody: {
-            entities: [{
-                entityType: "LoanPayment",
+        entities: [{
+            entityHeader: {
                 entityId: paymentId,
-                updatedAttributes: {
-                    id: paymentId,
-                    loanId: loanId,
-                    amount: parseFloat(paymentAmount).toFixed(2),
-                    paymentDate: timestamp
-                }
-            }]
-        }
+                entityType: "LoanPayment",
+                createdAt: timestamp,
+                updatedAt: timestamp
+            },
+            id: paymentId,
+            loanId: loanId,
+            amount: parseFloat(paymentAmount).toFixed(2),
+            paymentDate: timestamp
+        }]
     });
 }
 
@@ -171,22 +171,22 @@ export function generateCarServiceDoneEvent(carId, serviceId = null) {
             createdDate: timestamp,
             savedDate: timestamp
         },
-        eventBody: {
-            entities: [{
-                entityType: "ServiceRecord",
+        entities: [{
+            entityHeader: {
                 entityId: id,
-                updatedAttributes: {
-                    id: id,
-                    carId: carId,
-                    serviceDate: timestamp,
-                    amountPaid: parseFloat(amountPaid).toFixed(2),
-                    dealerId: dealerId,
-                    dealerName: dealerName,
-                    mileageAtService: mileageAtService,
-                    description: description
-                }
-            }]
-        }
+                entityType: "ServiceRecord",
+                createdAt: timestamp,
+                updatedAt: timestamp
+            },
+            id: id,
+            carId: carId,
+            serviceDate: timestamp,
+            amountPaid: parseFloat(amountPaid).toFixed(2),
+            dealerId: dealerId,
+            dealerName: dealerName,
+            mileageAtService: mileageAtService,
+            description: description
+        }]
     });
 }
 

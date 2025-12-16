@@ -6,6 +6,9 @@ import lombok.NoArgsConstructor;
 
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.NotNull;
+import jakarta.validation.constraints.NotEmpty;
+
+import java.util.List;
 
 @Data
 @NoArgsConstructor
@@ -16,6 +19,7 @@ public class Event {
     @Valid
     private EventHeader eventHeader;
 
+    @NotEmpty(message = "entities is required and cannot be empty")
     @Valid
-    private EventBody eventBody;
+    private List<Entity> entities;
 }

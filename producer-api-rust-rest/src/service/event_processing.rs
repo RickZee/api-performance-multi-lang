@@ -1,4 +1,4 @@
-use crate::models::{EntityUpdate, Event};
+use crate::models::{Entity, Event};
 use crate::repository::{
     BusinessEventRepository, DuplicateEventError, EntityRepository, EventHeaderRepository,
 };
@@ -82,7 +82,7 @@ impl EventProcessingService {
                 .context("Failed to save event header")?;
 
             // 3. Extract and save entities to their respective tables
-            for entity_update in &event.event_body.entities {
+            for entity in &event.entities {
                 self.process_entity_update(entity_update, &event_id, Some(&mut tx)).await
                     .context("Failed to process entity update")?;
             }
@@ -182,24 +182,24 @@ impl EventProcessingService {
 
     async fn process_entity_update(
         &self,
-        entity_update: &EntityUpdate,
+        entity: &Entity,
         event_id: &str,
         tx: Option<&mut Transaction<'_, Postgres>>,
     ) -> anyhow::Result<()> {
         tracing::info!(
             "{} Processing entity for type: {} and id: {}",
             API_NAME,
-            entity_update.entity_type,
-            entity_update.entity_id
+            entity.entity_header.entity_type,
+            entity.entity_header.entity_id
         );
 
-        let entity_repo = match self.get_entity_repository(&entity_update.entity_type) {
+        let entity_repo = match self.get_entity_repository(&entity.entity_header.entity_type) {
             Some(repo) => repo,
             None => {
                 tracing::warn!(
                     "{} Skipping entity with unknown type: {}",
                     API_NAME,
-                    entity_update.entity_type
+                    entity.entity_header.entity_type
                 );
                 return Ok(());
             }
@@ -208,7 +208,7 @@ impl EventProcessingService {
         // Check existence using the pool (read operation doesn't need transaction)
         // The actual INSERT/UPDATE will be in the transaction and handle conflicts
         let exists = entity_repo
-            .exists_by_entity_id(&entity_update.entity_id, None)
+            .exists_by_entity_id(&entity.entity_header.entity_id, None)
             .await
             .context("Failed to check if entity exists")?;
 
@@ -216,72 +216,36 @@ impl EventProcessingService {
             tracing::warn!(
                 "{} Entity already exists, updating: {}",
                 API_NAME,
-                entity_update.entity_id
+                entity.entity_header.entity_id
             );
-            self.update_existing_entity(&entity_repo, entity_update, event_id, tx).await
+            self.update_existing_entity(&entity_repo, entity, event_id, tx).await
         } else {
             tracing::info!(
                 "{} Entity does not exist, creating new: {}",
                 API_NAME,
-                entity_update.entity_id
+                entity.entity_header.entity_id
             );
-            self.create_new_entity(&entity_repo, entity_update, event_id, tx).await
+            self.create_new_entity(&entity_repo, entity, event_id, tx).await
         }
     }
 
     async fn create_new_entity(
         &self,
         entity_repo: &EntityRepository,
-        entity_update: &EntityUpdate,
+        entity: &Entity,
         event_id: &str,
         tx: Option<&mut Transaction<'_, Postgres>>,
     ) -> anyhow::Result<()> {
-        let entity_id = &entity_update.entity_id;
-        let entity_type = &entity_update.entity_type;
+        let entity_id = &entity.entity_header.entity_id;
+        let entity_type = &entity.entity_header.entity_type;
         let now = Utc::now();
 
-        // Parse updatedAttributes to extract entity data
-        let mut entity_data: Value = entity_update.updated_attributes.clone();
+        // Extract entity data from entity properties (excluding entityHeader)
+        let mut entity_data = entity.properties.clone();
 
-        // Remove entityHeader from entity_data if it exists (nested structure)
-        let mut entity_header: Option<Value> = None;
-        if let Value::Object(ref mut obj) = entity_data {
-            entity_header = obj.remove("entityHeader");
-            if entity_header.is_none() {
-                entity_header = obj.remove("entity_header");
-            }
-        }
-
-        // Extract createdAt and updatedAt from entityHeader if present, otherwise from entity_data, otherwise use now
-        let mut created_at = now;
-        let mut updated_at = now;
-
-        if let Some(Value::Object(header_obj)) = entity_header {
-            if let Some(Value::String(ca)) = header_obj.get("createdAt").or_else(|| header_obj.get("created_at")) {
-                if let Ok(dt) = parse_datetime(ca) {
-                    created_at = dt;
-                }
-            }
-            if let Some(Value::String(ua)) = header_obj.get("updatedAt").or_else(|| header_obj.get("updated_at")) {
-                if let Ok(dt) = parse_datetime(ua) {
-                    updated_at = dt;
-                }
-            }
-        }
-
-        // Try to get from entity_data if not found in entityHeader
-        if let Value::Object(ref mut obj) = entity_data {
-            if let Some(Value::String(ca)) = obj.remove("createdAt").or_else(|| obj.remove("created_at")) {
-                if let Ok(dt) = parse_datetime(&ca) {
-                    created_at = dt;
-                }
-            }
-            if let Some(Value::String(ua)) = obj.remove("updatedAt").or_else(|| obj.remove("updated_at")) {
-                if let Ok(dt) = parse_datetime(&ua) {
-                    updated_at = dt;
-                }
-            }
-        }
+        // Use createdAt and updatedAt from entityHeader
+        let created_at = entity.entity_header.created_at;
+        let updated_at = entity.entity_header.updated_at;
 
         entity_repo
             .create(entity_id, entity_type, Some(created_at), Some(updated_at), &entity_data, Some(event_id), tx)
@@ -295,27 +259,15 @@ impl EventProcessingService {
     async fn update_existing_entity(
         &self,
         entity_repo: &EntityRepository,
-        entity_update: &EntityUpdate,
+        entity: &Entity,
         event_id: &str,
         tx: Option<&mut Transaction<'_, Postgres>>,
     ) -> anyhow::Result<()> {
-        let entity_id = &entity_update.entity_id;
+        let entity_id = &entity.entity_header.entity_id;
         let updated_at = Utc::now();
 
-        // Parse updatedAttributes to extract entity data
-        let mut entity_data: Value = entity_update.updated_attributes.clone();
-
-        // Remove entityHeader from entity_data if it exists
-        if let Value::Object(ref mut obj) = entity_data {
-            obj.remove("entityHeader");
-            obj.remove("entity_header");
-
-            // Remove entityHeader fields that might be at top level
-            obj.remove("createdAt");
-            obj.remove("created_at");
-            obj.remove("updatedAt");
-            obj.remove("updated_at");
-        }
+        // Extract entity data from entity properties (excluding entityHeader)
+        let entity_data = entity.properties.clone();
 
         entity_repo
             .update(entity_id, updated_at, &entity_data, Some(event_id), tx)

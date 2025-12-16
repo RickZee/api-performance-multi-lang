@@ -34,18 +34,18 @@ def create_car_event(index):
             "createdDate": now,
             "savedDate": now
         },
-        "eventBody": {
-            "entities": [{
-                "entityType": "CAR",
+        "entities": [{
+            "entityHeader": {
                 "entityId": entity_id,
-                "updatedAttributes": {
-                    "make": "Toyota",
-                    "model": "Camry",
-                    "year": 2024,
-                    "vin": f"VIN{int(time.time() * 1000) + index}"
-                }
-            }]
-        }
+                "entityType": "Car",
+                "createdAt": now,
+                "updatedAt": now
+            },
+            "make": "Toyota",
+            "model": "Camry",
+            "year": 2024,
+            "vin": f"VIN{int(time.time() * 1000) + index}"
+        }]
     }
 
 def create_loan_event(index):
@@ -62,17 +62,17 @@ def create_loan_event(index):
             "createdDate": now,
             "savedDate": now
         },
-        "eventBody": {
-            "entities": [{
-                "entityType": "LOAN",
+        "entities": [{
+            "entityHeader": {
                 "entityId": entity_id,
-                "updatedAttributes": {
-                    "loanAmount": 25000,
-                    "interestRate": 5.5,
-                    "termMonths": 60
-                }
-            }]
-        }
+                "entityType": "Loan",
+                "createdAt": now,
+                "updatedAt": now
+            },
+            "loanAmount": 25000,
+            "interestRate": 5.5,
+            "termMonths": 60
+        }]
     }
 
 def create_payment_event(index):
@@ -89,16 +89,16 @@ def create_payment_event(index):
             "createdDate": now,
             "savedDate": now
         },
-        "eventBody": {
-            "entities": [{
-                "entityType": "LOAN_PAYMENT",
+        "entities": [{
+            "entityHeader": {
                 "entityId": entity_id,
-                "updatedAttributes": {
-                    "paymentAmount": 500,
-                    "paymentDate": now
-                }
-            }]
-        }
+                "entityType": "LoanPayment",
+                "createdAt": now,
+                "updatedAt": now
+            },
+            "paymentAmount": 500,
+            "paymentDate": now
+        }]
     }
 
 def create_service_event(index):
@@ -115,17 +115,17 @@ def create_service_event(index):
             "createdDate": now,
             "savedDate": now
         },
-        "eventBody": {
-            "entities": [{
-                "entityType": "SERVICE_RECORD",
+        "entities": [{
+            "entityHeader": {
                 "entityId": entity_id,
-                "updatedAttributes": {
-                    "serviceType": "Oil Change",
-                    "mileage": 15000,
-                    "cost": 75.00
-                }
-            }]
-        }
+                "entityType": "ServiceRecord",
+                "createdAt": now,
+                "updatedAt": now
+            },
+            "serviceType": "Oil Change",
+            "mileage": 15000,
+            "cost": 75.00
+        }]
     }
 
 def submit_event(event, event_type):

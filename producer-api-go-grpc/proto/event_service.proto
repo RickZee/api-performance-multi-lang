@@ -13,7 +13,7 @@ service EventService {
 // Request message for event processing
 message EventRequest {
   EventHeader event_header = 1;
-  EventBody event_body = 2;
+  repeated Entity entities = 2;
 }
 
 // Response message for event processing
@@ -31,16 +31,19 @@ message EventHeader {
   string event_type = 5;
 }
 
-// Event body containing entity updates
-message EventBody {
-  repeated EntityUpdate entities = 1;
+// Entity header containing metadata
+message EntityHeader {
+  string entity_id = 1;
+  string entity_type = 2;
+  string created_at = 3;
+  string updated_at = 4;
 }
 
-// Entity update information
-message EntityUpdate {
-  string entity_type = 1;
-  string entity_id = 2;
-  map<string, string> updated_attributes = 3;
+// Entity with header and flat properties
+message Entity {
+  EntityHeader entity_header = 1;
+  // Additional entity-specific properties stored as JSON string
+  string properties_json = 2;
 }
 
 // Health check request

@@ -57,29 +57,68 @@ class EventHeader(BaseModel):
         }
 
 
-class EntityUpdate(BaseModel):
-    """Entity update information."""
+class EntityHeader(BaseModel):
+    """Entity header containing metadata."""
     
-    entity_type: str = Field(..., alias="entityType")
     entity_id: str = Field(..., alias="entityId")
-    updated_attributes: Any = Field(..., alias="updatedAttributes")
+    entity_type: str = Field(..., alias="entityType")
+    created_at: datetime = Field(..., alias="createdAt")
+    updated_at: datetime = Field(..., alias="updatedAt")
+    
+    @field_validator("created_at", "updated_at", mode="before")
+    @classmethod
+    def parse_flexible_date(cls, v: Any) -> datetime:
+        """Parse date from ISO 8601 string or Unix timestamp (milliseconds)."""
+        if isinstance(v, datetime):
+            return v
+        
+        if isinstance(v, str):
+            # Try ISO 8601 formats first
+            try:
+                return parser.isoparse(v)
+            except (ValueError, TypeError):
+                pass
+            
+            # Try parsing as numeric string (timestamp in milliseconds)
+            try:
+                ms = int(v)
+                return datetime.fromtimestamp(ms / 1000.0)
+            except (ValueError, TypeError):
+                pass
+            
+            raise ValueError(f"Unable to parse date string: {v}")
+        
+        if isinstance(v, (int, float)):
+            # JSON numbers are parsed as int/float
+            ms = int(v)
+            return datetime.fromtimestamp(ms / 1000.0)
+        
+        raise ValueError(f"Unsupported date type: {type(v)}")
     
     class Config:
         """Pydantic config."""
         populate_by_name = True
+        json_encoders = {
+            datetime: lambda v: v.isoformat() if v else None
+        }
 
 
-class EventBody(BaseModel):
-    """Event body containing entity updates."""
+class Entity(BaseModel):
+    """Entity with header and flat properties."""
     
-    entities: List[EntityUpdate]
+    entity_header: EntityHeader = Field(..., alias="entityHeader")
+    
+    class Config:
+        """Pydantic config."""
+        populate_by_name = True
+        extra = "allow"  # Allow additional entity-specific properties at root level
 
 
 class Event(BaseModel):
     """Complete event structure."""
     
     event_header: EventHeader = Field(..., alias="eventHeader")
-    event_body: EventBody = Field(..., alias="eventBody")
+    entities: List[Entity] = Field(..., min_length=1)
     
     class Config:
         """Pydantic config."""

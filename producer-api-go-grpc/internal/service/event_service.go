@@ -7,11 +7,12 @@ import (
 	"producer-api-go-grpc/internal/repository"
 	"producer-api-go-grpc/proto"
 
+	"producer-api-go-grpc/internal/constants"
+
 	"github.com/jackc/pgx/v5/pgxpool"
 	"go.uber.org/zap"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
-	"producer-api-go-grpc/internal/constants"
 )
 
 type EventServiceImpl struct {
@@ -48,21 +49,20 @@ func (s *EventServiceImpl) ProcessEvent(ctx context.Context, req *proto.EventReq
 		return nil, status.Error(codes.InvalidArgument, "Invalid event: eventName cannot be empty")
 	}
 
-	if req.EventBody == nil {
-		return nil, status.Error(codes.InvalidArgument, "Invalid event: missing eventBody")
-	}
-
 	// Validate entities list is not empty
-	if len(req.EventBody.Entities) == 0 {
+	if len(req.Entities) == 0 {
 		return nil, status.Error(codes.InvalidArgument, "Invalid event: entities list cannot be empty")
 	}
 
 	// Validate each entity
-	for _, entityUpdate := range req.EventBody.Entities {
-		if entityUpdate.EntityType == "" {
+	for _, entity := range req.Entities {
+		if entity.EntityHeader == nil {
+			return nil, status.Error(codes.InvalidArgument, "Invalid entity: missing entityHeader")
+		}
+		if entity.EntityHeader.EntityType == "" {
 			return nil, status.Error(codes.InvalidArgument, "Invalid entity: entityType cannot be empty")
 		}
-		if entityUpdate.EntityId == "" {
+		if entity.EntityHeader.EntityId == "" {
 			return nil, status.Error(codes.InvalidArgument, "Invalid entity: entityId cannot be empty")
 		}
 	}

@@ -121,7 +121,7 @@ class TestBusinessEventRepository:
         event_type = "CarCreated"
         created_date = datetime(2024, 1, 15, 10, 30, 0)
         saved_date = datetime(2024, 1, 15, 10, 30, 5)
-        event_data = {"eventHeader": {}, "eventBody": {"entities": []}}
+        event_data = {"eventHeader": {}, "entities": []}
         
         await business_event_repo.create(
             event_id=event_id,

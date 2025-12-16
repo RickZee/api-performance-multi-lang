@@ -1,13 +1,11 @@
 package main
 
 import (
-	"context"
 	"encoding/json"
 	"testing"
 
 	"github.com/aws/aws-lambda-go/events"
 	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/require"
 )
 
 func TestHandler_HealthCheck(t *testing.T) {
@@ -50,13 +48,15 @@ func TestHandler_ProcessEvent_ValidEvent(t *testing.T) {
 			"eventName": "CarCreated",
 			"uuid":      "test-uuid",
 		},
-		"eventBody": map[string]interface{}{
-			"entities": []map[string]interface{}{
-				{
-					"entityType":        "Car",
-					"entityId":          "car-123",
-					"updatedAttributes": map[string]interface{}{"model": "Test"},
+		"entities": []map[string]interface{}{
+			{
+				"entityHeader": map[string]interface{}{
+					"entityId":   "car-123",
+					"entityType": "Car",
+					"createdAt":  "2024-01-15T10:30:00Z",
+					"updatedAt":  "2024-01-15T10:30:00Z",
 				},
+				"model": "Test",
 			},
 		},
 	}
@@ -94,4 +94,3 @@ func TestRunMigrations(t *testing.T) {
 	// This test would require a test database
 	t.Skip("Skipping test - requires database connection")
 }
-

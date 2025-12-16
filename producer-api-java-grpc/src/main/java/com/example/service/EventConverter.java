@@ -1,9 +1,9 @@
 package com.example.service;
 
 import com.example.dto.Event;
-import com.example.dto.EventBody;
 import com.example.dto.EventHeader;
-import com.example.dto.EntityUpdate;
+import com.example.dto.Entity;
+import com.example.dto.EntityHeader;
 import com.example.grpc.EventRequest;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.RequiredArgsConstructor;
@@ -44,27 +44,37 @@ public class EventConverter {
             event.setEventHeader(header);
         }
         
-        // Convert EventBody
-        if (request.hasEventBody()) {
-            var protoBody = request.getEventBody();
-            EventBody body = new EventBody();
-            List<EntityUpdate> entities = new ArrayList<>();
+        // Convert entities
+        List<Entity> entities = new ArrayList<>();
+        
+        for (var protoEntity : request.getEntitiesList()) {
+            // Convert entityHeader
+            EntityHeader entityHeader = new EntityHeader();
+            entityHeader.setEntityId(protoEntity.getEntityHeader().getEntityId());
+            entityHeader.setEntityType(protoEntity.getEntityHeader().getEntityType());
+            entityHeader.setCreatedAt(parseDateTime(protoEntity.getEntityHeader().getCreatedAt()));
+            entityHeader.setUpdatedAt(parseDateTime(protoEntity.getEntityHeader().getUpdatedAt()));
             
-            for (var protoEntity : protoBody.getEntitiesList()) {
-                // Convert map<string, string> to map<string, object>
-                Map<String, Object> updatedAttrs = new HashMap<>(protoEntity.getUpdatedAttributesMap());
-                
-                EntityUpdate entityUpdate = new EntityUpdate();
-                entityUpdate.setEntityType(protoEntity.getEntityType());
-                entityUpdate.setEntityId(protoEntity.getEntityId());
-                entityUpdate.setUpdatedAttributes(updatedAttrs);
-                
-                entities.add(entityUpdate);
+            // Convert properties_json to map
+            Map<String, Object> properties = new HashMap<>();
+            if (!protoEntity.getPropertiesJson().isEmpty()) {
+                try {
+                    @SuppressWarnings("unchecked")
+                    Map<String, Object> props = objectMapper.readValue(protoEntity.getPropertiesJson(), Map.class);
+                    properties.putAll(props);
+                } catch (Exception e) {
+                    // If parsing fails, properties will be empty
+                }
             }
             
-            body.setEntities(entities);
-            event.setEventBody(body);
+            Entity entity = new Entity();
+            entity.setEntityHeader(entityHeader);
+            entity.setProperties(properties);
+            
+            entities.add(entity);
         }
+        
+        event.setEntities(entities);
         
         return event;
     }

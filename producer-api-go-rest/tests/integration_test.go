@@ -8,7 +8,6 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
-	"producer-api-go/internal/config"
 	"producer-api-go/internal/handlers"
 	"producer-api-go/internal/models"
 	"producer-api-go/internal/repository"
@@ -92,16 +91,16 @@ func createTestEvent() map[string]interface{} {
 			"savedDate":   "2024-01-15T10:30:05Z",
 			"eventType":   "LoanPaymentSubmitted",
 		},
-		"eventBody": map[string]interface{}{
-			"entities": []map[string]interface{}{
-				{
-					"entityType": "Loan",
+		"entities": []map[string]interface{}{
+			{
+				"entityHeader": map[string]interface{}{
 					"entityId":   "loan-12345",
-					"updatedAttributes": map[string]interface{}{
-						"balance":     24439.75,
-						"lastPaidDate": "2024-01-15T10:30:00Z",
-					},
+					"entityType": "Loan",
+					"createdAt":  "2024-01-15T10:30:00Z",
+					"updatedAt":  "2024-01-15T10:30:00Z",
 				},
+				"balance":      24439.75,
+				"lastPaidDate": "2024-01-15T10:30:00Z",
 			},
 		},
 	}
@@ -220,25 +219,27 @@ func TestProcessEventWithMultipleEntitiesShouldProcessAllEntities(t *testing.T) 
 			"savedDate":   "2024-01-15T10:30:05Z",
 			"eventType":   "LoanPaymentSubmitted",
 		},
-		"eventBody": map[string]interface{}{
-			"entities": []map[string]interface{}{
-				{
-					"entityType": "Loan",
+		"entities": []map[string]interface{}{
+			{
+				"entityHeader": map[string]interface{}{
 					"entityId":   "loan-12345",
-					"updatedAttributes": map[string]interface{}{
-						"balance":     24439.75,
-						"lastPaidDate": "2024-01-15T10:30:00Z",
-					},
+					"entityType": "Loan",
+					"createdAt":  "2024-01-15T10:30:00Z",
+					"updatedAt":  "2024-01-15T10:30:00Z",
 				},
-				{
-					"entityType": "LoanPayment",
+				"balance":      24439.75,
+				"lastPaidDate": "2024-01-15T10:30:00Z",
+			},
+			{
+				"entityHeader": map[string]interface{}{
 					"entityId":   "payment-12345",
-					"updatedAttributes": map[string]interface{}{
-						"paymentAmount": 560.25,
-						"paymentDate":   "2024-01-15T10:30:00Z",
-						"paymentMethod": "ACH",
-					},
+					"entityType": "LoanPayment",
+					"createdAt":  "2024-01-15T10:30:00Z",
+					"updatedAt":  "2024-01-15T10:30:00Z",
 				},
+				"paymentAmount": 560.25,
+				"paymentDate":   "2024-01-15T10:30:00Z",
+				"paymentMethod": "ACH",
 			},
 		},
 	}
@@ -290,7 +291,7 @@ func TestProcessEventWithInvalidEventShouldReturnError(t *testing.T) {
 
 	invalidEvent := map[string]interface{}{
 		"eventHeader": nil,
-		"eventBody":   nil,
+		"entities":    nil,
 	}
 
 	body, _ := json.Marshal(invalidEvent)
@@ -347,16 +348,16 @@ func TestProcessBulkEventsWithValidEventsShouldProcessAllEvents(t *testing.T) {
 				"savedDate":   "2024-01-15T10:30:05Z",
 				"eventType":   "LoanPaymentSubmitted",
 			},
-			"eventBody": map[string]interface{}{
-				"entities": []map[string]interface{}{
-					{
-						"entityType": "LoanPayment",
+			"entities": []map[string]interface{}{
+				{
+					"entityHeader": map[string]interface{}{
 						"entityId":   "payment-67890",
-						"updatedAttributes": map[string]interface{}{
-							"paymentAmount": 560.25,
-							"paymentDate":   "2024-01-15T10:30:00Z",
-						},
+						"entityType": "LoanPayment",
+						"createdAt":  "2024-01-15T10:30:00Z",
+						"updatedAt":  "2024-01-15T10:30:00Z",
 					},
+					"paymentAmount": 560.25,
+					"paymentDate":   "2024-01-15T10:30:00Z",
 				},
 			},
 		},
@@ -424,9 +425,7 @@ func TestProcessEventWithEmptyEntitiesListShouldReturnError(t *testing.T) {
 			"savedDate":   "2024-01-15T10:30:05Z",
 			"eventType":   "LoanPaymentSubmitted",
 		},
-		"eventBody": map[string]interface{}{
-			"entities": []map[string]interface{}{},
-		},
+		"entities": []map[string]interface{}{},
 	}
 
 	body, _ := json.Marshal(event)
@@ -456,15 +455,15 @@ func TestProcessEventWithEmptyEventNameShouldReturnError(t *testing.T) {
 			"savedDate":   "2024-01-15T10:30:05Z",
 			"eventType":   "LoanPaymentSubmitted",
 		},
-		"eventBody": map[string]interface{}{
-			"entities": []map[string]interface{}{
-				{
-					"entityType": "Loan",
+		"entities": []map[string]interface{}{
+			{
+				"entityHeader": map[string]interface{}{
 					"entityId":   "loan-12345",
-					"updatedAttributes": map[string]interface{}{
-						"balance": 24439.75,
-					},
+					"entityType": "Loan",
+					"createdAt":  "2024-01-15T10:30:00Z",
+					"updatedAt":  "2024-01-15T10:30:00Z",
 				},
+				"balance": 24439.75,
 			},
 		},
 	}
@@ -481,4 +480,3 @@ func TestProcessEventWithEmptyEventNameShouldReturnError(t *testing.T) {
 		t.Errorf("Expected status 422, got %d: %s", w.Code, w.Body.String())
 	}
 }
-

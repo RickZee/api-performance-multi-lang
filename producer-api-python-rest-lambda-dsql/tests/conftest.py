@@ -67,30 +67,30 @@ def sample_loan_entity() -> Dict[str, Any]:
 
 @pytest.fixture
 def sample_event(sample_event_header) -> Dict[str, Any]:
-    """Sample complete event with eventBody structure."""
+    """Sample complete event matching canonical schema."""
     return {
         "eventHeader": sample_event_header,
-        "eventBody": {
-            "entities": [
-                {
-                    "entityType": "Car",
+        "entities": [
+            {
+                "entityHeader": {
                     "entityId": "CAR-2024-001",
-                    "updatedAttributes": {
-                        "id": "CAR-2024-001",
-                        "vin": "5TDJKRFH4LS123456",
-                        "make": "Tesla",
-                        "model": "Model S",
-                        "year": 2025,
-                        "color": "Midnight Silver",
-                        "mileage": 0,
-                        "lastServiceDate": "2024-01-15T10:30:00Z",
-                        "totalBalance": 0.0,
-                        "lastLoanPaymentDate": "2024-01-15T10:30:00Z",
-                        "owner": "John Doe"
-                    }
-                }
-            ]
-        }
+                    "entityType": "Car",
+                    "createdAt": "2024-01-15T10:30:00Z",
+                    "updatedAt": "2024-01-15T10:30:00Z"
+                },
+                "id": "CAR-2024-001",
+                "vin": "5TDJKRFH4LS123456",
+                "make": "Tesla",
+                "model": "Model S",
+                "year": 2025,
+                "color": "Midnight Silver",
+                "mileage": 0,
+                "lastServiceDate": "2024-01-15T10:30:00Z",
+                "totalBalance": 0.0,
+                "lastLoanPaymentDate": "2024-01-15T10:30:00Z",
+                "owner": "John Doe"
+            }
+        ]
     }
 
 
@@ -105,19 +105,19 @@ def sample_bulk_events(sample_event_header) -> list:
                 "eventName": "Car Created",
                 "eventType": "CarCreated"
             },
-            "eventBody": {
-                "entities": [
-                    {
-                        "entityType": "Car",
+            "entities": [
+                {
+                    "entityHeader": {
                         "entityId": "CAR-2024-001",
-                        "updatedAttributes": {
-                            "id": "CAR-2024-001",
-                            "vin": "5TDJKRFH4LS123456",
-                            "make": "Tesla"
-                        }
-                    }
-                ]
-            }
+                        "entityType": "Car",
+                        "createdAt": "2024-01-15T10:30:00Z",
+                        "updatedAt": "2024-01-15T10:30:00Z"
+                    },
+                    "id": "CAR-2024-001",
+                    "vin": "5TDJKRFH4LS123456",
+                    "make": "Tesla"
+                }
+            ]
         },
         {
             "eventHeader": {
@@ -126,19 +126,19 @@ def sample_bulk_events(sample_event_header) -> list:
                 "eventName": "Loan Created",
                 "eventType": "LoanCreated"
             },
-            "eventBody": {
-                "entities": [
-                    {
-                        "entityType": "Loan",
+            "entities": [
+                {
+                    "entityHeader": {
                         "entityId": "LOAN-2024-001",
-                        "updatedAttributes": {
-                            "id": "LOAN-2024-001",
-                            "carId": "CAR-2024-001",
-                            "balance": "50000.00"
-                        }
-                    }
-                ]
-            }
+                        "entityType": "Loan",
+                        "createdAt": "2024-01-15T10:30:00Z",
+                        "updatedAt": "2024-01-15T10:30:00Z"
+                    },
+                    "id": "LOAN-2024-001",
+                    "carId": "CAR-2024-001",
+                    "balance": "50000.00"
+                }
+            ]
         }
     ]
 
@@ -154,19 +154,19 @@ def invalid_event_missing_entity_header() -> Dict[str, Any]:
             "createdDate": "2024-01-15T10:30:00Z",
             "savedDate": "2024-01-15T10:30:05Z"
         },
-        "eventBody": {
-            "entities": [
-                {
-                    "entityType": "Car",
+        "entities": [
+            {
+                "entityHeader": {
                     "entityId": "CAR-2024-001",
-                    "updatedAttributes": {
-                        "id": "CAR-2024-001",
-                        "vin": "5TDJKRFH4LS123456",
-                        "make": "Tesla"
-                    }
-                }
-            ]
-        }
+                    "entityType": "Car",
+                    "createdAt": "2024-01-15T10:30:00Z",
+                    "updatedAt": "2024-01-15T10:30:00Z"
+                },
+                "id": "CAR-2024-001",
+                "vin": "5TDJKRFH4LS123456",
+                "make": "Tesla"
+            }
+        ]
     }
 
 
@@ -181,16 +181,16 @@ def invalid_event_missing_entity_type() -> Dict[str, Any]:
             "createdDate": "2024-01-15T10:30:00Z",
             "savedDate": "2024-01-15T10:30:05Z"
         },
-        "eventBody": {
-            "entities": [
-                {
+        "entities": [
+            {
+                "entityHeader": {
                     "entityId": "CAR-2024-001",
                     # Missing entityType
-                    "updatedAttributes": {
-                        "id": "CAR-2024-001",
-                        "vin": "5TDJKRFH4LS123456"
-                    }
-                }
-            ]
-        }
+                    "createdAt": "2024-01-15T10:30:00Z",
+                    "updatedAt": "2024-01-15T10:30:00Z"
+                },
+                "id": "CAR-2024-001",
+                "vin": "5TDJKRFH4LS123456"
+            }
+        ]
     }

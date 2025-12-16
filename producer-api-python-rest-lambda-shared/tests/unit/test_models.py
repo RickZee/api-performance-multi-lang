@@ -88,47 +88,58 @@ class TestEvent:
         """Test Event with multiple entities."""
         event = Event(
             eventHeader=sample_event_header,
-            eventBody={
-                "entities": [
-                    {
-                        "entityType": "Car",
+            entities=[
+                {
+                    "entityHeader": {
                         "entityId": "CAR-2024-001",
-                        "updatedAttributes": {"id": "CAR-2024-001", "vin": "TEST123"}
+                        "entityType": "Car",
+                        "createdAt": "2024-01-15T10:30:00Z",
+                        "updatedAt": "2024-01-15T10:30:00Z"
                     },
-                    {
-                        "entityType": "Loan",
+                    "id": "CAR-2024-001",
+                    "vin": "TEST123"
+                },
+                {
+                    "entityHeader": {
                         "entityId": "LOAN-2024-001",
-                        "updatedAttributes": {"id": "LOAN-2024-001", "balance": "50000.00"}
-                    }
-                ]
-            }
+                        "entityType": "Loan",
+                        "createdAt": "2024-01-15T10:30:00Z",
+                        "updatedAt": "2024-01-15T10:30:00Z"
+                    },
+                    "id": "LOAN-2024-001",
+                    "balance": "50000.00"
+                }
+            ]
         )
-        assert len(event.event_body.entities) == 2
-        assert event.event_body.entities[0].entity_type == "Car"
-        assert event.event_body.entities[1].entity_type == "Loan"
+        assert len(event.entities) == 2
+        assert event.entities[0].entity_header.entity_type == "Car"
+        assert event.entities[1].entity_header.entity_type == "Loan"
     
     def test_event_missing_entities(self, sample_event_header):
-        """Test Event with empty entities list (allowed by model)."""
-        # Note: Pydantic allows empty lists by default, validation happens at service layer
-        event = Event(
-            eventHeader=sample_event_header,
-            eventBody={"entities": []}
-        )
-        assert len(event.event_body.entities) == 0
+        """Test Event with empty entities list (not allowed - min_length=1)."""
+        # Note: Event requires at least one entity (min_length=1)
+        with pytest.raises(ValidationError):
+            Event(
+                eventHeader=sample_event_header,
+                entities=[]
+            )
     
     def test_event_entity_missing_type(self, sample_event_header):
         """Test Event validates entityType requirement."""
         with pytest.raises(ValidationError) as exc_info:
             Event(
                 eventHeader=sample_event_header,
-                eventBody={
-                    "entities": [
-                        {
+                entities=[
+                    {
+                        "entityHeader": {
                             "entityId": "CAR-2024-001",
-                            "updatedAttributes": {"id": "CAR-2024-001"}
-                        }
-                    ]
-                }
+                            # Missing entityType
+                            "createdAt": "2024-01-15T10:30:00Z",
+                            "updatedAt": "2024-01-15T10:30:00Z"
+                        },
+                        "id": "CAR-2024-001"
+                    }
+                ]
             )
         assert "entityType" in str(exc_info.value) or "entity_type" in str(exc_info.value)
     
@@ -137,13 +148,16 @@ class TestEvent:
         with pytest.raises(ValidationError) as exc_info:
             Event(
                 eventHeader=sample_event_header,
-                eventBody={
-                    "entities": [
-                        {
+                entities=[
+                    {
+                        "entityHeader": {
+                            # Missing entityId
                             "entityType": "Car",
-                            "updatedAttributes": {"id": "CAR-2024-001"}
-                        }
-                    ]
-                }
+                            "createdAt": "2024-01-15T10:30:00Z",
+                            "updatedAt": "2024-01-15T10:30:00Z"
+                        },
+                        "id": "CAR-2024-001"
+                    }
+                ]
             )
         assert "entityId" in str(exc_info.value) or "entity_id" in str(exc_info.value)

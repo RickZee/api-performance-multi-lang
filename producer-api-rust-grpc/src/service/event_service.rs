@@ -1,5 +1,5 @@
 use crate::error::AppError;
-use crate::models::{EntityUpdate, Event, EventBody, EventHeader};
+use crate::models::{Entity, Event, EntityHeader};
 use crate::repository::DuplicateEventError;
 use crate::service::EventProcessingService;
 use crate::repository::BusinessEventRepository;
@@ -54,17 +54,13 @@ impl EventService for EventServiceImpl {
             return Err(Status::invalid_argument("Invalid event: eventName cannot be empty"));
         }
 
-        let event_body_proto = req.event_body.ok_or_else(|| {
-            Status::from(AppError::Validation("Invalid event: missing eventBody".to_string()))
-        })?;
-
         // Validate entities list is not empty
-        if event_body_proto.entities.is_empty() {
+        if req.entities.is_empty() {
             return Err(Status::invalid_argument("Invalid event: entities list cannot be empty"));
         }
 
         // Convert protobuf EventRequest to internal Event model
-        let event = convert_proto_to_event(event_header_proto, event_body_proto)
+        let event = convert_proto_to_event(event_header_proto, req.entities)
             .map_err(|e| Status::invalid_argument(format!("Failed to convert event: {}", e)))?;
 
         // Process event
@@ -103,7 +99,7 @@ impl EventService for EventServiceImpl {
 
 fn convert_proto_to_event(
     header: proto::EventHeader,
-    body: proto::EventBody,
+    entities_proto: Vec<proto::Entity>,
 ) -> Result<Event, String> {
     // Convert EventHeader
     let event_header = EventHeader {
@@ -122,34 +118,52 @@ fn convert_proto_to_event(
         },
     };
 
-    // Convert EntityUpdate list
+    // Convert Entity list
     let mut entities = Vec::new();
-    for entity_proto in body.entities {
-        // Validate entity_type and entity_id are not empty
-        if entity_proto.entity_type.is_empty() {
+    for entity_proto in entities_proto {
+        // Validate entityHeader
+        let entity_header_proto = entity_proto.entity_header.ok_or_else(|| {
+            "Invalid entity: missing entityHeader".to_string()
+        })?;
+        
+        if entity_header_proto.entity_type.is_empty() {
             return Err("Invalid entity: entityType cannot be empty".to_string());
         }
-        if entity_proto.entity_id.is_empty() {
+        if entity_header_proto.entity_id.is_empty() {
             return Err("Invalid entity: entityId cannot be empty".to_string());
         }
 
-        // Convert map<string, string> to serde_json::Value
-        let updated_attributes: Value = serde_json::to_value(entity_proto.updated_attributes)
-            .map_err(|e| format!("Failed to convert updated_attributes: {}", e))?;
+        // Convert entityHeader
+        let entity_header = EntityHeader {
+            entity_id: entity_header_proto.entity_id,
+            entity_type: entity_header_proto.entity_type,
+            created_at: parse_datetime_required(&entity_header_proto.created_at)?,
+            updated_at: parse_datetime_required(&entity_header_proto.updated_at)?,
+        };
 
-        entities.push(EntityUpdate {
-            entity_type: entity_proto.entity_type,
-            entity_id: entity_proto.entity_id,
-            updated_attributes,
+        // Convert properties_json to serde_json::Value
+        let properties: Value = if entity_proto.properties_json.is_empty() {
+            serde_json::json!({})
+        } else {
+            serde_json::from_str(&entity_proto.properties_json)
+                .map_err(|e| format!("Failed to parse properties_json: {}", e))?
+        };
+
+        entities.push(Entity {
+            entity_header,
+            properties,
         });
     }
 
-    let event_body = EventBody { entities };
-
     Ok(Event {
         event_header,
-        event_body,
+        entities,
     })
+}
+
+fn parse_datetime_required(dt_str: &str) -> Result<DateTime<Utc>, String> {
+    parse_datetime_option(dt_str)
+        .ok_or_else(|| format!("Invalid datetime: {}", dt_str))
 }
 
 fn parse_datetime_option(dt_str: &str) -> Option<DateTime<Utc>> {

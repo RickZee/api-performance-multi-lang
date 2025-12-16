@@ -62,9 +62,7 @@ class TestSingleEventEndpoint:
         """Test event processing with missing entities."""
         invalid_event = {
             "eventHeader": sample_event_header,
-            "eventBody": {
-                "entities": []
-            }
+            "entities": []
         }
         
         response = client.post("/api/v1/events", json=invalid_event)
@@ -75,18 +73,18 @@ class TestSingleEventEndpoint:
         """Test event processing with entity missing entityType."""
         invalid_event = {
             "eventHeader": sample_event_header,
-            "eventBody": {
-                "entities": [
-                    {
+            "entities": [
+                {
+                    "entityHeader": {
                         "entityId": "CAR-2024-001",
                         # Missing entityType
-                        "updatedAttributes": {
-                            "id": "CAR-2024-001",
-                            "vin": "TEST1234567890123"
-                        }
-                    }
-                ]
-            }
+                        "createdAt": "2024-01-15T10:30:00Z",
+                        "updatedAt": "2024-01-15T10:30:00Z"
+                    },
+                    "id": "CAR-2024-001",
+                    "vin": "TEST1234567890123"
+                }
+            ]
         }
         
         response = client.post("/api/v1/events", json=invalid_event)
@@ -97,18 +95,18 @@ class TestSingleEventEndpoint:
         """Test event processing with entity missing entityId."""
         invalid_event = {
             "eventHeader": sample_event_header,
-            "eventBody": {
-                "entities": [
-                    {
-                        "entityType": "Car",
+            "entities": [
+                {
+                    "entityHeader": {
                         # Missing entityId
-                        "updatedAttributes": {
-                            "id": "CAR-2024-001",
-                            "vin": "TEST1234567890123"
-                        }
-                    }
-                ]
-            }
+                        "entityType": "Car",
+                        "createdAt": "2024-01-15T10:30:00Z",
+                        "updatedAt": "2024-01-15T10:30:00Z"
+                    },
+                    "id": "CAR-2024-001",
+                    "vin": "TEST1234567890123"
+                }
+            ]
         }
         
         response = client.post("/api/v1/events", json=invalid_event)

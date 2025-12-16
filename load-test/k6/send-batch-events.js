@@ -232,11 +232,13 @@ function generateCarCreatedEvent(carId = null, vuId = null, iteration = null, ev
             createdDate: timestamp,
             savedDate: timestamp
         },
-        eventBody: {
-            entities: [{
-            entityType: "Car",
-            entityId: id,
-            updatedAttributes: {
+        entities: [{
+            entityHeader: {
+                entityId: id,
+                entityType: "Car",
+                createdAt: timestamp,
+                updatedAt: timestamp
+            },
             id: id,
             vin: `${randomString(17).toUpperCase()}`,
             make: ["Tesla", "Toyota", "Honda", "Ford", "BMW", "Mercedes", "Audi", "Lexus"][randomIntBetween(0, 7)],
@@ -248,9 +250,7 @@ function generateCarCreatedEvent(carId = null, vuId = null, iteration = null, ev
             totalBalance: (randomIntBetween(0, 50000)).toFixed(2),
             lastLoanPaymentDate: timestamp,
             owner: `${randomString(8)} ${randomString(10)}`
-            }
-            }]
-        }
+        }]
     });
 }
 
@@ -272,11 +272,13 @@ function generateLoanCreatedEvent(carId, loanId = null, vuId = null, iteration =
             createdDate: timestamp,
             savedDate: timestamp
         },
-        eventBody: {
-            entities: [{
-            entityType: "Loan",
-            entityId: id,
-            updatedAttributes: {
+        entities: [{
+            entityHeader: {
+                entityId: id,
+                entityType: "Loan",
+                createdAt: timestamp,
+                updatedAt: timestamp
+            },
             id: id,
             carId: carId,
             financialInstitution: ["First National Bank", "Chase Bank", "Wells Fargo", "Bank of America", "Citibank"][randomIntBetween(0, 4)],
@@ -288,9 +290,7 @@ function generateLoanCreatedEvent(carId, loanId = null, vuId = null, iteration =
             startDate: timestamp,
             status: "active",
             monthlyPayment: monthlyPayment
-            }
-            }]
-        }
+        }]
     });
 }
 
@@ -309,18 +309,18 @@ function generateLoanPaymentEvent(loanId, amount = null, vuId = null, iteration 
             createdDate: timestamp,
             savedDate: timestamp
         },
-        eventBody: {
-            entities: [{
-            entityType: "LoanPayment",
-            entityId: paymentId,
-            updatedAttributes: {
+        entities: [{
+            entityHeader: {
+                entityId: paymentId,
+                entityType: "LoanPayment",
+                createdAt: timestamp,
+                updatedAt: timestamp
+            },
             id: paymentId,
             loanId: loanId,
             amount: parseFloat(paymentAmount).toFixed(2),
             paymentDate: timestamp
-            }
-            }]
-        }
+        }]
     });
 }
 
@@ -357,11 +357,13 @@ function generateCarServiceEvent(carId, serviceId = null, vuId = null, iteration
             createdDate: timestamp,
             savedDate: timestamp
         },
-        eventBody: {
-            entities: [{
-            entityType: "ServiceRecord",
-            entityId: id,
-            updatedAttributes: {
+        entities: [{
+            entityHeader: {
+                entityId: id,
+                entityType: "ServiceRecord",
+                createdAt: timestamp,
+                updatedAt: timestamp
+            },
             id: id,
             carId: carId,
             serviceDate: timestamp,
@@ -370,9 +372,7 @@ function generateCarServiceEvent(carId, serviceId = null, vuId = null, iteration
             dealerName: dealerName,
             mileageAtService: mileageAtService,
             description: description
-            }
-            }]
-        }
+        }]
     });
 }
 
@@ -400,19 +400,19 @@ export function setup() {
             createdDate: generateTimestamp(),
             savedDate: generateTimestamp()
         },
-        eventBody: {
-            entities: [{
-                entityType: "Car",
+        entities: [{
+            entityHeader: {
                 entityId: "TEST-SCHEMA-CHECK",
-                updatedAttributes: {
-                    id: "TEST-SCHEMA-CHECK",
-                    vin: "TEST1234567890123",
-                    make: "Test",
-                    model: "Test Model",
-                    year: 2024
-                }
-            }]
-        }
+                entityType: "Car",
+                createdAt: generateTimestamp(),
+                updatedAt: generateTimestamp()
+            },
+            id: "TEST-SCHEMA-CHECK",
+            vin: "TEST1234567890123",
+            make: "Test",
+            model: "Test Model",
+            year: 2024
+        }]
     });
     
     // Prepare headers
@@ -774,8 +774,8 @@ export default function (data) {
             uuid: eventData.eventHeader.uuid,
             eventName: eventData.eventHeader.eventName,
             eventType: eventData.eventHeader.eventType,
-            entityType: eventData.eventBody.entities[0]?.entityType,
-            entityId: eventData.eventBody.entities[0]?.entityId,
+            entityType: eventData.entities[0]?.entityHeader?.entityType,
+            entityId: eventData.entities[0]?.entityHeader?.entityId,
             timestamp: new Date().toISOString(),
             vuId: vuId,
             iteration: globalIteration,

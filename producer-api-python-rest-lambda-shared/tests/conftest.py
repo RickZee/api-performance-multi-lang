@@ -19,24 +19,24 @@ def sample_event_header() -> Dict[str, Any]:
 
 @pytest.fixture
 def sample_event(sample_event_header) -> Dict[str, Any]:
-    """Sample complete event with eventBody structure."""
+    """Sample complete event matching canonical schema."""
     return {
         "eventHeader": sample_event_header,
-        "eventBody": {
-            "entities": [
-                {
-                    "entityType": "Car",
+        "entities": [
+            {
+                "entityHeader": {
                     "entityId": "CAR-2024-001",
-                    "updatedAttributes": {
-                        "id": "CAR-2024-001",
-                        "vin": "5TDJKRFH4LS123456",
-                        "make": "Tesla",
-                        "model": "Model S",
-                        "year": 2025,
-                        "color": "Midnight Silver",
-                        "mileage": 0
-                    }
-                }
-            ]
-        }
+                    "entityType": "Car",
+                    "createdAt": "2024-01-15T10:30:00Z",
+                    "updatedAt": "2024-01-15T10:30:00Z"
+                },
+                "id": "CAR-2024-001",
+                "vin": "5TDJKRFH4LS123456",
+                "make": "Tesla",
+                "model": "Model S",
+                "year": 2025,
+                "color": "Midnight Silver",
+                "mileage": 0
+            }
+        ]
     }

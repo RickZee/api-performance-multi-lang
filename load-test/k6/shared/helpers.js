@@ -314,13 +314,15 @@ export function generateEventPayload() {
             savedDate: timestamp,
             eventType: eventType
         },
-        eventBody: {
-            entities: [{
-                entityType: entityType,
+        entities: [{
+            entityHeader: {
                 entityId: entityId,
-                updatedAttributes: expandedAttributes
-            }]
-        }
+                entityType: entityType,
+                createdAt: timestamp,
+                updatedAt: timestamp
+            },
+            ...expandedAttributes
+        }]
     };
     
     const payloadJson = JSON.stringify(payload);
@@ -333,7 +335,8 @@ export function generateEventPayload() {
             const attributesSize = JSON.stringify(expandedAttributes).length;
             const attributesTarget = targetSize - (currentSize - attributesSize);
             const finalAttributes = expandAttributesToSize(updatedAttributes, attributesTarget);
-            payload.eventBody.entities[0].updatedAttributes = finalAttributes;
+            // Merge final attributes into entity (excluding entityHeader)
+            Object.assign(payload.entities[0], finalAttributes);
             return JSON.stringify(payload);
         }
     }
@@ -397,13 +400,15 @@ export function generateGrpcEventPayload() {
             saved_date: timestamp,
             event_type: eventType
         },
-        event_body: {
-            entities: [{
-                entity_type: entityType,
+        entities: [{
+            entity_header: {
                 entity_id: entityId,
-                updated_attributes: grpcAttributes
-            }]
-        }
+                entity_type: entityType,
+                created_at: timestamp,
+                updated_at: timestamp
+            },
+            properties_json: JSON.stringify(grpcAttributes)
+        }]
     };
     
     // If target size is specified, ensure we meet it (accounting for event structure overhead)
@@ -416,7 +421,7 @@ export function generateGrpcEventPayload() {
             const attributesTarget = targetSize - (currentSize - attributesSize);
             const finalAttributes = expandAttributesToSize(updatedAttributes, attributesTarget);
             // Convert to gRPC format
-            payload.event_body.entities[0].updated_attributes = stringifyAttributesForGrpc(finalAttributes);
+            payload.entities[0].properties_json = JSON.stringify(stringifyAttributesForGrpc(finalAttributes));
         }
     }
     

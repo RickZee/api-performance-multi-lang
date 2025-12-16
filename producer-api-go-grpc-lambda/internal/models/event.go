@@ -12,7 +12,7 @@ import (
 // Event represents the complete event structure (converted from protobuf)
 type Event struct {
 	EventHeader EventHeader
-	EventBody   EventBody
+	Entities    []Entity
 }
 
 // EventHeader contains event metadata
@@ -24,16 +24,21 @@ type EventHeader struct {
 	EventType   *string
 }
 
-// EventBody contains the entity updates
-type EventBody struct {
-	Entities []EntityUpdate
+// EntityHeader contains entity metadata
+type EntityHeader struct {
+	EntityID   string
+	EntityType string
+	CreatedAt  time.Time
+	UpdatedAt  time.Time
 }
 
-// EntityUpdate represents a single entity update
-type EntityUpdate struct {
-	EntityType        string
-	EntityID          string
-	UpdatedAttributes json.RawMessage
+// Entity represents a single entity with header and flat properties
+// The entity-specific properties are stored as raw JSON to allow flexible structure
+type Entity struct {
+	EntityHeader EntityHeader
+	// Additional entity-specific fields are stored as raw JSON
+	// These will be unmarshaled separately when needed
+	RawData json.RawMessage
 }
 
 // ConvertFromProto converts a protobuf EventRequest to internal Event model
@@ -67,24 +72,46 @@ func ConvertFromProto(req *proto.EventRequest) (*Event, error) {
 		}
 	}
 
-	// Convert EventBody
-	if req.EventBody != nil {
-		entities := make([]EntityUpdate, 0, len(req.EventBody.Entities))
-		for _, protoEntity := range req.EventBody.Entities {
-			// Convert map[string]string to JSON
-			updatedAttrsJSON, err := json.Marshal(protoEntity.UpdatedAttributes)
-			if err != nil {
-				return nil, fmt.Errorf("failed to marshal updated attributes: %w", err)
-			}
-
-			entities = append(entities, EntityUpdate{
-				EntityType:        protoEntity.EntityType,
-				EntityID:          protoEntity.EntityId,
-				UpdatedAttributes: updatedAttrsJSON,
-			})
+	// Convert entities
+	entities := make([]Entity, 0, len(req.Entities))
+	for _, protoEntity := range req.Entities {
+		if protoEntity.EntityHeader == nil {
+			return nil, fmt.Errorf("entity missing entityHeader")
 		}
-		event.EventBody.Entities = entities
+
+		// Parse entityHeader dates
+		createdAt, err := parseFlexibleDate(protoEntity.EntityHeader.CreatedAt)
+		if err != nil {
+			return nil, fmt.Errorf("failed to parse createdAt: %w", err)
+		}
+		updatedAt, err := parseFlexibleDate(protoEntity.EntityHeader.UpdatedAt)
+		if err != nil {
+			return nil, fmt.Errorf("failed to parse updatedAt: %w", err)
+		}
+
+		entityHeader := EntityHeader{
+			EntityID:   protoEntity.EntityHeader.EntityId,
+			EntityType: protoEntity.EntityHeader.EntityType,
+			CreatedAt:  *createdAt,
+			UpdatedAt:  *updatedAt,
+		}
+
+		// Convert properties_json to map
+		var properties map[string]interface{}
+		if protoEntity.PropertiesJson != "" {
+			if err := json.Unmarshal([]byte(protoEntity.PropertiesJson), &properties); err != nil {
+				return nil, fmt.Errorf("failed to parse properties_json: %w", err)
+			}
+		} else {
+			properties = make(map[string]interface{})
+		}
+
+		entities = append(entities, Entity{
+			EntityHeader: entityHeader,
+			Properties:   properties,
+		})
 	}
+	event.Entities = entities
 
 	return event, nil
 }
@@ -119,4 +146,3 @@ func parseFlexibleDate(v string) (*time.Time, error) {
 
 	return nil, fmt.Errorf("unable to parse date string: %s", v)
 }
-

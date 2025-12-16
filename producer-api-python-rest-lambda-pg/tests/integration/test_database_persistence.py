@@ -99,19 +99,21 @@ def sample_car_event():
             "createdDate": "2024-01-15T10:30:00Z",
             "savedDate": "2024-01-15T10:30:05Z"
         },
-        "eventBody": {
-            "entities": [
-                {
-                    "entityType": "Car",
+        "entities": [
+            {
+                "entityHeader": {
                     "entityId": "TEST-CAR-PG-001",
-                    "updatedAttributes": {
-                        "id": "TEST-CAR-PG-001",
-                        "vin": "TEST1234567890123",
-                        "make": "Tesla",
-                        "model": "Model S",
-                        "year": 2025,
-                        "color": "Midnight Silver",
-                        "mileage": 0
+                    "entityType": "Car",
+                    "createdAt": "2024-01-15T10:30:00Z",
+                    "updatedAt": "2024-01-15T10:30:00Z"
+                },
+                "id": "TEST-CAR-PG-001",
+                "vin": "TEST1234567890123",
+                "make": "Tesla",
+                "model": "Model S",
+                "year": 2025,
+                "color": "Midnight Silver",
+                "mileage": 0
                     }
                 }
             ]

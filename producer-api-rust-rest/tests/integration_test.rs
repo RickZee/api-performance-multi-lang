@@ -125,18 +125,18 @@ fn create_test_event() -> serde_json::Value {
             "savedDate": "2024-01-15T10:30:05Z",
             "eventType": "LoanPaymentSubmitted"
         },
-        "eventBody": {
-            "entities": [
-                {
-                    "entityType": "Loan",
+        "entities": [
+            {
+                "entityHeader": {
                     "entityId": "loan-12345",
-                    "updatedAttributes": {
-                        "balance": 24439.75,
-                        "lastPaidDate": "2024-01-15T10:30:00Z"
-                    }
-                }
-            ]
-        }
+                    "entityType": "Loan",
+                    "createdAt": "2024-01-15T10:30:00Z",
+                    "updatedAt": "2024-01-15T10:30:00Z"
+                },
+                "balance": 24439.75,
+                "lastPaidDate": "2024-01-15T10:30:00Z"
+            }
+        ]
     })
 }
 
@@ -238,27 +238,29 @@ async fn test_process_event_with_multiple_entities_should_process_all_entities()
             "savedDate": "2024-01-15T10:30:05Z",
             "eventType": "LoanPaymentSubmitted"
         },
-        "eventBody": {
-            "entities": [
-                {
-                    "entityType": "Loan",
+        "entities": [
+            {
+                "entityHeader": {
                     "entityId": "loan-12345",
-                    "updatedAttributes": {
-                        "balance": 24439.75,
-                        "lastPaidDate": "2024-01-15T10:30:00Z"
-                    }
+                    "entityType": "Loan",
+                    "createdAt": "2024-01-15T10:30:00Z",
+                    "updatedAt": "2024-01-15T10:30:00Z"
                 },
-                {
-                    "entityType": "LoanPayment",
+                "balance": 24439.75,
+                "lastPaidDate": "2024-01-15T10:30:00Z"
+            },
+            {
+                "entityHeader": {
                     "entityId": "payment-12345",
-                    "updatedAttributes": {
-                        "paymentAmount": 560.25,
-                        "paymentDate": "2024-01-15T10:30:00Z",
-                        "paymentMethod": "ACH"
-                    }
-                }
-            ]
-        }
+                    "entityType": "LoanPayment",
+                    "createdAt": "2024-01-15T10:30:00Z",
+                    "updatedAt": "2024-01-15T10:30:00Z"
+                },
+                "paymentAmount": 560.25,
+                "paymentDate": "2024-01-15T10:30:00Z",
+                "paymentMethod": "ACH"
+            }
+        ]
     });
 
     let response = client
@@ -303,7 +305,7 @@ async fn test_process_event_with_invalid_event_should_return_error() {
     // Invalid event - missing required fields
     let invalid_event = json!({
         "eventHeader": null,
-        "eventBody": null
+        "entities": null
     });
 
     let response = client
@@ -350,18 +352,18 @@ async fn test_process_bulk_events_with_valid_events_should_process_all_events() 
                 "savedDate": "2024-01-15T10:30:05Z",
                 "eventType": "LoanPaymentSubmitted"
             },
-            "eventBody": {
-                "entities": [
-                    {
-                        "entityType": "LoanPayment",
+            "entities": [
+                {
+                    "entityHeader": {
                         "entityId": "payment-67890",
-                        "updatedAttributes": {
-                            "paymentAmount": 560.25,
-                            "paymentDate": "2024-01-15T10:30:00Z"
-                        }
-                    }
-                ]
-            }
+                        "entityType": "LoanPayment",
+                        "createdAt": "2024-01-15T10:30:00Z",
+                        "updatedAt": "2024-01-15T10:30:00Z"
+                    },
+                    "paymentAmount": 560.25,
+                    "paymentDate": "2024-01-15T10:30:00Z"
+                }
+            ]
         }),
     ];
 
@@ -397,9 +399,7 @@ async fn test_process_bulk_events_with_mixed_valid_and_invalid_events_should_pro
                 "savedDate": "2024-01-15T10:30:05Z",
                 "eventType": "LoanPaymentSubmitted"
             },
-            "eventBody": {
-                "entities": []
-            }
+            "entities": []
         }),
     ];
 
@@ -450,9 +450,7 @@ async fn test_process_event_with_empty_entities_list_should_return_error() {
             "savedDate": "2024-01-15T10:30:05Z",
             "eventType": "LoanPaymentSubmitted"
         },
-        "eventBody": {
-            "entities": []
-        }
+        "entities": []
     });
 
     let response = client
@@ -479,17 +477,17 @@ async fn test_process_event_with_empty_event_name_should_return_error() {
             "savedDate": "2024-01-15T10:30:05Z",
             "eventType": "LoanPaymentSubmitted"
         },
-        "eventBody": {
-            "entities": [
-                {
-                    "entityType": "Loan",
+        "entities": [
+            {
+                "entityHeader": {
                     "entityId": "loan-12345",
-                    "updatedAttributes": {
-                        "balance": 24439.75
-                    }
-                }
-            ]
-        }
+                    "entityType": "Loan",
+                    "createdAt": "2024-01-15T10:30:00Z",
+                    "updatedAt": "2024-01-15T10:30:00Z"
+                },
+                "balance": 24439.75
+            }
+        ]
     });
 
     let response = client
@@ -516,17 +514,17 @@ async fn test_process_event_with_empty_entity_type_should_return_error() {
             "savedDate": "2024-01-15T10:30:05Z",
             "eventType": "LoanPaymentSubmitted"
         },
-        "eventBody": {
-            "entities": [
-                {
-                    "entityType": "",
+        "entities": [
+            {
+                "entityHeader": {
                     "entityId": "loan-12345",
-                    "updatedAttributes": {
-                        "balance": 24439.75
-                    }
-                }
-            ]
-        }
+                    "entityType": "",
+                    "createdAt": "2024-01-15T10:30:00Z",
+                    "updatedAt": "2024-01-15T10:30:00Z"
+                },
+                "balance": 24439.75
+            }
+        ]
     });
 
     let response = client
@@ -553,17 +551,17 @@ async fn test_process_event_with_empty_entity_id_should_return_error() {
             "savedDate": "2024-01-15T10:30:05Z",
             "eventType": "LoanPaymentSubmitted"
         },
-        "eventBody": {
-            "entities": [
-                {
-                    "entityType": "Loan",
+        "entities": [
+            {
+                "entityHeader": {
                     "entityId": "",
-                    "updatedAttributes": {
-                        "balance": 24439.75
-                    }
-                }
-            ]
-        }
+                    "entityType": "Loan",
+                    "createdAt": "2024-01-15T10:30:00Z",
+                    "updatedAt": "2024-01-15T10:30:00Z"
+                },
+                "balance": 24439.75
+            }
+        ]
     });
 
     let response = client

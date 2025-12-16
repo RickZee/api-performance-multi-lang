@@ -223,9 +223,9 @@ variable "lambda_memory_size" {
 }
 
 variable "lambda_timeout" {
-  description = "Lambda timeout in seconds (cost-optimized default: 15)"
+  description = "Lambda timeout in seconds (default: 30 to handle event processing)"
   type        = number
-  default     = 15
+  default     = 30
 }
 
 variable "enable_python_lambda_pg" {

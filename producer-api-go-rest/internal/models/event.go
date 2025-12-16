@@ -10,7 +10,7 @@ import (
 // Event represents the complete event structure
 type Event struct {
 	EventHeader EventHeader `json:"eventHeader"`
-	EventBody   EventBody   `json:"eventBody"`
+	Entities    []Entity    `json:"entities"`
 }
 
 // EventHeader contains event metadata
@@ -22,16 +22,89 @@ type EventHeader struct {
 	EventType   *string    `json:"eventType,omitempty"`
 }
 
-// EventBody contains the entity updates
-type EventBody struct {
-	Entities []EntityUpdate `json:"entities"`
+// EntityHeader contains entity metadata
+type EntityHeader struct {
+	EntityID   string    `json:"entityId"`
+	EntityType string    `json:"entityType"`
+	CreatedAt  time.Time `json:"createdAt"`
+	UpdatedAt  time.Time `json:"updatedAt"`
 }
 
-// EntityUpdate represents a single entity update
-type EntityUpdate struct {
-	EntityType        string          `json:"entityType"`
-	EntityID          string          `json:"entityId"`
-	UpdatedAttributes json.RawMessage `json:"updatedAttributes"`
+// UnmarshalJSON implements custom unmarshaling for EntityHeader to handle flexible date parsing
+func (eh *EntityHeader) UnmarshalJSON(data []byte) error {
+	type Alias EntityHeader
+	aux := &struct {
+		CreatedAt interface{} `json:"createdAt"`
+		UpdatedAt interface{} `json:"updatedAt"`
+		*Alias
+	}{
+		Alias: (*Alias)(eh),
+	}
+
+	if err := json.Unmarshal(data, &aux); err != nil {
+		return err
+	}
+
+	// Parse CreatedAt
+	if aux.CreatedAt != nil {
+		createdAt, err := parseFlexibleDate(aux.CreatedAt)
+		if err != nil {
+			return fmt.Errorf("invalid createdAt: %w", err)
+		}
+		eh.CreatedAt = *createdAt
+	}
+
+	// Parse UpdatedAt
+	if aux.UpdatedAt != nil {
+		updatedAt, err := parseFlexibleDate(aux.UpdatedAt)
+		if err != nil {
+			return fmt.Errorf("invalid updatedAt: %w", err)
+		}
+		eh.UpdatedAt = *updatedAt
+	}
+
+	return nil
+}
+
+// Entity represents a single entity with header and flat properties
+// Entity-specific properties are stored in a map for flexible structure
+type Entity struct {
+	EntityHeader EntityHeader           `json:"entityHeader"`
+	Properties   map[string]interface{} `json:"-"`
+}
+
+// UnmarshalJSON implements custom unmarshaling to extract entityHeader and store other properties
+func (e *Entity) UnmarshalJSON(data []byte) error {
+	var raw map[string]interface{}
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return err
+	}
+
+	// Extract entityHeader
+	if headerData, ok := raw["entityHeader"]; ok {
+		headerBytes, err := json.Marshal(headerData)
+		if err != nil {
+			return err
+		}
+		if err := json.Unmarshal(headerBytes, &e.EntityHeader); err != nil {
+			return err
+		}
+		delete(raw, "entityHeader")
+	}
+
+	// Store remaining properties
+	e.Properties = raw
+	return nil
+}
+
+// MarshalJSON implements custom marshaling to include entityHeader and properties
+func (e *Entity) MarshalJSON() ([]byte, error) {
+	result := make(map[string]interface{})
+	result["entityHeader"] = e.EntityHeader
+	for k, v := range e.Properties {
+		result[k] = v
+	}
+	return json.Marshal(result)
 }
 
 // UnmarshalJSON implements custom unmarshaling for EventHeader to handle flexible date parsing
@@ -111,4 +184,3 @@ func parseFlexibleDate(v interface{}) (*time.Time, error) {
 		return nil, fmt.Errorf("unsupported date type: %T", v)
 	}
 }
-

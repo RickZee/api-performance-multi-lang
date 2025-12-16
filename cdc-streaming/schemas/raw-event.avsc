@@ -43,43 +43,57 @@
       }
     },
     {
-      "name": "eventBody",
+      "name": "entities",
       "type": {
-        "type": "record",
-        "name": "EventBody",
-        "fields": [
-          {
-            "name": "entities",
-            "type": {
-              "type": "array",
-              "items": {
+        "type": "array",
+        "items": {
+          "type": "record",
+          "name": "Entity",
+          "fields": [
+            {
+              "name": "entityHeader",
+              "type": {
                 "type": "record",
-                "name": "EntityUpdate",
+                "name": "EntityHeader",
                 "fields": [
-                  {
-                    "name": "entityType",
-                    "type": "string",
-                    "doc": "Type of entity (Car, Loan, LoanPayment, ServiceRecord, etc.). Car entity example: data/entities/car/car-large.json"
-                  },
                   {
                     "name": "entityId",
                     "type": "string",
                     "doc": "Unique identifier of the entity"
                   },
                   {
-                    "name": "updatedAttributes",
-                    "type": {
-                      "type": "map",
-                      "values": "string"
-                    },
-                    "doc": "Updated entity attributes as key-value pairs (JSON stringified)"
+                    "name": "entityType",
+                    "type": "string",
+                    "doc": "Type of entity (Car, Loan, LoanPayment, ServiceRecord, etc.)"
+                  },
+                  {
+                    "name": "createdAt",
+                    "type": "long",
+                    "logicalType": "timestamp-millis",
+                    "doc": "Entity creation timestamp in milliseconds"
+                  },
+                  {
+                    "name": "updatedAt",
+                    "type": "long",
+                    "logicalType": "timestamp-millis",
+                    "doc": "Entity update timestamp in milliseconds"
                   }
                 ]
-              }
+              },
+              "doc": "Entity header containing metadata"
+            },
+            {
+              "name": "properties",
+              "type": {
+                "type": "map",
+                "values": "string"
+              },
+              "doc": "Entity-specific properties as key-value pairs (JSON stringified)"
             }
-          }
-        ]
-      }
+          ]
+        }
+      },
+      "doc": "Array of entities with header and flat properties"
     },
     {
       "name": "sourceMetadata",

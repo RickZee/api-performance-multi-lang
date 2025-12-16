@@ -8,10 +8,8 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
-	"producer-api-go/internal/config"
 	"producer-api-go/internal/constants"
 	"producer-api-go/internal/handlers"
-	"producer-api-go/internal/models"
 	"producer-api-go/internal/repository"
 	"producer-api-go/internal/service"
 	"strings"
@@ -57,7 +55,7 @@ func (lc *LogCapture) Check(entry zapcore.Entry, checked *zapcore.CheckedEntry) 
 func (lc *LogCapture) Write(entry zapcore.Entry, fields []zapcore.Field) error {
 	lc.mu.Lock()
 	defer lc.mu.Unlock()
-	
+
 	var buf bytes.Buffer
 	buf.WriteString(entry.Message)
 	for _, field := range fields {
@@ -218,15 +216,15 @@ func TestProcessMultipleEventsShouldLogPersistedEventsCountWithAPIName(t *testin
 				"savedDate":   "2024-01-15T10:30:05Z",
 				"eventType":   "LoanPaymentSubmitted",
 			},
-			"eventBody": map[string]interface{}{
-				"entities": []map[string]interface{}{
-					{
-						"entityType": "Loan",
+			"entities": []map[string]interface{}{
+				{
+					"entityHeader": map[string]interface{}{
 						"entityId":   fmt.Sprintf("loan-log-bulk-%d", i),
-						"updatedAttributes": map[string]interface{}{
-							"balance": "24439.75",
-						},
+						"entityType": "Loan",
+						"createdAt":  "2024-01-15T10:30:00Z",
+						"updatedAt":  "2024-01-15T10:30:00Z",
 					},
+					"balance": "24439.75",
 				},
 			},
 		}
@@ -283,7 +281,7 @@ func TestProcessEventShouldLogAllRequiredPatternsWithAPIName(t *testing.T) {
 
 	// Verify all required log patterns are present with API name
 	messages := strings.Join(logCapture.GetMessages(), "\n")
-	
+
 	if !strings.Contains(messages, "[producer-api-go-rest]") {
 		t.Error("Logs should contain API name [producer-api-go-rest]")
 	}
@@ -294,4 +292,3 @@ func TestProcessEventShouldLogAllRequiredPatternsWithAPIName(t *testing.T) {
 		t.Error("Logs should contain 'Successfully created entity' message")
 	}
 }
-

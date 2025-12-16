@@ -68,11 +68,13 @@ function generateCarCreatedEvent() {
             createdDate: timestamp,
             savedDate: timestamp
         },
-        eventBody: {
-            entities: [{
-            entityType: "Car",
-            entityId: carId,
-            updatedAttributes: {
+        entities: [{
+            entityHeader: {
+                entityId: carId,
+                entityType: "Car",
+                createdAt: timestamp,
+                updatedAt: timestamp
+            },
             id: carId,
             vin: `${randomString(17).toUpperCase()}`,
             make: ["Tesla", "Toyota", "Honda", "Ford", "BMW"][randomIntBetween(0, 4)],
@@ -84,9 +86,7 @@ function generateCarCreatedEvent() {
             totalBalance: 0.0,
             lastLoanPaymentDate: timestamp,
             owner: `${randomString(8)} ${randomString(10)}`
-            }
-            }]
-        }
+        }]
     });
 }
 
@@ -108,11 +108,13 @@ function generateLoanCreatedEvent(carId) {
             createdDate: timestamp,
             savedDate: timestamp
         },
-        eventBody: {
-            entities: [{
-            entityType: "Loan",
-            entityId: loanId,
-            updatedAttributes: {
+        entities: [{
+            entityHeader: {
+                entityId: loanId,
+                entityType: "Loan",
+                createdAt: timestamp,
+                updatedAt: timestamp
+            },
             id: loanId,
             carId: carId,
             financialInstitution: ["First National Bank", "Chase Bank", "Wells Fargo", "Bank of America"][randomIntBetween(0, 3)],
@@ -124,9 +126,7 @@ function generateLoanCreatedEvent(carId) {
             startDate: timestamp,
             status: "active",
             monthlyPayment: monthlyPayment.toFixed(2)
-            }
-            }]
-        }
+        }]
     });
 }
 
@@ -143,18 +143,18 @@ function generateLoanPaymentEvent(loanId, amount) {
             createdDate: timestamp,
             savedDate: timestamp
         },
-        eventBody: {
-            entities: [{
-            entityType: "LoanPayment",
-            entityId: paymentId,
-            updatedAttributes: {
+        entities: [{
+            entityHeader: {
+                entityId: paymentId,
+                entityType: "LoanPayment",
+                createdAt: timestamp,
+                updatedAt: timestamp
+            },
             id: paymentId,
             loanId: loanId,
             amount: parseFloat(amount).toFixed(2),
             paymentDate: timestamp
-            }
-            }]
-        }
+        }]
     });
 }
 
@@ -190,22 +190,22 @@ function generateCarServiceDoneEvent(carId, serviceId = null) {
             createdDate: timestamp,
             savedDate: timestamp
         },
-        eventBody: {
-            entities: [{
-                entityType: "ServiceRecord",
+        entities: [{
+            entityHeader: {
                 entityId: id,
-                updatedAttributes: {
-                    id: id,
-                    carId: carId,
-                    serviceDate: timestamp,
-                    amountPaid: parseFloat(amountPaid).toFixed(2),
-                    dealerId: dealerId,
-                    dealerName: dealerName,
-                    mileageAtService: mileageAtService,
-                    description: description
-                }
-            }]
-        }
+                entityType: "ServiceRecord",
+                createdAt: timestamp,
+                updatedAt: timestamp
+            },
+            id: id,
+            carId: carId,
+            serviceDate: timestamp,
+            amountPaid: parseFloat(amountPaid).toFixed(2),
+            dealerId: dealerId,
+            dealerName: dealerName,
+            mileageAtService: mileageAtService,
+            description: description
+        }]
     });
 }
 
@@ -239,8 +239,8 @@ export default function (data) {
         payload = generateCarCreatedEvent();
         // Override with shared car ID for consistency
         const carEvent = JSON.parse(payload);
-        carEvent.eventBody.entities[0].entityId = data.carId;
-        carEvent.eventBody.entities[0].updatedAttributes.id = data.carId;
+        carEvent.entities[0].entityHeader.entityId = data.carId;
+        carEvent.entities[0].id = data.carId;
         payload = JSON.stringify(carEvent);
         eventType = "CarCreated";
     } else if (iteration === 1) {
@@ -248,8 +248,8 @@ export default function (data) {
         payload = generateLoanCreatedEvent(data.carId);
         // Override with shared loan ID for consistency
         const loanEvent = JSON.parse(payload);
-        loanEvent.eventBody.entities[0].entityId = data.loanId;
-        loanEvent.eventBody.entities[0].updatedAttributes.id = data.loanId;
+        loanEvent.entities[0].entityHeader.entityId = data.loanId;
+        loanEvent.entities[0].id = data.loanId;
         payload = JSON.stringify(loanEvent);
         eventType = "LoanCreated";
     } else if (iteration === 2) {

@@ -8,7 +8,7 @@ from typing import Optional
 import uuid
 
 from constants import API_NAME
-from models.event import Event, EntityUpdate
+from models.event import Event, Entity
 from repository import BusinessEventRepository, EntityRepository, EventHeaderRepository, get_connection
 from config import LambdaConfig
 from service.retry_utils import retry_on_oc000, classify_dsql_error, is_oc000_error
@@ -71,7 +71,7 @@ class EventProcessingService:
                 'event_id': event_id,
                 'event_type': event.event_header.event_type,
                 'transaction_id': transaction_id,
-                'entity_count': len(event.event_body.entities),
+                'entity_count': len(event.entities),
             }
         )
         
@@ -131,20 +131,20 @@ class EventProcessingService:
                 
                 # 3. Extract and save entities to their respective tables
                 entity_count = 0
-                for idx, entity_update in enumerate(event.event_body.entities):
+                for idx, entity in enumerate(event.entities):
                     step_start = time.time()
-                    await self.process_entity_update(entity_update, event_id, conn=conn)
+                    await self.process_entity_update(entity, event_id, conn=conn)
                     step_duration = int((time.time() - step_start) * 1000)
                     entity_count += 1
                     logger.debug(
-                        f"{API_NAME} Step 3/3: Processed entity {idx+1}/{len(event.event_body.entities)}",
+                        f"{API_NAME} Step 3/3: Processed entity {idx+1}/{len(event.entities)}",
                         extra={
                             'event_id': event_id,
                             'transaction_id': transaction_id,
                             'step': 'entity_update',
                             'entity_index': idx,
-                            'entity_type': entity_update.entity_type,
-                            'entity_id': entity_update.entity_id,
+                            'entity_type': entity.entity_header.entity_type,
+                            'entity_id': entity.entity_header.entity_id,
                             'duration_ms': step_duration,
                         }
                     )
@@ -261,12 +261,14 @@ class EventProcessingService:
         # Enhanced logging for Payment and Service events to diagnose failures
         if event_type in ('LoanPaymentSubmitted', 'CarServiceDone'):
             entity_info = []
-            for entity in event.event_body.entities:
+            for entity in event.entities:
+                entity_props = entity.model_dump(mode='json')
+                entity_props.pop('entityHeader', None)
                 entity_info.append({
-                    'entity_type': entity.entity_type,
-                    'entity_id': entity.entity_id,
-                    'has_loan_id': 'loanId' in (entity.updated_attributes or {}),
-                    'has_car_id': 'carId' in (entity.updated_attributes or {}),
+                    'entity_type': entity.entity_header.entity_type,
+                    'entity_id': entity.entity_header.entity_id,
+                    'has_loan_id': 'loanId' in entity_props,
+                    'has_car_id': 'carId' in entity_props,
                 })
             logger.info(
                 f"{API_NAME} Payment/Service event details: {event_name}",
@@ -275,7 +277,7 @@ class EventProcessingService:
                     'event_type': event_type,
                     'event_name': event_name,
                     'transaction_id': transaction_id,
-                    'entity_count': len(event.event_body.entities),
+                    'entity_count': len(event.entities),
                     'entity_info': entity_info,
                 }
             )
@@ -309,8 +311,8 @@ class EventProcessingService:
                         f"{API_NAME} OC000 transaction conflict - all retries exhausted for {event_name}",
                         extra={
                             **log_context,
-                            'entity_types': [e.entity_type for e in event.event_body.entities],
-                            'entity_ids': [e.entity_id for e in event.event_body.entities],
+                            'entity_types': [e.entity_header.entity_type for e in event.entities],
+                            'entity_ids': [e.entity_header.entity_id for e in event.entities],
                             'retry_exhausted': True,
                         },
                         exc_info=True
@@ -379,20 +381,20 @@ class EventProcessingService:
         )
         logger.info(f"{API_NAME} Successfully saved event header: {event_id}")
     
-    async def process_entity_update(self, entity_update: EntityUpdate, event_id: str,
+    async def process_entity_update(self, entity: Entity, event_id: str,
                                    conn: Optional[asyncpg.Connection] = None) -> None:
         """Process a single entity update.
         
         Args:
-            entity_update: EntityUpdate object with entity type, ID, and updated attributes
+            entity: Entity object with entity header and flat properties
             event_id: Event ID that triggered this entity update
             conn: Database connection
         """
         import time
         step_start = time.time()
         
-        entity_type = entity_update.entity_type
-        entity_id = entity_update.entity_id
+        entity_type = entity.entity_header.entity_type
+        entity_id = entity.entity_header.entity_id
         
         if not entity_type or not entity_id:
             logger.warning(
@@ -451,7 +453,7 @@ class EventProcessingService:
                     'action': 'update',
                 }
             )
-            await self.update_existing_entity(entity_repo, entity_update, event_id, conn=conn)
+            await self.update_existing_entity(entity_repo, entity, event_id, conn=conn)
         else:
             logger.info(
                 f"{API_NAME} Entity does not exist, creating new: {entity_id}",
@@ -462,7 +464,7 @@ class EventProcessingService:
                     'action': 'create',
                 }
             )
-            await self.create_new_entity(entity_repo, entity_update, event_id, conn=conn)
+            await self.create_new_entity(entity_repo, entity, event_id, conn=conn)
         
         step_duration = int((time.time() - step_start) * 1000)
         logger.debug(
@@ -476,40 +478,28 @@ class EventProcessingService:
         )
     
     async def create_new_entity(
-        self, entity_repo: EntityRepository, entity_update: EntityUpdate,
+        self, entity_repo: EntityRepository, entity: Entity,
         event_id: str, conn: Optional[asyncpg.Connection] = None
     ) -> None:
         """Create a new entity.
         
         Args:
             entity_repo: Repository for the entity type
-            entity_update: EntityUpdate object with entity type, ID, and updated attributes
+            entity: Entity object with entity header and flat properties
             event_id: Event ID that triggered this entity creation
             conn: Database connection
         """
-        entity_id = entity_update.entity_id
-        entity_type = entity_update.entity_type
+        entity_id = entity.entity_header.entity_id
+        entity_type = entity.entity_header.entity_type
         now = datetime.utcnow()
         
-        # Extract entity data from updated_attributes
-        entity_data = entity_update.updated_attributes.copy() if isinstance(
-            entity_update.updated_attributes, dict
-        ) else {}
+        # Extract entity data from entity properties (excluding entityHeader)
+        entity_dict = entity.model_dump(mode='json')
+        entity_data = {k: v for k, v in entity_dict.items() if k != 'entityHeader'}
         
-        # Remove entityHeader from entity_data if it exists (nested structure)
-        entity_header = entity_data.pop("entityHeader", None) or entity_data.pop("entity_header", None)
-        
-        # Extract createdAt and updatedAt from entityHeader if present, otherwise from entity_data, otherwise use now
-        if entity_header and isinstance(entity_header, dict):
-            created_at_str = entity_header.get("createdAt") or entity_header.get("created_at")
-            updated_at_str = entity_header.get("updatedAt") or entity_header.get("updated_at")
-        else:
-            created_at_str = entity_data.pop("createdAt", None) or entity_data.pop("created_at", None)
-            updated_at_str = entity_data.pop("updatedAt", None) or entity_data.pop("updated_at", None)
-        
-        # Parse datetime strings to datetime objects
-        created_at = self._parse_datetime(created_at_str) if created_at_str else now
-        updated_at = self._parse_datetime(updated_at_str) if updated_at_str else now
+        # Use createdAt and updatedAt from entityHeader
+        created_at = entity.entity_header.created_at if entity.entity_header.created_at else now
+        updated_at = entity.entity_header.updated_at if entity.entity_header.updated_at else now
         
         await entity_repo.create(
             entity_id=entity_id,
@@ -539,34 +529,23 @@ class EventProcessingService:
                 return datetime.utcnow()
     
     async def update_existing_entity(
-        self, entity_repo: EntityRepository, entity_update: EntityUpdate,
+        self, entity_repo: EntityRepository, entity: Entity,
         event_id: str, conn: Optional[asyncpg.Connection] = None
     ) -> None:
         """Update an existing entity.
         
         Args:
             entity_repo: Repository for the entity type
-            entity_update: EntityUpdate object with entity type, ID, and updated attributes
+            entity: Entity object with entity header and flat properties
             event_id: Event ID that triggered this entity update
             conn: Database connection
         """
-        entity_id = entity_update.entity_id
+        entity_id = entity.entity_header.entity_id
         updated_at = datetime.utcnow()
         
-        # Extract entity data from updated_attributes
-        entity_data = entity_update.updated_attributes.copy() if isinstance(
-            entity_update.updated_attributes, dict
-        ) else {}
-        
-        # Remove entityHeader from entity_data if it exists
-        entity_data.pop("entityHeader", None)
-        entity_data.pop("entity_header", None)
-        
-        # Remove entityHeader fields that might be at top level
-        entity_data.pop("createdAt", None)
-        entity_data.pop("created_at", None)
-        entity_data.pop("updatedAt", None)
-        entity_data.pop("updated_at", None)
+        # Extract entity data from entity properties (excluding entityHeader)
+        entity_dict = entity.model_dump(mode='json')
+        entity_data = {k: v for k, v in entity_dict.items() if k != 'entityHeader'}
         
         await entity_repo.update(
             entity_id=entity_id,

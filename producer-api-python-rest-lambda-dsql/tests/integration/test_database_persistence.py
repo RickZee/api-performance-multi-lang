@@ -117,7 +117,7 @@ def test_service(test_config):
 
 @pytest.fixture
 def sample_car_event():
-    """Sample car created event with eventBody structure."""
+    """Sample car created event matching canonical schema."""
     return {
         "eventHeader": {
             "uuid": "test-event-car-001",
@@ -126,27 +126,27 @@ def sample_car_event():
             "createdDate": "2024-01-15T10:30:00Z",
             "savedDate": "2024-01-15T10:30:05Z"
         },
-        "eventBody": {
-            "entities": [
-                {
-                    "entityType": "Car",
+        "entities": [
+            {
+                "entityHeader": {
                     "entityId": "TEST-CAR-001",
-                    "updatedAttributes": {
-                        "id": "TEST-CAR-001",
-                        "vin": "TEST1234567890123",
-                        "make": "Tesla",
-                        "model": "Model S",
-                        "year": 2025,
-                        "color": "Midnight Silver",
-                        "mileage": 0,
-                        "lastServiceDate": "2024-01-15T10:30:00Z",
-                        "totalBalance": 0.0,
-                        "lastLoanPaymentDate": "2024-01-15T10:30:00Z",
-                        "owner": "Test Owner"
-                    }
-                }
-            ]
-        }
+                    "entityType": "Car",
+                    "createdAt": "2024-01-15T10:30:00Z",
+                    "updatedAt": "2024-01-15T10:30:00Z"
+                },
+                "id": "TEST-CAR-001",
+                "vin": "TEST1234567890123",
+                "make": "Tesla",
+                "model": "Model S",
+                "year": 2025,
+                "color": "Midnight Silver",
+                "mileage": 0,
+                "lastServiceDate": "2024-01-15T10:30:00Z",
+                "totalBalance": 0.0,
+                "lastLoanPaymentDate": "2024-01-15T10:30:00Z",
+                "owner": "Test Owner"
+            }
+        ]
     }
 
 
@@ -161,17 +161,19 @@ def sample_loan_event():
             "createdDate": "2024-01-15T10:30:00Z",
             "savedDate": "2024-01-15T10:30:05Z"
         },
-        "eventBody": {
-            "entities": [
-                {
-                    "entityType": "Loan",
+        "entities": [
+            {
+                "entityHeader": {
                     "entityId": "TEST-LOAN-001",
-                    "updatedAttributes": {
-                        "id": "TEST-LOAN-001",
-                        "carId": "TEST-CAR-001",
-                        "financialInstitution": "Test Bank",
-                        "balance": "50000.00",
-                        "lastPaidDate": "2024-01-15T10:30:00Z",
+                    "entityType": "Loan",
+                    "createdAt": "2024-01-15T10:30:00Z",
+                    "updatedAt": "2024-01-15T10:30:00Z"
+                },
+                "id": "TEST-LOAN-001",
+                "carId": "TEST-CAR-001",
+                "financialInstitution": "Test Bank",
+                "balance": "50000.00",
+                "lastPaidDate": "2024-01-15T10:30:00Z",
                         "loanAmount": "50000.00",
                         "interestRate": 4.5,
                         "termMonths": 60,
@@ -217,14 +219,14 @@ class TestBusinessEventsPersistence:
             # Verify event_data contains full event structure
             event_data = row["event_data"]
             assert "eventHeader" in event_data
-            assert "eventBody" in event_data
+            assert "entities" in event_data
             assert event_data["eventHeader"]["uuid"] == "test-event-car-001"
             assert event_data["eventHeader"]["eventName"] == "Car Created"
-            assert len(event_data["eventBody"]["entities"]) == 1
-            assert event_data["eventBody"]["entities"][0]["entityType"] == "Car"
-            assert event_data["eventBody"]["entities"][0]["entityId"] == "TEST-CAR-001"
-            assert "updatedAttributes" in event_data["eventBody"]["entities"][0]
-            assert event_data["eventBody"]["entities"][0]["updatedAttributes"]["vin"] == "TEST1234567890123"
+            assert len(event_data["entities"]) == 1
+            assert event_data["entities"][0]["entityHeader"]["entityType"] == "Car"
+            assert event_data["entities"][0]["entityHeader"]["entityId"] == "TEST-CAR-001"
+            assert "entityHeader" in event_data["entities"][0]
+            assert event_data["entities"][0]["vin"] == "TEST1234567890123"
     
     @pytest.mark.asyncio
     async def test_business_event_event_data_matches_input(
@@ -246,10 +248,11 @@ class TestBusinessEventsPersistence:
             # Verify structure matches input
             assert event_data["eventHeader"]["uuid"] == sample_car_event["eventHeader"]["uuid"]
             assert event_data["eventHeader"]["eventName"] == sample_car_event["eventHeader"]["eventName"]
-            assert event_data["eventBody"]["entities"][0]["entityType"] == "Car"
-            assert event_data["eventBody"]["entities"][0]["entityId"] == "TEST-CAR-001"
-            # Verify updatedAttributes contains all entity fields
-            updated_attrs = event_data["eventBody"]["entities"][0]["updatedAttributes"]
+            assert event_data["entities"][0]["entityHeader"]["entityType"] == "Car"
+            assert event_data["entities"][0]["entityHeader"]["entityId"] == "TEST-CAR-001"
+            # Verify entity contains all fields (excluding entityHeader)
+            entity = event_data["entities"][0]
+            entity_props = {k: v for k, v in entity.items() if k != "entityHeader"}
             assert updated_attrs["vin"] == "TEST1234567890123"
             assert updated_attrs["make"] == "Tesla"
             assert updated_attrs["model"] == "Model S"
@@ -387,7 +390,7 @@ class TestEntityPersistence:
     async def test_entity_data_contains_updated_attributes(
         self, test_db_pool, clean_database, test_config, sample_car_event
     ):
-        """Test that entity_data contains all fields from updatedAttributes."""
+        """Test that entity_data contains all fields from entity properties."""
         event = Event(**sample_car_event)
         service = test_service
         
@@ -400,12 +403,13 @@ class TestEntityPersistence:
             )
             
             entity_data = row["entity_data"]
-            updated_attrs = sample_car_event["eventBody"]["entities"][0]["updatedAttributes"]
+            entity = sample_car_event["entities"][0]
+            entity_props = {k: v for k, v in entity.items() if k != "entityHeader"}
             
-            # Verify all fields from updatedAttributes are in entity_data
-            for key, value in updated_attrs.items():
+            # Verify all fields from entity properties are in entity_data
+            for key, value in entity_props.items():
                 assert key in entity_data, f"Field {key} should be in entity_data"
-                assert entity_data[key] == value, f"Field {key} should match updatedAttributes value"
+                assert entity_data[key] == value, f"Field {key} should match entity property value"
     
     @pytest.mark.asyncio
     async def test_loan_entity_saved_to_loan_entities_table(
@@ -495,8 +499,8 @@ class TestEntityUpsert:
         # Update entity with new data
         updated_event = sample_car_event.copy()
         updated_event["eventHeader"]["uuid"] = "test-event-car-002"
-        updated_event["eventBody"]["entities"][0]["updatedAttributes"]["mileage"] = 1000
-        updated_event["eventBody"]["entities"][0]["updatedAttributes"]["color"] = "Red"
+        updated_event["entities"][0]["mileage"] = 1000
+        updated_event["entities"][0]["color"] = "Red"
         
         event2 = Event(**updated_event)
         await service.process_event(event2)
@@ -565,17 +569,17 @@ class TestTransactionAtomicity:
                 "createdDate": "2024-01-15T10:30:00Z",
                 "savedDate": "2024-01-15T10:30:05Z"
             },
-            "eventBody": {
-                "entities": [
-                    {
-                        "entityType": "UnknownEntityType",  # Will fail - no repository
+            "entities": [
+                {
+                    "entityHeader": {
                         "entityId": "TEST-UNKNOWN-001",
-                        "updatedAttributes": {
-                            "id": "TEST-UNKNOWN-001"
-                        }
-                    }
-                ]
-            }
+                        "entityType": "UnknownEntityType",  # Will fail - no repository
+                        "createdAt": "2024-01-15T10:30:00Z",
+                        "updatedAt": "2024-01-15T10:30:00Z"
+                    },
+                    "id": "TEST-UNKNOWN-001"
+                }
+            ]
         }
         
         event = Event(**invalid_event)
@@ -624,28 +628,30 @@ class TestMultipleEntities:
                 "createdDate": "2024-01-15T10:30:00Z",
                 "savedDate": "2024-01-15T10:30:05Z"
             },
-            "eventBody": {
-                "entities": [
-                    {
-                        "entityType": "Car",
+            "entities": [
+                {
+                    "entityHeader": {
                         "entityId": "TEST-CAR-MULTI-001",
-                        "updatedAttributes": {
-                            "id": "TEST-CAR-MULTI-001",
-                            "vin": "MULTI1234567890123",
-                            "make": "Tesla"
-                        }
+                        "entityType": "Car",
+                        "createdAt": "2024-01-15T10:30:00Z",
+                        "updatedAt": "2024-01-15T10:30:00Z"
                     },
-                    {
-                        "entityType": "Loan",
+                    "id": "TEST-CAR-MULTI-001",
+                    "vin": "MULTI1234567890123",
+                    "make": "Tesla"
+                },
+                {
+                    "entityHeader": {
                         "entityId": "TEST-LOAN-MULTI-001",
-                        "updatedAttributes": {
-                            "id": "TEST-LOAN-MULTI-001",
-                            "carId": "TEST-CAR-MULTI-001",
-                            "balance": "30000.00"
-                        }
-                    }
-                ]
-            }
+                        "entityType": "Loan",
+                        "createdAt": "2024-01-15T10:30:00Z",
+                        "updatedAt": "2024-01-15T10:30:00Z"
+                    },
+                    "id": "TEST-LOAN-MULTI-001",
+                    "carId": "TEST-CAR-MULTI-001",
+                    "balance": "30000.00"
+                }
+            ]
         }
         
         event = Event(**multi_entity_event)

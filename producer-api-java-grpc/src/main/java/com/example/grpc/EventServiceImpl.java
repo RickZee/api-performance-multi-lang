@@ -42,23 +42,22 @@ public class EventServiceImpl extends EventServiceGrpc.EventServiceImplBase {
                 return;
             }
             
-            if (!request.hasEventBody()) {
-                sendErrorResponse(responseObserver, Status.INVALID_ARGUMENT, "Invalid event: missing eventBody");
-                return;
-            }
-            
-            if (request.getEventBody().getEntitiesList().isEmpty()) {
+            if (request.getEntitiesList().isEmpty()) {
                 sendErrorResponse(responseObserver, Status.INVALID_ARGUMENT, "Invalid event: entities list cannot be empty");
                 return;
             }
             
             // Validate each entity
-            for (EntityUpdate entityUpdate : request.getEventBody().getEntitiesList()) {
-                if (entityUpdate.getEntityType().isEmpty()) {
+            for (com.example.grpc.Entity entity : request.getEntitiesList()) {
+                if (!entity.hasEntityHeader()) {
+                    sendErrorResponse(responseObserver, Status.INVALID_ARGUMENT, "Invalid entity: missing entityHeader");
+                    return;
+                }
+                if (entity.getEntityHeader().getEntityType().isEmpty()) {
                     sendErrorResponse(responseObserver, Status.INVALID_ARGUMENT, "Invalid entity: entityType cannot be empty");
                     return;
                 }
-                if (entityUpdate.getEntityId().isEmpty()) {
+                if (entity.getEntityHeader().getEntityId().isEmpty()) {
                     sendErrorResponse(responseObserver, Status.INVALID_ARGUMENT, "Invalid entity: entityId cannot be empty");
                     return;
                 }

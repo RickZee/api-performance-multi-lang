@@ -223,10 +223,14 @@ def _is_database_connection_error(error: Exception) -> bool:
 
 async def _handle_process_event(event_body: str) -> Dict[str, Any]:
     """Handle single event processing."""
+    logger.info(f"{API_NAME} _handle_process_event called, parsing JSON...")
     try:
         # Parse request body
+        logger.info(f"{API_NAME} Parsing event_body (length: {len(event_body)})")
         event_data = json.loads(event_body)
+        logger.info(f"{API_NAME} JSON parsed, creating Event object...")
         event = Event(**event_data)
+        logger.info(f"{API_NAME} Event object created successfully")
     except json.JSONDecodeError as e:
         logger.warning(f"{API_NAME} Invalid JSON: {e}")
         return _create_response(
@@ -301,10 +305,12 @@ async def _handle_process_event(event_body: str) -> Dict[str, Any]:
     
     # Process event
     try:
+        logger.info(f"{API_NAME} Initializing service...")
         service = await _initialize_service()
+        logger.info(f"{API_NAME} Service initialized, starting event processing...")
         start_time = time.time()
         
-        logger.debug(
+        logger.info(
             f"{API_NAME} Starting event processing",
             extra={
                 'event_id': event_id,
@@ -313,7 +319,9 @@ async def _handle_process_event(event_body: str) -> Dict[str, Any]:
             }
         )
         
+        logger.info(f"{API_NAME} Calling service.process_event...")
         await service.process_event(event)
+        logger.info(f"{API_NAME} service.process_event completed")
         duration_ms = int((time.time() - start_time) * 1000)
         
         logger.info(
@@ -642,6 +650,7 @@ def handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
     are always created and used in the same loop context.
     """
     global _lambda_loop
+    logger.info(f"{API_NAME} handler() called - START")
     
     # Check if we're already in a running loop (shouldn't happen in real Lambda/SAM)
     try:
@@ -670,7 +679,10 @@ def handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
     
     # Run the async handler in the dedicated loop
     try:
-        return _lambda_loop.run_until_complete(_async_handler(event, context))
+        logger.info(f"{API_NAME} About to run async handler in event loop")
+        result = _lambda_loop.run_until_complete(_async_handler(event, context))
+        logger.info(f"{API_NAME} Async handler completed successfully")
+        return result
     except Exception as e:
         logger.error(f"{API_NAME} Error in handler: {e}", exc_info=True)
         raise
@@ -678,14 +690,16 @@ def handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
 
 async def _async_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
     """Async handler implementation."""
+    logger.info(f"{API_NAME} _async_handler called")
     # Extract path and method
     request_context = event.get("requestContext", {})
     http_context = request_context.get("http", {})
     path = http_context.get("path", "")
     method = http_context.get("method", "")
+    logger.info(f"{API_NAME} Path: {path}, Method: {method}")
     
     # Extract request ID for correlation
-    request_id = request_context.get("requestId", context.request_id if context else "unknown")
+    request_id = request_context.get("requestId", context.aws_request_id if context else "unknown")
     
     # Log with structured context
     logger.info(
@@ -698,10 +712,14 @@ async def _async_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
     )
     
     # Route requests
+    logger.info(f"{API_NAME} Routing request to path: {path}")
     if path == "/api/v1/events/health" and method == "GET":
+        logger.info(f"{API_NAME} Routing to health check")
         return await _handle_health_check()
     elif path == "/api/v1/events" and method == "POST":
+        logger.info(f"{API_NAME} Routing to process event")
         body = event.get("body", "{}")
+        logger.info(f"{API_NAME} Body length: {len(body)}")
         return await _handle_process_event(body)
     elif path == "/api/v1/events/bulk" and method == "POST":
         body = event.get("body", "[]")

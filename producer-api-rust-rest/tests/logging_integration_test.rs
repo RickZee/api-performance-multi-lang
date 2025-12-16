@@ -124,16 +124,16 @@ async fn test_process_event_should_log_processing_event() {
             "savedDate": "2024-01-15T10:30:05Z",
             "eventType": "LoanPaymentSubmitted"
         },
-        "eventBody": {
-            "entities": [{
-                "entityType": "Loan",
+        "entities": [{
+            "entityHeader": {
                 "entityId": "loan-log-test-001",
-                "updatedAttributes": {
-                    "balance": "24439.75",
-                    "lastPaidDate": "2024-01-15T10:30:00Z"
-                }
-            }]
-        }
+                "entityType": "Loan",
+                "createdAt": "2024-01-15T10:30:00Z",
+                "updatedAt": "2024-01-15T10:30:00Z"
+            },
+            "balance": "24439.75",
+            "lastPaidDate": "2024-01-15T10:30:00Z"
+        }]
     });
 
     let response = client
@@ -173,15 +173,15 @@ async fn test_process_event_should_log_successfully_created_entity() {
             "savedDate": "2024-01-15T10:30:05Z",
             "eventType": "LoanPaymentSubmitted"
         },
-        "eventBody": {
-            "entities": [{
-                "entityType": "Loan",
+        "entities": [{
+            "entityHeader": {
                 "entityId": "loan-log-test-002",
-                "updatedAttributes": {
-                    "balance": "24439.75"
-                }
-            }]
-        }
+                "entityType": "Loan",
+                "createdAt": "2024-01-15T10:30:00Z",
+                "updatedAt": "2024-01-15T10:30:00Z"
+            },
+            "balance": "24439.75"
+        }]
     });
 
     let response = client
@@ -224,15 +224,15 @@ async fn test_process_multiple_events_should_log_persisted_events_count() {
                 "savedDate": "2024-01-15T10:30:05Z",
                 "eventType": "LoanPaymentSubmitted"
             },
-            "eventBody": {
-                "entities": [{
-                    "entityType": "Loan",
+            "entities": [{
+                "entityHeader": {
                     "entityId": format!("loan-log-bulk-{}", i),
-                    "updatedAttributes": {
-                        "balance": "24439.75"
-                    }
-                }]
-            }
+                    "entityType": "Loan",
+                    "createdAt": "2024-01-15T10:30:00Z",
+                    "updatedAt": "2024-01-15T10:30:00Z"
+                },
+                "balance": "24439.75"
+            }]
         });
 
         let response = client
@@ -276,16 +276,16 @@ async fn test_process_event_should_log_all_required_patterns() {
             "savedDate": "2024-01-15T10:30:05Z",
             "eventType": "LoanPaymentSubmitted"
         },
-        "eventBody": {
-            "entities": [{
-                "entityType": "Loan",
+        "entities": [{
+            "entityHeader": {
                 "entityId": "loan-log-complete-001",
-                "updatedAttributes": {
-                    "balance": "24439.75",
-                    "lastPaidDate": "2024-01-15T10:30:00Z"
-                }
-            }]
-        }
+                "entityType": "Loan",
+                "createdAt": "2024-01-15T10:30:00Z",
+                "updatedAt": "2024-01-15T10:30:00Z"
+            },
+            "balance": "24439.75",
+            "lastPaidDate": "2024-01-15T10:30:00Z"
+        }]
     });
 
     let response = client

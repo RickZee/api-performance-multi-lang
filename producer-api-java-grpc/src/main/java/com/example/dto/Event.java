@@ -4,11 +4,13 @@ import lombok.AllArgsConstructor;
 import lombok.Data;
 import lombok.NoArgsConstructor;
 
+import java.util.List;
+
 @Data
 @NoArgsConstructor
 @AllArgsConstructor
 public class Event {
     private EventHeader eventHeader;
-    private EventBody eventBody;
+    private List<Entity> entities;
 }
 

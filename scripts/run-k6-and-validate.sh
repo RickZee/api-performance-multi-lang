@@ -176,13 +176,13 @@ echo ""
 # DSQL may need more time for eventual consistency
 WAIT_START_TIME=$(date +%s)
 if [ "$DB_TYPE" = "dsql" ]; then
-    log_progress "Waiting 20 seconds for DSQL eventual consistency..." "$BLUE"
-    sleep 20
-    WAIT_DURATION=20
+    log_progress "Waiting 2 seconds for DSQL eventual consistency..." "$BLUE"
+    sleep 2
+    WAIT_DURATION=2
 else
-    log_progress "Waiting 5 seconds for database propagation..." "$BLUE"
-    sleep 5
-    WAIT_DURATION=5
+    log_progress "Waiting 2 seconds for database propagation..." "$BLUE"
+    sleep 2
+    WAIT_DURATION=2
 fi
 WAIT_END_TIME=$(date +%s)
 

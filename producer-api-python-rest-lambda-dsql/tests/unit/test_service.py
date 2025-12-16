@@ -89,12 +89,17 @@ class TestEventProcessingService:
     @pytest.mark.asyncio
     async def test_process_entity_update_new_entity(self, service, mock_connection):
         """Test processing a new entity (doesn't exist)."""
-        from producer_api_python_rest_lambda_shared.models.event import EntityUpdate
+        from producer_api_python_rest_lambda_shared.models.event import Entity, EntityHeader
         
-        entity_update = EntityUpdate(
-            entityType="Car",
-            entityId="CAR-2024-001",
-            updatedAttributes={"id": "CAR-2024-001", "vin": "5TDJKRFH4LS123456"}
+        entity = Entity(
+            entityHeader=EntityHeader(
+                entityId="CAR-2024-001",
+                entityType="Car",
+                createdAt="2024-01-15T10:30:00Z",
+                updatedAt="2024-01-15T10:30:00Z"
+            ),
+            id="CAR-2024-001",
+            vin="5TDJKRFH4LS123456"
         )
         
         with patch.object(service, '_get_entity_repository') as mock_get_repo:
@@ -103,7 +108,7 @@ class TestEventProcessingService:
             mock_repo.create = AsyncMock()
             mock_get_repo.return_value = mock_repo
             
-            await service.process_entity_update(entity_update, "event-123", conn=mock_connection)
+            await service.process_entity_update(entity, "event-123", conn=mock_connection)
             
             mock_repo.exists_by_entity_id.assert_called_once_with("CAR-2024-001", conn=mock_connection)
             mock_repo.create.assert_called_once()
@@ -115,12 +120,17 @@ class TestEventProcessingService:
     @pytest.mark.asyncio
     async def test_process_entity_update_existing_entity(self, service, mock_connection):
         """Test processing an existing entity (update)."""
-        from producer_api_python_rest_lambda_shared.models.event import EntityUpdate
+        from producer_api_python_rest_lambda_shared.models.event import Entity, EntityHeader
         
-        entity_update = EntityUpdate(
-            entityType="Car",
-            entityId="CAR-2024-001",
-            updatedAttributes={"id": "CAR-2024-001", "vin": "UPDATED123"}
+        entity = Entity(
+            entityHeader=EntityHeader(
+                entityId="CAR-2024-001",
+                entityType="Car",
+                createdAt="2024-01-15T10:30:00Z",
+                updatedAt="2024-01-15T10:30:00Z"
+            ),
+            id="CAR-2024-001",
+            vin="UPDATED123"
         )
         
         with patch.object(service, '_get_entity_repository') as mock_get_repo:
@@ -129,7 +139,7 @@ class TestEventProcessingService:
             mock_repo.update = AsyncMock()
             mock_get_repo.return_value = mock_repo
             
-            await service.process_entity_update(entity_update, "event-123", conn=mock_connection)
+            await service.process_entity_update(entity, "event-123", conn=mock_connection)
             
             mock_repo.exists_by_entity_id.assert_called_once_with("CAR-2024-001", conn=mock_connection)
             mock_repo.update.assert_called_once()
@@ -137,19 +147,24 @@ class TestEventProcessingService:
     @pytest.mark.asyncio
     async def test_create_new_entity_extracts_data(self, service, mock_connection):
         """Test create_new_entity extracts entity data correctly."""
-        from producer_api_python_rest_lambda_shared.models.event import EntityUpdate
+        from producer_api_python_rest_lambda_shared.models.event import Entity, EntityHeader
         
-        entity_update = EntityUpdate(
-            entityType="Car",
-            entityId="CAR-2024-001",
-            updatedAttributes={"id": "CAR-2024-001", "vin": "5TDJKRFH4LS123456"}
+        entity = Entity(
+            entityHeader=EntityHeader(
+                entityId="CAR-2024-001",
+                entityType="Car",
+                createdAt="2024-01-15T10:30:00Z",
+                updatedAt="2024-01-15T10:30:00Z"
+            ),
+            id="CAR-2024-001",
+            vin="5TDJKRFH4LS123456"
         )
         
         mock_repo = MagicMock(spec=EntityRepository)
         mock_repo.create = AsyncMock()
         
         await service.create_new_entity(
-            mock_repo, entity_update, "event-123", conn=mock_connection
+            mock_repo, entity, "event-123", conn=mock_connection
         )
         
         mock_repo.create.assert_called_once()
@@ -162,19 +177,24 @@ class TestEventProcessingService:
     @pytest.mark.asyncio
     async def test_update_existing_entity_extracts_data(self, service, mock_connection):
         """Test update_existing_entity extracts entity data correctly."""
-        from producer_api_python_rest_lambda_shared.models.event import EntityUpdate
+        from producer_api_python_rest_lambda_shared.models.event import Entity, EntityHeader
         
-        entity_update = EntityUpdate(
-            entityType="Car",
-            entityId="CAR-2024-001",
-            updatedAttributes={"id": "CAR-2024-001", "vin": "UPDATED123"}
+        entity = Entity(
+            entityHeader=EntityHeader(
+                entityId="CAR-2024-001",
+                entityType="Car",
+                createdAt="2024-01-15T10:30:00Z",
+                updatedAt="2024-01-15T10:30:00Z"
+            ),
+            id="CAR-2024-001",
+            vin="UPDATED123"
         )
         
         mock_repo = MagicMock(spec=EntityRepository)
         mock_repo.update = AsyncMock()
         
         await service.update_existing_entity(
-            mock_repo, entity_update, "event-123", conn=mock_connection
+            mock_repo, entity, "event-123", conn=mock_connection
         )
         
         mock_repo.update.assert_called_once()

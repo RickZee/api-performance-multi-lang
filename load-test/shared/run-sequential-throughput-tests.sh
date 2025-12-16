@@ -1050,17 +1050,17 @@ send_test_request() {
     "savedDate": "'$(date -u +%Y-%m-%dT%H:%M:%SZ)'",
     "eventType": "CarCreated"
   },
-  "eventBody": {
-    "entities": [{
-      "entityType": "Car",
+  "entities": [{
+    "entityHeader": {
       "entityId": "test-verification-car-'$(date +%s)'",
-      "updatedAttributes": {
-        "make": "Test",
-        "model": "Verification",
-        "year": "2024"
-      }
-    }]
-  }
+      "entityType": "Car",
+      "createdAt": "'$(date -u +%Y-%m-%dT%H:%M:%SZ)'",
+      "updatedAt": "'$(date -u +%Y-%m-%dT%H:%M:%SZ)'"
+    },
+    "make": "Test",
+    "model": "Verification",
+    "year": "2024"
+  }]
 }'
         
         if curl -f -s -X POST "http://localhost:${health_check_port}/api/v1/events" \
@@ -2241,16 +2241,16 @@ run_ghz_test() {
     "savedDate": "{{.Timestamp}}",
     "eventType": "TestEvent"
   },
-  "eventBody": {
-    "entities": [{
-      "entityType": "TestEntity",
+  "entities": [{
+    "entityHeader": {
       "entityId": "test-{{.RequestNumber}}",
-      "updatedAttributes": {
-        "id": "test-{{.RequestNumber}}",
-        "timestamp": "{{.Timestamp}}"
-      }
-    }]
-  }
+      "entityType": "TestEntity",
+      "createdAt": "{{.Timestamp}}",
+      "updatedAt": "{{.Timestamp}}"
+    },
+    "id": "test-{{.RequestNumber}}",
+    "timestamp": "{{.Timestamp}}"
+  }]
 }'
     
     # Use Docker service name for host (accessible via Docker network)

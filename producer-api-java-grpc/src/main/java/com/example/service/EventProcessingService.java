@@ -2,7 +2,7 @@ package com.example.service;
 
 import com.example.constants.ApiConstants;
 import com.example.dto.Event;
-import com.example.dto.EntityUpdate;
+import com.example.dto.Entity;
 import com.example.repository.BusinessEventRepository;
 import com.example.repository.DuplicateEventError;
 import com.example.repository.EntityRepository;
@@ -49,20 +49,20 @@ public class EventProcessingService {
         if (eventName == null || eventName.trim().isEmpty()) {
             return Mono.error(new IllegalArgumentException("eventName is required and cannot be empty"));
         }
-        if (event.getEventBody() == null) {
-            return Mono.error(new IllegalArgumentException("eventBody is required"));
-        }
-        var entities = event.getEventBody().getEntities();
+        var entities = event.getEntities();
         if (entities == null || entities.isEmpty()) {
-            return Mono.error(new IllegalArgumentException("eventBody.entities is required and cannot be empty"));
+            return Mono.error(new IllegalArgumentException("entities is required and cannot be empty"));
         }
         
         // Validate each entity
         for (var entity : entities) {
-            if (entity.getEntityType() == null || entity.getEntityType().trim().isEmpty()) {
+            if (entity.getEntityHeader() == null) {
+                return Mono.error(new IllegalArgumentException("entityHeader is required"));
+            }
+            if (entity.getEntityHeader().getEntityType() == null || entity.getEntityHeader().getEntityType().trim().isEmpty()) {
                 return Mono.error(new IllegalArgumentException("entityType cannot be empty"));
             }
-            if (entity.getEntityId() == null || entity.getEntityId().trim().isEmpty()) {
+            if (entity.getEntityHeader().getEntityId() == null || entity.getEntityHeader().getEntityId().trim().isEmpty()) {
                 return Mono.error(new IllegalArgumentException("entityId cannot be empty"));
             }
         }
@@ -79,7 +79,7 @@ public class EventProcessingService {
         return saveBusinessEvent(event, eventId)
                 .then(saveEventHeader(event, eventId))
                 .then(Flux.fromIterable(entities)
-                        .flatMap(entityUpdate -> processEntityUpdate(entityUpdate, eventId))
+                        .flatMap(entity -> processEntityUpdate(entity, eventId))
                         .then())
                 .timeout(Duration.ofSeconds(55))
                 .doOnSuccess(v -> {
@@ -164,104 +164,63 @@ public class EventProcessingService {
         }
     }
 
-    private Mono<Void> processEntityUpdate(EntityUpdate entityUpdate, String eventId) {
+    private Mono<Void> processEntityUpdate(Entity entity, String eventId) {
         log.info("{} Processing entity for type: {} and id: {}",
-                ApiConstants.API_NAME, entityUpdate.getEntityType(), entityUpdate.getEntityId());
+                ApiConstants.API_NAME, entity.getEntityHeader().getEntityType(), entity.getEntityHeader().getEntityId());
         
-        EntityRepository entityRepo = entityRepositoryFactory.getRepository(entityUpdate.getEntityType());
+        EntityRepository entityRepo = entityRepositoryFactory.getRepository(entity.getEntityHeader().getEntityType());
         if (entityRepo == null) {
             log.warn("{} Skipping entity with unknown type: {}",
-                    ApiConstants.API_NAME, entityUpdate.getEntityType());
+                    ApiConstants.API_NAME, entity.getEntityHeader().getEntityType());
             return Mono.empty();
         }
         
-        return entityRepo.existsByEntityId(entityUpdate.getEntityId(), null)
+        return entityRepo.existsByEntityId(entity.getEntityHeader().getEntityId(), null)
                 .flatMap(exists -> {
                     if (exists) {
                         log.warn("{} Entity already exists, updating: {}",
-                                ApiConstants.API_NAME, entityUpdate.getEntityId());
-                        return updateExistingEntity(entityRepo, entityUpdate, eventId);
+                                ApiConstants.API_NAME, entity.getEntityHeader().getEntityId());
+                        return updateExistingEntity(entityRepo, entity, eventId);
                     } else {
                         log.info("{} Entity does not exist, creating new: {}",
-                                ApiConstants.API_NAME, entityUpdate.getEntityId());
-                        return createNewEntity(entityRepo, entityUpdate, eventId);
+                                ApiConstants.API_NAME, entity.getEntityHeader().getEntityId());
+                        return createNewEntity(entityRepo, entity, eventId);
                     }
                 });
     }
 
-    private Mono<Void> createNewEntity(EntityRepository entityRepo, EntityUpdate entityUpdate, String eventId) {
-        String entityId = entityUpdate.getEntityId();
-        String entityType = entityUpdate.getEntityType();
+    private Mono<Void> createNewEntity(EntityRepository entityRepo, Entity entity, String eventId) {
+        String entityId = entity.getEntityHeader().getEntityId();
+        String entityType = entity.getEntityHeader().getEntityType();
         OffsetDateTime now = OffsetDateTime.now();
         
-        // Extract entity data from updatedAttributes
-        Map<String, Object> updatedAttrs = entityUpdate.getUpdatedAttributes();
-        if (updatedAttrs == null) {
-            updatedAttrs = new HashMap<>();
+        // Extract entity data from entity properties
+        Map<String, Object> entityData = entity.getProperties();
+        if (entityData == null) {
+            entityData = new HashMap<>();
         }
         
-        // Make a copy to avoid modifying the original
-        Map<String, Object> entityData = new HashMap<>(updatedAttrs);
-        
-        // Remove entityHeader from entity_data if it exists (nested structure)
-        Object entityHeaderObj = entityData.remove("entityHeader");
-        if (entityHeaderObj == null) {
-            entityHeaderObj = entityData.remove("entity_header");
-        }
-        
-        // Extract createdAt and updatedAt from entityHeader if present, otherwise from entity_data, otherwise use now
-        OffsetDateTime createdAt = now;
-        OffsetDateTime updatedAt = now;
-        
-        if (entityHeaderObj instanceof Map) {
-            @SuppressWarnings("unchecked")
-            Map<String, Object> entityHeader = (Map<String, Object>) entityHeaderObj;
-            createdAt = parseDateTime(entityHeader.get("createdAt"), entityHeader.get("created_at"), now);
-            updatedAt = parseDateTime(entityHeader.get("updatedAt"), entityHeader.get("updated_at"), now);
-        }
-        
-        // Try to get from entity_data if not found in entityHeader
-        if (createdAt.equals(now)) {
-            Object ca = entityData.remove("createdAt");
-            if (ca == null) {
-                ca = entityData.remove("created_at");
-            }
-            createdAt = parseDateTime(ca, null, now);
-        }
-        if (updatedAt.equals(now)) {
-            Object ua = entityData.remove("updatedAt");
-            if (ua == null) {
-                ua = entityData.remove("updated_at");
-            }
-            updatedAt = parseDateTime(ua, null, now);
-        }
+        // Use createdAt and updatedAt from entityHeader
+        OffsetDateTime createdAt = entity.getEntityHeader().getCreatedAt() != null 
+                ? entity.getEntityHeader().getCreatedAt() 
+                : now;
+        OffsetDateTime updatedAt = entity.getEntityHeader().getUpdatedAt() != null 
+                ? entity.getEntityHeader().getUpdatedAt() 
+                : now;
         
         return entityRepo.create(entityId, entityType, createdAt, updatedAt, entityData, eventId, null)
                 .doOnSuccess(v -> log.info("{} Successfully created entity: {}", ApiConstants.API_NAME, entityId));
     }
 
-    private Mono<Void> updateExistingEntity(EntityRepository entityRepo, EntityUpdate entityUpdate, String eventId) {
-        String entityId = entityUpdate.getEntityId();
+    private Mono<Void> updateExistingEntity(EntityRepository entityRepo, Entity entity, String eventId) {
+        String entityId = entity.getEntityHeader().getEntityId();
         OffsetDateTime updatedAt = OffsetDateTime.now();
         
-        // Extract entity data from updatedAttributes
-        Map<String, Object> updatedAttrs = entityUpdate.getUpdatedAttributes();
-        if (updatedAttrs == null) {
-            updatedAttrs = new HashMap<>();
+        // Extract entity data from entity properties
+        Map<String, Object> entityData = entity.getProperties();
+        if (entityData == null) {
+            entityData = new HashMap<>();
         }
-        
-        // Make a copy to avoid modifying the original
-        Map<String, Object> entityData = new HashMap<>(updatedAttrs);
-        
-        // Remove entityHeader from entity_data if it exists
-        entityData.remove("entityHeader");
-        entityData.remove("entity_header");
-        
-        // Remove entityHeader fields that might be at top level
-        entityData.remove("createdAt");
-        entityData.remove("created_at");
-        entityData.remove("updatedAt");
-        entityData.remove("updated_at");
         
         return entityRepo.update(entityId, updatedAt, entityData, eventId, null)
                 .doOnSuccess(v -> log.info("{} Successfully updated entity: {}", ApiConstants.API_NAME, entityId));
