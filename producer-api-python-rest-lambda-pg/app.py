@@ -208,8 +208,6 @@ async def process_event(event: Event):
             if pool_loop is not request_loop:
                 logger.error(f"{API_NAME} CRITICAL: Event loop mismatch! Pool: {id(pool_loop)}, Request: {id(request_loop)}")
                 raise RuntimeError(f"Pool created in loop {id(pool_loop)} but used in loop {id(request_loop)}")
-            else:
-                logger.debug(f"{API_NAME} Event loop verified: {id(request_loop)}")
         
         await service.process_event(event)
         

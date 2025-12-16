@@ -43,7 +43,6 @@ def generate_iam_auth_token(
             # Regenerate if expired or within 1 minute of expiration
             time_until_expiry = expires_at - datetime.utcnow()
             if time_until_expiry > timedelta(minutes=1):
-                logger.debug("Using cached IAM auth token")
                 return cached_token
             else:
                 logger.info("IAM auth token expired or expiring soon, regenerating")
@@ -121,5 +120,4 @@ def clear_token_cache():
     """Clear the token cache (useful for testing or forced refresh)."""
     global _token_cache
     _token_cache = None
-    logger.debug("IAM auth token cache cleared")
 

@@ -62,9 +62,6 @@ class EventProcessingService:
             event_id: Event ID
             transaction_id: Unique transaction ID for logging
         """
-        import time
-        tx_start_time = time.time()
-        
         logger.info(
             f"{API_NAME} Starting transaction execution",
             extra={
@@ -76,96 +73,21 @@ class EventProcessingService:
         )
         
         # Create direct connection (no pooling) - new connection for each retry attempt
-        conn_start = time.time()
         conn = await get_connection(self.config)
-        conn_duration = int((time.time() - conn_start) * 1000)
-        
-        logger.debug(
-            f"{API_NAME} Connection established",
-            extra={
-                'event_id': event_id,
-                'transaction_id': transaction_id,
-                'connection_duration_ms': conn_duration,
-                'connection_id': id(conn),
-            }
-        )
         
         try:
-            tx_begin = time.time()
             async with conn.transaction():
-                logger.debug(
-                    f"{API_NAME} Transaction started",
-                    extra={
-                        'event_id': event_id,
-                        'transaction_id': transaction_id,
-                    }
-                )
-                
                 # 1. Save entire event to business_events table
-                step_start = time.time()
                 await self.save_business_event(event, conn=conn)
-                step_duration = int((time.time() - step_start) * 1000)
-                logger.debug(
-                    f"{API_NAME} Step 1/3: Saved business event",
-                    extra={
-                        'event_id': event_id,
-                        'transaction_id': transaction_id,
-                        'step': 'business_event',
-                        'duration_ms': step_duration,
-                    }
-                )
                 
                 # 2. Save event header to event_headers table
-                step_start = time.time()
                 await self.save_event_header(event, event_id, conn=conn)
-                step_duration = int((time.time() - step_start) * 1000)
-                logger.debug(
-                    f"{API_NAME} Step 2/3: Saved event header",
-                    extra={
-                        'event_id': event_id,
-                        'transaction_id': transaction_id,
-                        'step': 'event_header',
-                        'duration_ms': step_duration,
-                    }
-                )
                 
                 # 3. Extract and save entities to their respective tables
                 entity_count = 0
-                for idx, entity in enumerate(event.entities):
-                    step_start = time.time()
+                for entity in event.entities:
                     await self.process_entity_update(entity, event_id, conn=conn)
-                    step_duration = int((time.time() - step_start) * 1000)
                     entity_count += 1
-                    logger.debug(
-                        f"{API_NAME} Step 3/3: Processed entity {idx+1}/{len(event.entities)}",
-                        extra={
-                            'event_id': event_id,
-                            'transaction_id': transaction_id,
-                            'step': 'entity_update',
-                            'entity_index': idx,
-                            'entity_type': entity.entity_header.entity_type,
-                            'entity_id': entity.entity_header.entity_id,
-                            'duration_ms': step_duration,
-                        }
-                    )
-                
-                tx_commit_start = time.time()
-                # Transaction commits here (end of async with block)
-                logger.debug(
-                    f"{API_NAME} Transaction committing",
-                    extra={
-                        'event_id': event_id,
-                        'transaction_id': transaction_id,
-                    }
-                )
-            
-            tx_duration = int((time.time() - tx_begin) * 1000)
-            commit_duration = int((time.time() - tx_commit_start) * 1000)
-            total_duration = int((time.time() - tx_start_time) * 1000)
-            
-            # Explicit write confirmation timestamp for eventual consistency tracking
-            commit_timestamp_utc = datetime.utcnow().isoformat() + 'Z'
-            commit_timestamp_epoch = time.time()
             
             self._log_persisted_event_count()
             logger.info(
@@ -176,30 +98,9 @@ class EventProcessingService:
                     'event_name': event.event_header.event_name,
                     'transaction_id': transaction_id,
                     'entity_count': entity_count,
-                    'transaction_duration_ms': tx_duration,
-                    'commit_duration_ms': commit_duration,
-                    'total_duration_ms': total_duration,
-                }
-            )
-            
-            # Explicit write confirmation log for eventual consistency correlation
-            logger.info(
-                f"{API_NAME} Event committed to database - ready for validation",
-                extra={
-                    'event_id': event_id,
-                    'event_type': event.event_header.event_type,
-                    'event_name': event.event_header.event_name,
-                    'transaction_id': transaction_id,
-                    'commit_timestamp_utc': commit_timestamp_utc,
-                    'commit_timestamp_epoch': commit_timestamp_epoch,
-                    'transaction_duration_ms': tx_duration,
-                    'commit_duration_ms': commit_duration,
-                    'entity_count': entity_count,
-                    'validation_ready': True,  # Flag for eventual consistency tracking
                 }
             )
         except Exception as e:
-            tx_duration = int((time.time() - tx_start_time) * 1000)
             logger.error(
                 f"{API_NAME} Transaction failed: {event_id}",
                 extra={
@@ -207,24 +108,13 @@ class EventProcessingService:
                     'transaction_id': transaction_id,
                     'error': str(e),
                     'error_type': type(e).__name__,
-                    'transaction_duration_ms': tx_duration,
                 },
                 exc_info=True
             )
             raise
         finally:
             # Always close connection
-            close_start = time.time()
             await conn.close()
-            close_duration = int((time.time() - close_start) * 1000)
-            logger.debug(
-                f"{API_NAME} Connection closed",
-                extra={
-                    'event_id': event_id,
-                    'transaction_id': transaction_id,
-                    'close_duration_ms': close_duration,
-                }
-            )
     
     async def process_event(self, event: Event) -> None:
         """Process a single event within a transaction with retry logic for OC000 conflicts.
@@ -257,30 +147,6 @@ class EventProcessingService:
                 'transaction_id': transaction_id,
             }
         )
-        
-        # Enhanced logging for Payment and Service events to diagnose failures
-        if event_type in ('LoanPaymentSubmitted', 'CarServiceDone'):
-            entity_info = []
-            for entity in event.entities:
-                entity_props = entity.model_dump(mode='json')
-                entity_props.pop('entityHeader', None)
-                entity_info.append({
-                    'entity_type': entity.entity_header.entity_type,
-                    'entity_id': entity.entity_header.entity_id,
-                    'has_loan_id': 'loanId' in entity_props,
-                    'has_car_id': 'carId' in entity_props,
-                })
-            logger.info(
-                f"{API_NAME} Payment/Service event details: {event_name}",
-                extra={
-                    'event_id': event_id,
-                    'event_type': event_type,
-                    'event_name': event_name,
-                    'transaction_id': transaction_id,
-                    'entity_count': len(event.entities),
-                    'entity_info': entity_info,
-                }
-            )
         
         try:
             # Execute transaction with automatic retry on OC000 errors
@@ -390,9 +256,6 @@ class EventProcessingService:
             event_id: Event ID that triggered this entity update
             conn: Database connection
         """
-        import time
-        step_start = time.time()
-        
         entity_type = entity.entity_header.entity_type
         entity_id = entity.entity_header.entity_id
         
@@ -407,15 +270,6 @@ class EventProcessingService:
             )
             return
         
-        logger.debug(
-            f"{API_NAME} Processing entity update",
-            extra={
-                'event_id': event_id,
-                'entity_type': entity_type,
-                'entity_id': entity_id,
-            }
-        )
-        
         entity_repo = self._get_entity_repository(entity_type)
         if entity_repo is None:
             logger.warning(
@@ -428,20 +282,7 @@ class EventProcessingService:
             )
             return
         
-        exists_start = time.time()
         exists = await entity_repo.exists_by_entity_id(entity_id, conn=conn)
-        exists_duration = int((time.time() - exists_start) * 1000)
-        
-        logger.debug(
-            f"{API_NAME} Entity existence check completed",
-            extra={
-                'event_id': event_id,
-                'entity_type': entity_type,
-                'entity_id': entity_id,
-                'exists': exists,
-                'check_duration_ms': exists_duration,
-            }
-        )
         
         if exists:
             logger.info(
@@ -465,17 +306,6 @@ class EventProcessingService:
                 }
             )
             await self.create_new_entity(entity_repo, entity, event_id, conn=conn)
-        
-        step_duration = int((time.time() - step_start) * 1000)
-        logger.debug(
-            f"{API_NAME} Entity update completed",
-            extra={
-                'event_id': event_id,
-                'entity_type': entity_type,
-                'entity_id': entity_id,
-                'total_duration_ms': step_duration,
-            }
-        )
     
     async def create_new_entity(
         self, entity_repo: EntityRepository, entity: Entity,

@@ -117,7 +117,6 @@ class EventHeaderRepository:
         step_start = time.time()
         
         try:
-            insert_start = time.time()
             await conn.execute(
                 """
                 INSERT INTO event_headers (id, event_name, event_type, created_date, saved_date, header_data)
@@ -129,18 +128,6 @@ class EventHeaderRepository:
                 created_date,
                 saved_date,
                 json.dumps(header_data),
-            )
-            insert_duration = int((time.time() - insert_start) * 1000)
-            total_duration = int((time.time() - step_start) * 1000)
-            
-            logger.debug(
-                f"Event header inserted",
-                extra={
-                    'event_id': event_id,
-                    'event_type': event_type,
-                    'insert_duration_ms': insert_duration,
-                    'total_duration_ms': total_duration,
-                }
             )
         except asyncpg.UniqueViolationError as e:
             # Raise custom exception for duplicate key violations

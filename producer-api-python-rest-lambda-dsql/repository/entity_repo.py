@@ -35,17 +35,6 @@ class EntityRepository:
                     """,
                     entity_id,
                 )
-                duration = int((time.time() - step_start) * 1000)
-                
-                logger.debug(
-                    f"Entity existence check completed",
-                    extra={
-                        'entity_id': entity_id,
-                        'table_name': self.table_name,
-                        'exists': exists,
-                        'duration_ms': duration,
-                    }
-                )
                 return exists
             except asyncpg.SerializationError as e:
                 # OC000 transaction conflict
@@ -102,7 +91,6 @@ class EntityRepository:
         
         if conn:
             try:
-                insert_start = time.time()
                 await conn.execute(
                     f"""
                     INSERT INTO {self.table_name} (entity_id, entity_type, created_at, updated_at, entity_data, event_id)
@@ -114,20 +102,6 @@ class EntityRepository:
                     updated_at,
                     json.dumps(entity_data),
                     event_id,
-                )
-                insert_duration = int((time.time() - insert_start) * 1000)
-                total_duration = int((time.time() - step_start) * 1000)
-                
-                logger.debug(
-                    f"Entity created",
-                    extra={
-                        'entity_id': entity_id,
-                        'entity_type': entity_type,
-                        'table_name': self.table_name,
-                        'event_id': event_id,
-                        'insert_duration_ms': insert_duration,
-                        'total_duration_ms': total_duration,
-                    }
                 )
             except asyncpg.SerializationError as e:
                 # OC000 transaction conflict
@@ -184,7 +158,6 @@ class EntityRepository:
         
         if conn:
             try:
-                update_start = time.time()
                 result = await conn.execute(
                     f"""
                     UPDATE {self.table_name}
@@ -195,23 +168,6 @@ class EntityRepository:
                     json.dumps(entity_data),
                     event_id,
                     entity_id,
-                )
-                update_duration = int((time.time() - update_start) * 1000)
-                total_duration = int((time.time() - step_start) * 1000)
-                
-                # Extract rows affected from result (format: "UPDATE N")
-                rows_affected = result.split()[-1] if result else "0"
-                
-                logger.debug(
-                    f"Entity updated",
-                    extra={
-                        'entity_id': entity_id,
-                        'table_name': self.table_name,
-                        'event_id': event_id,
-                        'rows_affected': rows_affected,
-                        'update_duration_ms': update_duration,
-                        'total_duration_ms': total_duration,
-                    }
                 )
             except asyncpg.SerializationError as e:
                 # OC000 transaction conflict

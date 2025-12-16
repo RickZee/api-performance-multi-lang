@@ -101,8 +101,7 @@ def validate_dsql(events: List[Dict], query_script: str) -> Dict:
         'missing': [],
         'by_event_type': defaultdict(int),
         'by_entity_type': defaultdict(int),
-        'errors': [],
-        'eventual_consistency_log': []  # Track eventual consistency patterns
+        'errors': []
     }
     
     # Track event timestamps for analysis
@@ -140,8 +139,8 @@ def validate_dsql(events: List[Dict], query_script: str) -> Dict:
         
         # Query DSQL for event headers - use IN clause with proper escaping
         # DSQL has transaction row limits, so we may need to query in batches
-        # Split into batches of 1000 UUIDs to avoid issues
-        batch_size = 1000
+        # Use smaller batch size (100) to avoid IN clause size limits
+        batch_size = 100
         found_uuids = set()
         uuid_list = list(sent_uuids)
         
@@ -154,11 +153,11 @@ def validate_dsql(events: List[Dict], query_script: str) -> Dict:
             uuid_list_str = "','".join(batch)
             query = f"""
             SELECT id, event_name, event_type 
-            FROM event_headers 
+            FROM car_entities_schema.event_headers 
             WHERE id IN ('{uuid_list_str}')
             """
         
-            # Run query via bastion host with retry for eventual consistency
+            # Run query via bastion host with retry for transient errors
             max_retries = 2
             batch_found = set()
             for retry in range(max_retries):
@@ -184,12 +183,19 @@ def validate_dsql(events: List[Dict], query_script: str) -> Dict:
                 output = result.stdout.strip()
                 if output:
                     # Extract UUIDs from query results
+                    # Skip header lines and separator lines (contain dashes or are empty)
                     for line in output.split('\n'):
-                        if line.strip() and '|' in line:
+                        line = line.strip()
+                        # Skip empty lines, header separators, and the "SET" line
+                        if not line or line.startswith('---') or line.startswith('SET') or line.startswith('(') or 'rows)' in line.lower():
+                            continue
+                        if '|' in line:
                             # Parse line format: uuid | event_name | event_type
                             parts = [p.strip() for p in line.split('|')]
-                            if len(parts) >= 1 and parts[0]:
-                                batch_found.add(parts[0])
+                            if len(parts) >= 1 and parts[0] and parts[0] not in ('id', '') and not parts[0].startswith('-'):
+                                # Validate it looks like a UUID (contains dashes)
+                                if '-' in parts[0]:
+                                    batch_found.add(parts[0])
                     
                     # If we found results, add them and break retry loop
                     if batch_found:
@@ -197,7 +203,7 @@ def validate_dsql(events: List[Dict], query_script: str) -> Dict:
                         print(f"[DSQL Validation] Batch {batch_num}/{total_batches}, retry {retry + 1}/{max_retries}: Found {len(batch_found)}/{len(batch)} events (duration: {batch_query_duration:.2f}s)", file=sys.stderr)
                         break
                 elif retry < max_retries - 1:
-                    # No results but might be eventual consistency - retry
+                    # No results but might be transient error - retry
                     print(f"[DSQL Validation] Batch {batch_num}/{total_batches}, retry {retry + 1}/{max_retries}: No results, retrying... (duration: {batch_query_duration:.2f}s)", file=sys.stderr)
                     time.sleep(2)
                     continue
@@ -207,16 +213,9 @@ def validate_dsql(events: List[Dict], query_script: str) -> Dict:
         pass1_duration = time.time() - pass1_start
         pass1_found = len(found_uuids)
         print(f"[DSQL Validation] Pass 1 complete: Found {pass1_found}/{len(sent_uuids)} events ({pass1_found/len(sent_uuids)*100:.1f}%) in {pass1_duration:.2f}s", file=sys.stderr)
-        results['eventual_consistency_log'].append({
-            'pass': 1,
-            'found': pass1_found,
-            'total': len(sent_uuids),
-            'duration': pass1_duration,
-            'timestamp': datetime.now().isoformat()
-        })
         
         if not found_uuids and not results['errors']:
-            results['errors'].append("DSQL query returned no results for any batch (may be eventual consistency issue)")
+            results['errors'].append("DSQL query returned no results for any batch")
         
         # Validate each sent event and track timing
         missing_uuids = []
@@ -256,7 +255,7 @@ def validate_dsql(events: List[Dict], query_script: str) -> Dict:
             for event_type, missing_list in missing_by_type.items():
                 print(f"  {event_type}: {len(missing_list)} missing, {found_by_type[event_type]} found", file=sys.stderr)
         
-        # For DSQL, do additional passes for missing events after waits (eventual consistency)
+        # For DSQL, do additional passes for missing events after waits
         if missing_uuids and len(missing_uuids) > 0 and len(missing_uuids) < len(sent_uuids):
             # Calculate time since test start
             if event_timestamps:
@@ -274,7 +273,7 @@ def validate_dsql(events: List[Dict], query_script: str) -> Dict:
             
             # Pass 2: Wait 10 seconds
             wait_time = 10
-            print(f"[DSQL Validation] ⚠️  {len(missing_uuids)} events not found initially. Waiting {wait_time} seconds for DSQL eventual consistency...", file=sys.stderr)
+            print(f"[DSQL Validation] ⚠️  {len(missing_uuids)} events not found initially. Waiting {wait_time} seconds...", file=sys.stderr)
             time.sleep(wait_time)
             
             pass2_start = time.time()
@@ -288,7 +287,7 @@ def validate_dsql(events: List[Dict], query_script: str) -> Dict:
                 uuid_list_str = "','".join(batch)
                 query = f"""
                 SELECT id, event_name, event_type 
-                FROM event_headers 
+                FROM car_entities_schema.event_headers 
                 WHERE id IN ('{uuid_list_str}')
                 """
                 
@@ -306,13 +305,18 @@ def validate_dsql(events: List[Dict], query_script: str) -> Dict:
                     if output:
                         batch_found = 0
                         for line in output.split('\n'):
-                            if line.strip() and '|' in line:
+                            line = line.strip()
+                            # Skip empty lines, header separators, and the "SET" line
+                            if not line or line.startswith('---') or line.startswith('SET') or line.startswith('(') or 'rows)' in line.lower():
+                                continue
+                            if '|' in line:
                                 parts = [p.strip() for p in line.split('|')]
-                                if len(parts) >= 1 and parts[0] and parts[0] in missing_uuids:
-                                    # Found a previously missing event
-                                    found_uuids.add(parts[0])
-                                    batch_found += 1
-                                    pass2_found_count += 1
+                                if len(parts) >= 1 and parts[0] and parts[0] not in ('id', '') and not parts[0].startswith('-') and '-' in parts[0]:
+                                    if parts[0] in missing_uuids:
+                                        # Found a previously missing event
+                                        found_uuids.add(parts[0])
+                                        batch_found += 1
+                                        pass2_found_count += 1
                                     
                                     # Calculate time since event was sent
                                     event_time_info = ""
@@ -340,15 +344,6 @@ def validate_dsql(events: List[Dict], query_script: str) -> Dict:
             pass2_duration = time.time() - pass2_start
             pass2_total_found = len(found_uuids)
             print(f"[DSQL Validation] Pass 2 complete: Found {pass2_found_count} additional events. Total: {pass2_total_found}/{len(sent_uuids)} ({pass2_total_found/len(sent_uuids)*100:.1f}%) in {pass2_duration:.2f}s", file=sys.stderr)
-            results['eventual_consistency_log'].append({
-                'pass': 2,
-                'found': pass2_found_count,
-                'total_found': pass2_total_found,
-                'total': len(sent_uuids),
-                'duration': pass2_duration,
-                'wait_time': wait_time,
-                'timestamp': datetime.now().isoformat()
-            })
             
             # Update missing_uuids for potential pass 3
             missing_uuids = [uuid for uuid in missing_uuids if uuid not in found_uuids]
@@ -369,7 +364,7 @@ def validate_dsql(events: List[Dict], query_script: str) -> Dict:
                     uuid_list_str = "','".join(batch)
                     query = f"""
                     SELECT id, event_name, event_type 
-                    FROM event_headers 
+                    FROM car_entities_schema.event_headers 
                     WHERE id IN ('{uuid_list_str}')
                     """
                     
@@ -387,12 +382,17 @@ def validate_dsql(events: List[Dict], query_script: str) -> Dict:
                         if output:
                             batch_found = 0
                             for line in output.split('\n'):
-                                if line.strip() and '|' in line:
+                                line = line.strip()
+                                # Skip empty lines, header separators, and the "SET" line
+                                if not line or line.startswith('---') or line.startswith('SET') or line.startswith('(') or 'rows)' in line.lower():
+                                    continue
+                                if '|' in line:
                                     parts = [p.strip() for p in line.split('|')]
-                                    if len(parts) >= 1 and parts[0] and parts[0] in missing_uuids:
-                                        found_uuids.add(parts[0])
-                                        batch_found += 1
-                                        pass3_found_count += 1
+                                    if len(parts) >= 1 and parts[0] and parts[0] not in ('id', '') and not parts[0].startswith('-') and '-' in parts[0]:
+                                        if parts[0] in missing_uuids:
+                                            found_uuids.add(parts[0])
+                                            batch_found += 1
+                                            pass3_found_count += 1
                                         
                                         event_time_info = ""
                                         if parts[0] in event_timestamps:
@@ -423,15 +423,6 @@ def validate_dsql(events: List[Dict], query_script: str) -> Dict:
                 pass3_duration = time.time() - pass3_start
                 pass3_total_found = len(found_uuids)
                 print(f"[DSQL Validation] Pass 3 complete: Found {pass3_found_count} additional events. Total: {pass3_total_found}/{len(sent_uuids)} ({pass3_total_found/len(sent_uuids)*100:.1f}%) in {pass3_duration:.2f}s", file=sys.stderr)
-                results['eventual_consistency_log'].append({
-                    'pass': 3,
-                    'found': pass3_found_count,
-                    'total_found': pass3_total_found,
-                    'total': len(sent_uuids),
-                    'duration': pass3_duration,
-                    'wait_time': wait_time,
-                    'timestamp': datetime.now().isoformat()
-                })
         
         total_validation_duration = (datetime.now() - validation_start_time).total_seconds()
         print(f"[DSQL Validation] Total validation time: {total_validation_duration:.2f}s", file=sys.stderr)
@@ -451,22 +442,6 @@ def print_results(database_name: str, results: Dict):
     print(f"Total Events Sent: {results['total_sent']}")
     print(f"Events Found: {results['found']}")
     print(f"Events Missing: {len(results['missing'])}")
-    
-    # Print eventual consistency statistics for DSQL
-    if 'eventual_consistency_log' in results and results['eventual_consistency_log']:
-        print(f"\nEventual Consistency Analysis:")
-        for log_entry in results['eventual_consistency_log']:
-            pass_num = log_entry.get('pass', 0)
-            found = log_entry.get('found', 0)
-            total = log_entry.get('total', 0)
-            duration = log_entry.get('duration', 0)
-            wait_time = log_entry.get('wait_time', 0)
-            
-            if pass_num == 1:
-                print(f"  Pass {pass_num}: Found {found}/{total} events ({found/total*100:.1f}%) in {duration:.2f}s")
-            else:
-                total_found = log_entry.get('total_found', found)
-                print(f"  Pass {pass_num}: Found {found} additional events after {wait_time}s wait. Total: {total_found}/{total} ({total_found/total*100:.1f}%) in {duration:.2f}s")
     
     if results['by_event_type']:
         print(f"\nBy Event Type:")

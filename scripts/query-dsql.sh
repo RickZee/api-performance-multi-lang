@@ -26,6 +26,7 @@ fi
 AWS_REGION=$(terraform output -raw aws_region 2>/dev/null || echo "us-east-1")
 
 # Default query if none provided
+# Note: search_path will be set automatically, so we can use unqualified table names
 DEFAULT_QUERY="SELECT 'business_events' as table_name, COUNT(*) as count FROM business_events
 UNION ALL SELECT 'event_headers', COUNT(*) FROM event_headers
 UNION ALL SELECT 'car_entities', COUNT(*) FROM car_entities
@@ -47,6 +48,7 @@ echo ""
 ESCAPED_QUERY=$(echo "$QUERY" | sed "s/'/'\"'\"'/g" | tr '\n' ' ')
 
 # Build commands array using jq for proper JSON escaping
+# Set search_path to car_entities_schema for DSQL queries
 COMMANDS_JSON=$(jq -n \
     --arg dsql_host "$DSQL_HOST" \
     --arg aws_region "$AWS_REGION" \
@@ -56,7 +58,7 @@ COMMANDS_JSON=$(jq -n \
         "export AWS_REGION=" + $aws_region,
         "TOKEN=$(aws dsql generate-db-connect-admin-auth-token --region $AWS_REGION --hostname $DSQL_HOST)",
         "export PGPASSWORD=$TOKEN",
-        "psql -h $DSQL_HOST -U admin -d postgres -p 5432 -c \u0027" + $query + "\u0027"
+        "psql -h $DSQL_HOST -U admin -d postgres -p 5432 -c \u0027SET search_path TO car_entities_schema; " + $query + "\u0027"
     ]')
 
 # Send command to bastion host using proper JSON format

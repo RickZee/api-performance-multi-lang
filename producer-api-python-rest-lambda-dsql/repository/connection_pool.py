@@ -34,10 +34,6 @@ async def get_connection(database_url_or_config: Union[str, LambdaConfig]) -> as
         asyncio.TimeoutError: If connection establishment exceeds CONNECTION_TIMEOUT
         Exception: Other connection errors
     """
-    import time
-    connection_start = time.time()
-    
-    logger.debug("Creating database connection...")
     config = database_url_or_config if isinstance(database_url_or_config, LambdaConfig) else None
     
     if config and config.use_iam_auth:
@@ -53,40 +49,17 @@ async def get_connection(database_url_or_config: Union[str, LambdaConfig]) -> as
         
         # Generate IAM token (uses cache, valid for 14 minutes)
         try:
-            import time
-            connection_start = time.time()
-            
-            token_start = time.time()
             iam_token = generate_iam_auth_token(
                 endpoint=dsql_endpoint,
                 port=config.aurora_dsql_port,
                 iam_username=config.iam_username,
                 region=config.aws_region
             )
-            token_duration = int((time.time() - token_start) * 1000)
-            
-            logger.debug(
-                f"IAM token generated",
-                extra={
-                    'token_duration_ms': token_duration,
-                    'token_length': len(iam_token),
-                    'endpoint': dsql_endpoint,
-                }
-            )
             
             # Use dsql_host for connection - ensures correct SNI and private DNS resolution
             dsql_host = config.dsql_host or config.aurora_dsql_endpoint
             if not dsql_host:
                 raise ValueError("DSQL_HOST or AURORA_DSQL_ENDPOINT must be set for DSQL connections")
-            
-            # Log event loop ID for debugging
-            try:
-                current_loop = asyncio.get_running_loop()
-                loop_id = id(current_loop)
-                logger.debug(f"Creating direct DSQL connection to {dsql_host} in event loop: {loop_id}")
-            except RuntimeError:
-                loop_id = "unknown"
-                logger.warning(f"Creating direct DSQL connection to {dsql_host} (no running loop detected)")
             
             logger.info(
                 f"Creating direct DSQL connection",
@@ -99,7 +72,6 @@ async def get_connection(database_url_or_config: Union[str, LambdaConfig]) -> as
             )
             
             # Create direct connection (no pooling) with timeout
-            connect_start = time.time()
             try:
                 # Use asyncio.wait_for to enforce connection establishment timeout
                 # This prevents hanging indefinitely on VPC connections
@@ -118,42 +90,18 @@ async def get_connection(database_url_or_config: Union[str, LambdaConfig]) -> as
                     ),
                     timeout=CONNECTION_TIMEOUT  # Timeout for connection establishment
                 )
-                connect_duration = int((time.time() - connect_start) * 1000)
-                total_duration = int((time.time() - connection_start) * 1000)
-                
-                logger.info(
-                    f"Direct DSQL connection created successfully",
-                    extra={
-                        'connection_id': id(conn),
-                        'connect_duration_ms': connect_duration,
-                        'total_duration_ms': total_duration,
-                        'host': dsql_host,
-                        'search_path': 'car_entities_schema',
-                        'loop_id': loop_id,
-                    }
-                )
+                logger.info(f"Direct DSQL connection created successfully to {dsql_host}")
                 return conn
             except asyncio.TimeoutError:
-                total_duration = int((time.time() - connection_start) * 1000)
-                logger.error(
-                    f"Connection timeout after {CONNECTION_TIMEOUT}s to {dsql_host} (loop_id={loop_id})",
-                    extra={
-                        'timeout_seconds': CONNECTION_TIMEOUT,
-                        'duration_ms': total_duration,
-                        'host': dsql_host,
-                        'loop_id': loop_id,
-                    }
-                )
+                logger.error(f"Connection timeout after {CONNECTION_TIMEOUT}s to {dsql_host}")
                 raise ConnectionError(f"Connection timeout: Unable to connect to database within {CONNECTION_TIMEOUT} seconds")
             
         except Exception as e:
-            total_duration = int((time.time() - connection_start) * 1000) if 'connection_start' in locals() else 0
             logger.error(
                 f"Failed to create DSQL connection",
                 extra={
                     'error': str(e),
                     'error_type': type(e).__name__,
-                    'duration_ms': total_duration,
                     'host': dsql_host if 'dsql_host' in locals() else 'unknown',
                 },
                 exc_info=True
@@ -171,15 +119,6 @@ async def get_connection(database_url_or_config: Union[str, LambdaConfig]) -> as
         
         endpoint = database_url.split('@')[-1] if '@' in database_url else 'unknown'
         
-        # Log event loop ID for debugging
-        try:
-            current_loop = asyncio.get_running_loop()
-            loop_id = id(current_loop)
-            logger.debug(f"Creating direct connection (legacy mode) to {endpoint} in event loop: {loop_id}")
-        except RuntimeError:
-            loop_id = "unknown"
-            logger.warning(f"Creating direct connection (legacy mode) to {endpoint} (no running loop detected)")
-        
         logger.info(f"Creating direct connection (legacy mode): {endpoint}")
         try:
             # Use asyncio.wait_for to enforce connection establishment timeout
@@ -190,8 +129,8 @@ async def get_connection(database_url_or_config: Union[str, LambdaConfig]) -> as
                 ),
                 timeout=CONNECTION_TIMEOUT  # Timeout for connection establishment
             )
-            logger.info(f"Direct connection created successfully (legacy mode) to {endpoint} (loop_id={loop_id})")
+            logger.info(f"Direct connection created successfully (legacy mode) to {endpoint}")
             return conn
         except asyncio.TimeoutError:
-            logger.error(f"Connection timeout after {CONNECTION_TIMEOUT}s to {endpoint} (loop_id={loop_id})")
+            logger.error(f"Connection timeout after {CONNECTION_TIMEOUT}s to {endpoint}")
             raise ConnectionError(f"Connection timeout: Unable to connect to database within {CONNECTION_TIMEOUT} seconds")

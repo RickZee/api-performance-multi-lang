@@ -86,10 +86,8 @@ class BusinessEventRepository:
         """
         async def _do_create():
             # Use provided connection directly (transaction managed externally)
-            # Skip diagnostics when in transaction for performance
             await self._insert_business_event(conn, event_id, event_name, event_type,
-                                             created_date, saved_date, event_data,
-                                             skip_diagnostics=True)
+                                             created_date, saved_date, event_data)
         
         await self._retry_with_backoff(_do_create)
     
@@ -107,34 +105,9 @@ class BusinessEventRepository:
             created_date: Created date
             saved_date: Saved date
             event_data: Event data as dict
-            skip_diagnostics: If True, skip diagnostic queries (useful when in transaction)
+            skip_diagnostics: Unused (kept for compatibility)
         """
         try:
-            # Diagnostic: Check current database and schema (skip when in transaction for performance)
-            if not skip_diagnostics:
-                current_db = await conn.fetchval('SELECT current_database();')
-                current_schema = await conn.fetchval('SELECT current_schema();')
-                table_exists = await conn.fetchval("""
-                    SELECT EXISTS (
-                        SELECT FROM information_schema.tables 
-                        WHERE table_schema = $1
-                        AND table_name = 'business_events'
-                    );
-                """, current_schema)
-                
-                logger.info(f"Database context - DB: {current_db}, Schema: {current_schema}, business_events exists: {table_exists}")
-                
-                if not table_exists:
-                    # List available tables for debugging
-                    tables = await conn.fetch("""
-                        SELECT tablename 
-                        FROM pg_tables 
-                        WHERE schemaname = $1
-                        ORDER BY tablename;
-                    """, current_schema)
-                    table_list = [t['tablename'] for t in tables]
-                    logger.warning(f"business_events table not found in schema '{current_schema}'. Available tables: {table_list}")
-            
             await conn.execute(
                 """
                 INSERT INTO business_events (id, event_name, event_type, created_date, saved_date, event_data)

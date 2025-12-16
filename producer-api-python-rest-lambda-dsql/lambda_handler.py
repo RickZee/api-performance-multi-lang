@@ -52,14 +52,6 @@ async def _initialize_service():
     """
     global _service, _config, _lambda_client
     
-    # Get current event loop ID for logging
-    try:
-        current_loop = asyncio.get_running_loop()
-        loop_id = id(current_loop)
-        logger.debug(f"{API_NAME} Initializing service in event loop: {loop_id}")
-    except RuntimeError:
-        loop_id = "unknown"
-        logger.warning(f"{API_NAME} No running event loop detected during service initialization")
     
     if _service is None:
         _config = load_lambda_config()
@@ -81,16 +73,6 @@ async def _initialize_service():
         # Create connection factory that uses current event loop context
         # This factory will be called later, ensuring it uses the same loop
         async def connection_factory():
-            # Verify we're in the same loop context
-            try:
-                factory_loop = asyncio.get_running_loop()
-                factory_loop_id = id(factory_loop)
-                logger.debug(f"{API_NAME} Connection factory called in event loop: {factory_loop_id}")
-                if loop_id != "unknown" and factory_loop_id != loop_id:
-                    logger.warning(f"{API_NAME} Loop ID changed: init={loop_id}, factory={factory_loop_id}")
-            except RuntimeError:
-                logger.warning(f"{API_NAME} No running loop in connection factory")
-            
             return await get_connection(_config)
         
         _service = EventProcessingService(
@@ -250,144 +232,80 @@ def _is_database_connection_error(error: Exception) -> bool:
 
 
 async def _handle_process_event(event_body: str) -> Dict[str, Any]:
-    """Handle single event processing with detailed lifecycle tracking."""
-    lifecycle_start = time.time()
-    lifecycle_stages = {}
-    
-    stage_start = time.time()
-    logger.info(f"{API_NAME} [LIFECYCLE] Event processing started")
-    lifecycle_stages['request_received'] = {'timestamp': stage_start, 'duration_ms': 0}
-    
+    """Handle single event processing."""
     try:
         # Parse request body
-        stage_start = time.time()
-        logger.info(f"{API_NAME} [LIFECYCLE] Parsing JSON (body length: {len(event_body)})")
         event_data = json.loads(event_body)
-        lifecycle_stages['json_parsed'] = {
-            'timestamp': time.time(),
-            'duration_ms': int((time.time() - stage_start) * 1000)
-        }
         
         # Create Event object
-        stage_start = time.time()
-        logger.info(f"{API_NAME} [LIFECYCLE] Creating Event object from parsed data")
         event = Event(**event_data)
-        lifecycle_stages['event_created'] = {
-            'timestamp': time.time(),
-            'duration_ms': int((time.time() - stage_start) * 1000)
-        }
-        logger.info(f"{API_NAME} [LIFECYCLE] Event object created successfully")
     except json.JSONDecodeError as e:
-        lifecycle_stages['json_parse_failed'] = {
-            'timestamp': time.time(),
-            'duration_ms': int((time.time() - lifecycle_start) * 1000),
-            'error': str(e)
-        }
-        logger.error(f"{API_NAME} [LIFECYCLE] JSON parse failed: {e}", exc_info=True)
+        logger.error(f"{API_NAME} JSON parse failed: {e}", exc_info=True)
         return _create_response(
             400,
             {
                 "error": "Invalid JSON",
                 "status": 400,
-                "lifecycle": lifecycle_stages,
             },
         )
     except Exception as e:
-        lifecycle_stages['event_creation_failed'] = {
-            'timestamp': time.time(),
-            'duration_ms': int((time.time() - lifecycle_start) * 1000),
-            'error': str(e)
-        }
-        logger.error(f"{API_NAME} [LIFECYCLE] Event creation failed: {e}", exc_info=True)
+        logger.error(f"{API_NAME} Event creation failed: {e}", exc_info=True)
         return _create_response(
             422,
             {
                 "error": f"Invalid event structure: {str(e)}",
                 "status": 422,
-                "lifecycle": lifecycle_stages,
             },
         )
     
     # Validate event
-    stage_start = time.time()
-    logger.info(f"{API_NAME} [LIFECYCLE] Starting event validation")
-    
     event_id = event.event_header.uuid or "unknown"
     event_type = event.event_header.event_type or "unknown"
     event_name = event.event_header.event_name or "unknown"
     
     if not event.event_header.event_name:
-        lifecycle_stages['validation_failed'] = {
-            'timestamp': time.time(),
-            'duration_ms': int((time.time() - stage_start) * 1000),
-            'error': 'Event header event_name is required'
-        }
-        logger.warning(f"{API_NAME} [LIFECYCLE] Validation failed: missing event_name")
+        logger.warning(f"{API_NAME} Validation failed: missing event_name")
         return _create_response(
             422,
             {
                 "error": "Event header event_name is required",
                 "status": 422,
-                "lifecycle": lifecycle_stages,
             },
         )
     
     if not event.entities:
-        lifecycle_stages['validation_failed'] = {
-            'timestamp': time.time(),
-            'duration_ms': int((time.time() - stage_start) * 1000),
-            'error': 'Event must contain at least one entity'
-        }
-        logger.warning(f"{API_NAME} [LIFECYCLE] Validation failed: no entities")
+        logger.warning(f"{API_NAME} Validation failed: no entities")
         return _create_response(
             422,
             {
                 "error": "Event must contain at least one entity",
                 "status": 422,
-                "lifecycle": lifecycle_stages,
             },
         )
     
     # Validate each entity (Pydantic models handle validation automatically)
     for idx, entity in enumerate(event.entities):
         if not entity.entity_header.entity_type:
-            lifecycle_stages['validation_failed'] = {
-                'timestamp': time.time(),
-                'duration_ms': int((time.time() - stage_start) * 1000),
-                'error': f'Entity {idx} missing entity_type'
-            }
-            logger.warning(f"{API_NAME} [LIFECYCLE] Validation failed: entity {idx} missing type")
+            logger.warning(f"{API_NAME} Validation failed: entity {idx} missing type")
             return _create_response(
                 422,
                 {
                     "error": "Entity type cannot be empty",
                     "status": 422,
-                    "lifecycle": lifecycle_stages,
                 },
             )
         if not entity.entity_header.entity_id:
-            lifecycle_stages['validation_failed'] = {
-                'timestamp': time.time(),
-                'duration_ms': int((time.time() - stage_start) * 1000),
-                'error': f'Entity {idx} missing entity_id'
-            }
-            logger.warning(f"{API_NAME} [LIFECYCLE] Validation failed: entity {idx} missing id")
+            logger.warning(f"{API_NAME} Validation failed: entity {idx} missing id")
             return _create_response(
                 422,
                 {
                     "error": "Entity ID cannot be empty",
                     "status": 422,
-                    "lifecycle": lifecycle_stages,
                 },
             )
     
-    lifecycle_stages['validation_passed'] = {
-        'timestamp': time.time(),
-        'duration_ms': int((time.time() - stage_start) * 1000)
-    }
-    
     logger.info(
-        f"{API_NAME} [LIFECYCLE] Event validated: {event_name}",
+        f"{API_NAME} Event validated: {event_name}",
         extra={
             'event_id': event_id,
             'event_type': event_type,
@@ -398,36 +316,16 @@ async def _handle_process_event(event_body: str) -> Dict[str, Any]:
     )
     
     # Process event
-    stage_start = time.time()
-    logger.info(f"{API_NAME} [LIFECYCLE] Initializing service")
     try:
         service = await _initialize_service()
-        lifecycle_stages['service_initialized'] = {
-            'timestamp': time.time(),
-            'duration_ms': int((time.time() - stage_start) * 1000)
-        }
-        logger.info(f"{API_NAME} [LIFECYCLE] Service initialized")
-        
-        # Process event
-        stage_start = time.time()
-        logger.info(f"{API_NAME} [LIFECYCLE] Processing event in service layer")
         await service.process_event(event)
-        lifecycle_stages['event_processed'] = {
-            'timestamp': time.time(),
-            'duration_ms': int((time.time() - stage_start) * 1000)
-        }
-        
-        total_duration_ms = int((time.time() - lifecycle_start) * 1000)
-        lifecycle_stages['total_duration_ms'] = total_duration_ms
         
         logger.info(
-            f"{API_NAME} [LIFECYCLE] Event processed successfully",
+            f"{API_NAME} Event processed successfully",
             extra={
                 'event_id': event_id,
                 'event_type': event_type,
                 'event_name': event_name,
-                'total_duration_ms': total_duration_ms,
-                'lifecycle_stages': lifecycle_stages,
             }
         )
         
@@ -437,17 +335,10 @@ async def _handle_process_event(event_body: str) -> Dict[str, Any]:
                 "success": True,
                 "message": "Event processed successfully",
                 "event_id": event_id,
-                "lifecycle": lifecycle_stages,
             },
         )
     except DuplicateEventError as e:
-        lifecycle_stages['duplicate_event'] = {
-            'timestamp': time.time(),
-            'duration_ms': int((time.time() - lifecycle_start) * 1000),
-            'error': str(e),
-            'event_id': e.event_id
-        }
-        logger.warning(f"{API_NAME} [LIFECYCLE] Duplicate event detected: {e.event_id}")
+        logger.warning(f"{API_NAME} Duplicate event detected: {e.event_id}")
         return _create_response(
             409,
             {
@@ -455,17 +346,10 @@ async def _handle_process_event(event_body: str) -> Dict[str, Any]:
                 "message": e.message,
                 "eventId": e.event_id,
                 "status": 409,
-                "lifecycle": lifecycle_stages,
             },
         )
     except Exception as e:
-        lifecycle_stages['processing_error'] = {
-            'timestamp': time.time(),
-            'duration_ms': int((time.time() - lifecycle_start) * 1000),
-            'error': str(e),
-            'error_type': type(e).__name__
-        }
-        logger.error(f"{API_NAME} [LIFECYCLE] Error processing event: {e}", exc_info=True)
+        logger.error(f"{API_NAME} Error processing event: {e}", exc_info=True)
         # Check if it's a database connection error
         if _is_database_connection_error(e):
             logger.warning(f"{API_NAME} Database connection error detected: {e}")
@@ -633,19 +517,6 @@ async def _handle_bulk_events(event_body: str) -> Dict[str, Any]:
             
             await service.process_event(event)
             processed_count += 1
-            event_duration = int((time.time() - event_start_time) * 1000)
-            
-            logger.debug(
-                f"{API_NAME} Bulk event {idx+1}/{len(events)} processed successfully",
-                extra={
-                    'bulk_index': idx,
-                    'event_id': event_id,
-                    'event_type': event_type,
-                    'duration_ms': event_duration,
-                    'cumulative_success': processed_count,
-                    'cumulative_failed': failed_count,
-                }
-            )
         except DuplicateEventError as e:
             # Handle duplicate event ID (409 Conflict) - count as failed
             conflict_count += 1
@@ -777,14 +648,6 @@ def handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
 async def _async_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
     """Async handler implementation."""
     try:
-        # Log event loop ID for debugging
-        try:
-            handler_loop = asyncio.get_running_loop()
-            handler_loop_id = id(handler_loop)
-            logger.debug(f"{API_NAME} Async handler running in event loop: {handler_loop_id}")
-        except RuntimeError:
-            logger.warning(f"{API_NAME} No running event loop detected in async handler")
-        
         # Extract path and method
         request_context = event.get("requestContext", {})
         http_context = request_context.get("http", {})
@@ -806,14 +669,10 @@ async def _async_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
         )
         
         # Route requests
-        logger.info(f"{API_NAME} Routing request to path: {path}")
         if path == "/api/v1/events/health" and method == "GET":
-            logger.info(f"{API_NAME} Routing to health check")
             return await _handle_health_check()
         elif path == "/api/v1/events" and method == "POST":
-            logger.info(f"{API_NAME} Routing to process event")
             body = event.get("body", "{}")
-            logger.info(f"{API_NAME} Body length: {len(body)}")
             return await _handle_process_event(body)
         elif path == "/api/v1/events/bulk" and method == "POST":
             body = event.get("body", "[]")

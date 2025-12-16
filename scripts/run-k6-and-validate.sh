@@ -191,17 +191,10 @@ fi
 echo ""
 
 # Wait a bit for database propagation before validation
-# DSQL may need more time for eventual consistency
 WAIT_START_TIME=$(date +%s)
-if [ "$DB_TYPE" = "dsql" ]; then
-    log_progress "Waiting 2 seconds for DSQL eventual consistency..." "$BLUE"
-    sleep 2
-    WAIT_DURATION=2
-else
-    log_progress "Waiting 2 seconds for database propagation..." "$BLUE"
-    sleep 2
-    WAIT_DURATION=2
-fi
+log_progress "Waiting 2 seconds for database propagation..." "$BLUE"
+sleep 2
+WAIT_DURATION=2
 WAIT_END_TIME=$(date +%s)
 
 # Validate databases
@@ -301,26 +294,3 @@ echo ""
 echo "Events file saved at: $EVENTS_FILE"
 echo "You can re-validate using:"
 echo "  python3 scripts/validate-against-sent-events.py --events-file $EVENTS_FILE --aurora --dsql"
-echo ""
-echo "Generate detailed lifecycle report:"
-if [ "$DB_TYPE" = "pg" ]; then
-    LAMBDA_NAME="producer-api-python-rest-lambda-pg"
-elif [ "$DB_TYPE" = "dsql" ]; then
-    LAMBDA_NAME="producer-api-python-rest-lambda-dsql"
-else
-    LAMBDA_NAME=""
-fi
-
-if [ -n "$LAMBDA_NAME" ] && [ -f "$EVENTS_FILE" ]; then
-    REPORT_FILE="${EVENTS_FILE%.json}-lifecycle-report.txt"
-    log_progress "Generating lifecycle report..." "$BLUE"
-    python3 "$SCRIPT_DIR/generate-event-lifecycle-report.py" \
-        --events-file "$EVENTS_FILE" \
-        --lambda-name "$LAMBDA_NAME" \
-        --output "$REPORT_FILE" \
-        --format text \
-        --since 1h 2>&1 | tail -20 || true
-    if [ -f "$REPORT_FILE" ]; then
-        log_progress "Lifecycle report saved to: $REPORT_FILE" "$GREEN"
-    fi
-fi

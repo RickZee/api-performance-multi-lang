@@ -31,7 +31,6 @@ async def get_connection(config) -> asyncpg.Connection:
         database_url = config.database_url
         logger.info(f"Creating direct connection to: {database_url.split('@')[-1] if '@' in database_url else 'unknown'}")
         conn = await asyncpg.connect(database_url)
-        logger.debug(f"Direct connection established: {id(conn)}")
         return conn
     except Exception as e:
         logger.error(f"Failed to create direct connection: {e}", exc_info=True)
@@ -57,7 +56,6 @@ async def get_connection_pool(database_url: str) -> asyncpg.Pool:
     try:
         current_loop = asyncio.get_running_loop()
         current_loop_id = id(current_loop)
-        logger.debug(f"get_connection_pool: using running loop: {current_loop_id}")
     except RuntimeError:
         # No running loop - get or create event loop (for Lambda handler context)
         try:
@@ -66,15 +64,12 @@ async def get_connection_pool(database_url: str) -> asyncpg.Pool:
             if asyncio.get_event_loop() != current_loop:
                 asyncio.set_event_loop(current_loop)
             current_loop_id = id(current_loop)
-            logger.debug(f"get_connection_pool: using event loop (not running): {current_loop_id}")
         except RuntimeError:
             # No event loop exists - create a new one
             current_loop = asyncio.new_event_loop()
             asyncio.set_event_loop(current_loop)
             current_loop_id = id(current_loop)
             logger.warning(f"get_connection_pool: created new event loop: {current_loop_id}")
-    
-    logger.debug(f"get_connection_pool entry: loop_id={current_loop_id}, has_pool={_pool is not None}")
     
     # Invalidate pool if database URL changed OR if we're in a different event loop
     if _pool is not None:
@@ -108,14 +103,12 @@ async def get_connection_pool(database_url: str) -> asyncpg.Pool:
             # asyncpg.create_pool() requires a running loop or properly set event loop
             try:
                 # Try to get running loop first
-                running_loop = asyncio.get_running_loop()
-                logger.debug(f"Pool creation: using running loop: {id(running_loop)}")
+                asyncio.get_running_loop()
             except RuntimeError:
                 # No running loop - ensure event loop is set
                 event_loop = asyncio.get_event_loop()
                 if event_loop != current_loop:
                     asyncio.set_event_loop(current_loop)
-                logger.debug(f"Pool creation: using event loop (not running): {id(current_loop)}")
             
             # Pool size configurable via environment variables
             min_size = int(os.getenv('DB_POOL_MIN_SIZE', '1'))
@@ -138,12 +131,7 @@ async def get_connection_pool(database_url: str) -> asyncpg.Pool:
             logger.info(f"Connection pool created successfully: pool_id={id(_pool)}, loop_id={loop_id}")
         except Exception as e:
             logger.error(f"Failed to create connection pool: {e}", exc_info=True)
-            # Log additional context for debugging
-            logger.error(f"Database URL (masked): ...@{database_url.split('@')[-1] if '@' in database_url else 'unknown'}")
-            logger.error(f"Event loop ID: {current_loop_id}, loop closed: {current_loop.is_closed() if hasattr(current_loop, 'is_closed') else 'unknown'}")
             raise
-    else:
-        logger.debug(f"Returning existing connection pool: pool_id={id(_pool)}, loop_id={current_loop_id}")
     
     return _pool
 

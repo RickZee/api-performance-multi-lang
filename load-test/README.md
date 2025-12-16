@@ -156,6 +156,47 @@ cd load-test/shared
 ./run-lambda-tests.sh saturation cloud
 ```
 
+### Preferred Script for Lambda API Testing with Validation
+
+**`run-k6-and-validate.sh`** is the **preferred script** for running and validating Lambda APIs. This script:
+- Runs k6 batch tests against Lambda APIs
+- Automatically validates database results against sent events
+- Supports both PostgreSQL (`pg`) and DSQL (`dsql`) Lambda APIs
+- Pre-warms Lambda functions before testing
+- Clears databases before test execution
+- Provides comprehensive timing and throughput metrics
+
+**Usage:**
+
+```bash
+# Test PostgreSQL Lambda API (preferred for two lambda APIs)
+./scripts/run-k6-and-validate.sh pg [EVENTS_PER_TYPE] [VUS] [API_URL]
+
+# Test DSQL Lambda API
+./scripts/run-k6-and-validate.sh dsql [EVENTS_PER_TYPE] [VUS] [API_URL]
+
+# Examples:
+# Default: 10 events per type, 1 VU
+./scripts/run-k6-and-validate.sh pg
+
+# Custom: 100 events per type, 5 VUs
+./scripts/run-k6-and-validate.sh pg 100 5
+
+# Custom API URL
+./scripts/run-k6-and-validate.sh pg 50 3 https://custom-api.execute-api.us-east-1.amazonaws.com
+```
+
+**Features:**
+- Automatically extracts events from k6 output
+- Validates data in target database (Aurora PostgreSQL for `pg`, DSQL for `dsql`)
+- Provides detailed timing breakdown (k6 test, extraction, validation)
+- Calculates throughput metrics (events per second)
+- Saves sent events to a JSON file for re-validation
+
+**Environment Variables:**
+- `CLEAR_DATABASE` (default: `true`) - Clear database before test
+- `PRE_WARM_LAMBDAS` (default: `true`) - Pre-warm Lambda functions before test
+
 ### Lambda Test Configuration
 
 Lambda tests support different memory configurations and execution modes. See `lambda-config.json` for available settings and `system-test-config.json` for test execution configuration.

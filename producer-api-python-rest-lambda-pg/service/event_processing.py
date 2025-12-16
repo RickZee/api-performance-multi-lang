@@ -57,26 +57,6 @@ class EventProcessingService:
         event_id = event.event_header.uuid or f"event-{datetime.utcnow().isoformat()}"
         
         # Wrap all operations in a single transaction
-        # Verify we're in the correct event loop before acquiring
-        current_loop = asyncio.get_running_loop()
-        logger.info(f"{API_NAME} process_event - current loop: {id(current_loop)}")
-        
-        if hasattr(self.pool, '_loop'):
-            pool_loop = self.pool._loop
-            pool_loop_id = id(pool_loop)
-            current_loop_id = id(current_loop)
-            logger.info(f"{API_NAME} process_event - pool loop: {pool_loop_id}, current loop: {current_loop_id}")
-            
-            if pool_loop is not current_loop:
-                error_msg = f"CRITICAL: Event loop mismatch! Pool created in loop {pool_loop_id} but used in loop {current_loop_id}"
-                logger.error(f"{API_NAME} {error_msg}")
-                raise RuntimeError(error_msg)
-            else:
-                logger.info(f"{API_NAME} Event loop verified - matches: {current_loop_id}")
-        else:
-            logger.warning(f"{API_NAME} Pool does not have _loop attribute - cannot verify loop match")
-        
-        logger.info(f"{API_NAME} About to acquire connection from pool...")
         async with self.pool.acquire() as conn:
             async with conn.transaction():
                 try:

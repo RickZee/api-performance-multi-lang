@@ -107,10 +107,8 @@ class BusinessEventRepository:
         async def _do_create():
             if conn:
                 # Use provided connection directly (transaction managed externally)
-                # Skip diagnostics when in transaction for performance
                 await self._insert_business_event(conn, event_id, event_name, event_type,
-                                                 created_date, saved_date, event_data,
-                                                 skip_diagnostics=True)
+                                                 created_date, saved_date, event_data)
             else:
                 # Connection should always be provided by service layer
                 # This fallback should not be reached in normal operation
@@ -132,53 +130,9 @@ class BusinessEventRepository:
             created_date: Created date
             saved_date: Saved date
             event_data: Event data as dict
-            skip_diagnostics: If True, skip diagnostic queries (useful when in transaction)
+            skip_diagnostics: Unused (kept for compatibility)
         """
-        import time
-        step_start = time.time()
-        
         try:
-            # Diagnostic: Check current database and schema (skip when in transaction for performance)
-            if not skip_diagnostics:
-                current_db = await conn.fetchval('SELECT current_database();')
-                current_schema = await conn.fetchval('SELECT current_schema();')
-                table_exists = await conn.fetchval("""
-                    SELECT EXISTS (
-                        SELECT FROM information_schema.tables 
-                        WHERE table_schema = $1
-                        AND table_name = 'business_events'
-                    );
-                """, current_schema)
-                
-                logger.debug(
-                    f"Database context check",
-                    extra={
-                        'event_id': event_id,
-                        'database': current_db,
-                        'schema': current_schema,
-                        'table_exists': table_exists,
-                    }
-                )
-                
-                if not table_exists:
-                    # List available tables for debugging
-                    tables = await conn.fetch("""
-                        SELECT tablename 
-                        FROM pg_tables 
-                        WHERE schemaname = $1
-                        ORDER BY tablename;
-                    """, current_schema)
-                    table_list = [t['tablename'] for t in tables]
-                    logger.warning(
-                        f"business_events table not found",
-                        extra={
-                            'event_id': event_id,
-                            'schema': current_schema,
-                            'available_tables': table_list,
-                        }
-                    )
-            
-            insert_start = time.time()
             await conn.execute(
                 """
                 INSERT INTO business_events (id, event_name, event_type, created_date, saved_date, event_data)
@@ -191,21 +145,8 @@ class BusinessEventRepository:
                 saved_date,
                 json.dumps(event_data),
             )
-            insert_duration = int((time.time() - insert_start) * 1000)
-            total_duration = int((time.time() - step_start) * 1000)
-            
-            logger.debug(
-                f"Business event inserted",
-                extra={
-                    'event_id': event_id,
-                    'event_type': event_type,
-                    'insert_duration_ms': insert_duration,
-                    'total_duration_ms': total_duration,
-                }
-            )
         except asyncpg.UniqueViolationError as e:
             # Raise custom exception for duplicate key violations
-            duration = int((time.time() - step_start) * 1000)
             logger.warning(
                 f"Duplicate event ID detected: {event_id}",
                 extra={

@@ -1,6 +1,7 @@
 #!/bin/bash
-# Monitor Business Events CDC Pipeline
+# Monitor Event Headers CDC Pipeline
 # Checks connector status, Flink statements, topics, and message flow
+# Monitors CDC from event_headers table to raw-event-headers topic
 
 set -e
 
@@ -15,10 +16,12 @@ NC='\033[0m'
 ENV_ID="${CONFLUENT_ENV_ID:-env-q9n81p}"
 CLUSTER_ID="${KAFKA_CLUSTER_ID:-lkc-rno3vp}"
 COMPUTE_POOL_ID="${FLINK_COMPUTE_POOL_ID:-lfcp-2xqo0m}"
-CONNECTOR_NAME="${CONNECTOR_NAME:-postgres-debezium-business-events-confluent-cloud}"
+# Default connector names for event_headers CDC (can be overridden via CONNECTOR_NAME env var)
+CONNECTOR_NAME="${CONNECTOR_NAME:-postgres-cdc-source-v2-debezium-event-headers}"
+RAW_TOPIC="${RAW_TOPIC:-raw-event-headers}"
 
 echo -e "${CYAN}========================================${NC}"
-echo -e "${CYAN}Business Events Pipeline Monitor${NC}"
+echo -e "${CYAN}Event Headers CDC Pipeline Monitor${NC}"
 echo -e "${CYAN}========================================${NC}"
 echo ""
 
@@ -53,11 +56,11 @@ echo ""
 echo -e "${BLUE}2. Kafka Topics${NC}"
 echo "----------------------------------------"
 echo "Raw topic:"
-if confluent kafka topic describe raw-business-events &>/dev/null; then
-    MSG_COUNT=$(confluent kafka topic describe raw-business-events --output json | jq '[.partitions[].offset] | add' 2>/dev/null || echo "0")
-    echo -e "${GREEN}✓ raw-business-events exists${NC} (messages: $MSG_COUNT)"
+if confluent kafka topic describe "$RAW_TOPIC" &>/dev/null; then
+    MSG_COUNT=$(confluent kafka topic describe "$RAW_TOPIC" --output json | jq '[.partitions[].offset] | add' 2>/dev/null || echo "0")
+    echo -e "${GREEN}✓ $RAW_TOPIC exists${NC} (messages: $MSG_COUNT)"
 else
-    echo -e "${RED}✗ raw-business-events does not exist${NC}"
+    echo -e "${RED}✗ $RAW_TOPIC does not exist${NC}"
 fi
 
 echo ""
@@ -93,12 +96,12 @@ echo ""
 # 4. Check Message Flow
 echo -e "${BLUE}4. Message Flow Check${NC}"
 echo "----------------------------------------"
-echo "Checking for recent messages in raw-business-events..."
-LATEST_MSG=$(confluent kafka topic consume raw-business-events --max-messages 1 --timeout 5 2>&1 | head -5 || echo "")
+echo "Checking for recent messages in $RAW_TOPIC..."
+LATEST_MSG=$(confluent kafka topic consume "$RAW_TOPIC" --max-messages 1 --timeout 5 2>&1 | head -5 || echo "")
 if [ -n "$LATEST_MSG" ] && ! echo "$LATEST_MSG" | grep -q "No messages"; then
-    echo -e "${GREEN}✓ Messages found in raw-business-events${NC}"
+    echo -e "${GREEN}✓ Messages found in $RAW_TOPIC${NC}"
 else
-    echo -e "${YELLOW}⚠ No recent messages in raw-business-events${NC}"
+    echo -e "${YELLOW}⚠ No recent messages in $RAW_TOPIC${NC}"
     echo "  This is normal if no events have been sent recently"
 fi
 echo ""
@@ -115,7 +118,7 @@ if confluent connect cluster describe "$CONNECTOR_NAME" &>/dev/null; then
     [ "$CONNECTOR_STATE" = "RUNNING" ] && CONNECTOR_OK=true
 fi
 
-confluent kafka topic describe raw-business-events &>/dev/null && TOPIC_OK=true
+confluent kafka topic describe "$RAW_TOPIC" &>/dev/null && TOPIC_OK=true
 
 STATEMENT_COUNT=$(confluent flink statement list --compute-pool "$COMPUTE_POOL_ID" --output json 2>/dev/null | jq 'length' || echo "0")
 [ "$STATEMENT_COUNT" -gt 0 ] && FLINK_OK=true
@@ -143,6 +146,6 @@ echo "List Flink statements:"
 echo "  confluent flink statement list --compute-pool $COMPUTE_POOL_ID"
 echo ""
 echo "Consume messages:"
-echo "  confluent kafka topic consume raw-business-events --max-messages 5"
+echo "  confluent kafka topic consume $RAW_TOPIC --max-messages 5"
 echo "  confluent kafka topic consume filtered-car-created-events --max-messages 5"
 echo ""
