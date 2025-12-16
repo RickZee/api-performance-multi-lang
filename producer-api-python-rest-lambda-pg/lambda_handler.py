@@ -34,8 +34,7 @@ from repository import get_connection
 _service: EventProcessingService | None = None
 _config = None
 
-# Module-level dedicated event loop for Lambda handler
-_lambda_loop: Optional[asyncio.AbstractEventLoop] = None
+# Removed module-level event loop - using asyncio.run() per invocation instead
 _lambda_client = None
 
 # Track import errors (for error handling in handler)
@@ -47,8 +46,20 @@ async def _initialize_service():
     
     RDS Proxy handles connection pooling at the infrastructure level,
     so we use direct connections per request to avoid redundant pooling.
+    
+    Creates a fresh connection factory that uses the current event loop context,
+    preventing loop mismatch issues.
     """
     global _service, _config, _lambda_client
+    
+    # Get current event loop ID for logging
+    try:
+        current_loop = asyncio.get_running_loop()
+        loop_id = id(current_loop)
+        logger.debug(f"{API_NAME} Initializing service in event loop: {loop_id}")
+    except RuntimeError:
+        loop_id = "unknown"
+        logger.warning(f"{API_NAME} No running event loop detected during service initialization")
     
     if _service is None:
         _config = load_lambda_config()
@@ -67,9 +78,20 @@ async def _initialize_service():
         # Initialize repositories and service with connection factory
         business_event_repo = BusinessEventRepository()
         
-        # Create connection factory for direct connections (no pooling)
+        # Create connection factory that uses current event loop context
+        # This factory will be called later, ensuring it uses the same loop
         # RDS Proxy handles pooling at infrastructure level
         async def connection_factory():
+            # Verify we're in the same loop context
+            try:
+                factory_loop = asyncio.get_running_loop()
+                factory_loop_id = id(factory_loop)
+                logger.debug(f"{API_NAME} Connection factory called in event loop: {factory_loop_id}")
+                if loop_id != "unknown" and factory_loop_id != loop_id:
+                    logger.warning(f"{API_NAME} Loop ID changed: init={loop_id}, factory={factory_loop_id}")
+            except RuntimeError:
+                logger.warning(f"{API_NAME} No running loop in connection factory")
+            
             return await get_connection(_config)
         
         _service = EventProcessingService(
@@ -79,7 +101,7 @@ async def _initialize_service():
             should_close_connection=True  # Close direct connections after use
         )
         
-        logger.info(f"{API_NAME} Lambda handler initialized (using direct connections, RDS Proxy handles pooling)")
+        logger.info(f"{API_NAME} Lambda handler initialized (using direct connections, RDS Proxy handles pooling, loop_id={loop_id})")
     
     return _service
 
@@ -229,105 +251,217 @@ def _is_database_connection_error(error: Exception) -> bool:
 
 
 async def _handle_process_event(event_body: str) -> Dict[str, Any]:
-    """Handle single event processing."""
+    """Handle single event processing with detailed lifecycle tracking."""
+    lifecycle_start = time.time()
+    lifecycle_stages = {}
+    
+    stage_start = time.time()
+    logger.info(f"{API_NAME} [LIFECYCLE] Event processing started")
+    lifecycle_stages['request_received'] = {'timestamp': stage_start, 'duration_ms': 0}
+    
     try:
         # Parse request body
+        stage_start = time.time()
+        logger.info(f"{API_NAME} [LIFECYCLE] Parsing JSON (body length: {len(event_body)})")
         event_data = json.loads(event_body)
+        lifecycle_stages['json_parsed'] = {
+            'timestamp': time.time(),
+            'duration_ms': int((time.time() - stage_start) * 1000)
+        }
+        
+        # Create Event object
+        stage_start = time.time()
+        logger.info(f"{API_NAME} [LIFECYCLE] Creating Event object from parsed data")
         event = Event(**event_data)
+        lifecycle_stages['event_created'] = {
+            'timestamp': time.time(),
+            'duration_ms': int((time.time() - stage_start) * 1000)
+        }
+        logger.info(f"{API_NAME} [LIFECYCLE] Event object created successfully")
     except json.JSONDecodeError as e:
-        logger.warning(f"{API_NAME} Invalid JSON: {e}")
+        lifecycle_stages['json_parse_failed'] = {
+            'timestamp': time.time(),
+            'duration_ms': int((time.time() - lifecycle_start) * 1000),
+            'error': str(e)
+        }
+        logger.error(f"{API_NAME} [LIFECYCLE] JSON parse failed: {e}", exc_info=True)
         return _create_response(
             400,
             {
                 "error": "Invalid JSON",
                 "status": 400,
+                "lifecycle": lifecycle_stages,
             },
         )
     except Exception as e:
-        logger.warning(f"{API_NAME} Invalid event structure: {e}")
+        lifecycle_stages['event_creation_failed'] = {
+            'timestamp': time.time(),
+            'duration_ms': int((time.time() - lifecycle_start) * 1000),
+            'error': str(e)
+        }
+        logger.error(f"{API_NAME} [LIFECYCLE] Event creation failed: {e}", exc_info=True)
         return _create_response(
             422,
             {
                 "error": f"Invalid event structure: {str(e)}",
                 "status": 422,
+                "lifecycle": lifecycle_stages,
             },
         )
     
     # Validate event
+    stage_start = time.time()
+    logger.info(f"{API_NAME} [LIFECYCLE] Starting event validation")
+    
+    event_id = event.event_header.uuid or "unknown"
+    event_type = event.event_header.event_type or "unknown"
+    event_name = event.event_header.event_name or "unknown"
+    
     if not event.event_header.event_name:
+        lifecycle_stages['validation_failed'] = {
+            'timestamp': time.time(),
+            'duration_ms': int((time.time() - stage_start) * 1000),
+            'error': 'Event header event_name is required'
+        }
+        logger.warning(f"{API_NAME} [LIFECYCLE] Validation failed: missing event_name")
         return _create_response(
             422,
             {
                 "error": "Event header event_name is required",
                 "status": 422,
+                "lifecycle": lifecycle_stages,
             },
         )
     
-    if not event.event_body.entities:
+    if not event.entities:
+        lifecycle_stages['validation_failed'] = {
+            'timestamp': time.time(),
+            'duration_ms': int((time.time() - stage_start) * 1000),
+            'error': 'Event must contain at least one entity'
+        }
+        logger.warning(f"{API_NAME} [LIFECYCLE] Validation failed: no entities")
         return _create_response(
             422,
             {
-                "error": "Event body must contain at least one entity",
+                "error": "Event must contain at least one entity",
                 "status": 422,
+                "lifecycle": lifecycle_stages,
             },
         )
     
     # Validate each entity
-    for entity in event.event_body.entities:
-        if not entity.entity_type:
+    for idx, entity in enumerate(event.entities):
+        if not entity.entity_header.entity_type:
+            lifecycle_stages['validation_failed'] = {
+                'timestamp': time.time(),
+                'duration_ms': int((time.time() - stage_start) * 1000),
+                'error': f'Entity {idx} missing entity_type'
+            }
+            logger.warning(f"{API_NAME} [LIFECYCLE] Validation failed: entity {idx} missing type")
             return _create_response(
                 422,
                 {
                     "error": "Entity type cannot be empty",
                     "status": 422,
+                    "lifecycle": lifecycle_stages,
                 },
             )
-        if not entity.entity_id:
+        if not entity.entity_header.entity_id:
+            lifecycle_stages['validation_failed'] = {
+                'timestamp': time.time(),
+                'duration_ms': int((time.time() - stage_start) * 1000),
+                'error': f'Entity {idx} missing entity_id'
+            }
+            logger.warning(f"{API_NAME} [LIFECYCLE] Validation failed: entity {idx} missing id")
             return _create_response(
                 422,
                 {
                     "error": "Entity ID cannot be empty",
                     "status": 422,
+                    "lifecycle": lifecycle_stages,
                 },
             )
     
-    logger.info(f"{API_NAME} Received event: {event.event_header.event_name}")
+    lifecycle_stages['validation_passed'] = {
+        'timestamp': time.time(),
+        'duration_ms': int((time.time() - stage_start) * 1000)
+    }
+    
+    logger.info(
+        f"{API_NAME} [LIFECYCLE] Event validated: {event_name}",
+        extra={
+            'event_id': event_id,
+            'event_type': event_type,
+            'event_name': event_name,
+            'entity_count': len(event.entities) if event.entities else 0,
+            'entity_types': [e.entity_header.entity_type for e in event.entities] if event.entities else [],
+        }
+    )
     
     # Process event
+    stage_start = time.time()
+    logger.info(f"{API_NAME} [LIFECYCLE] Initializing service")
     try:
         service = await _initialize_service()
-        start_time = time.time()
-        await service.process_event(event)
-        duration_ms = int((time.time() - start_time) * 1000)
+        lifecycle_stages['service_initialized'] = {
+            'timestamp': time.time(),
+            'duration_ms': int((time.time() - stage_start) * 1000)
+        }
+        logger.info(f"{API_NAME} [LIFECYCLE] Service initialized in {lifecycle_stages['service_initialized']['duration_ms']}ms")
         
-        # Emit CloudWatch metric (non-blocking)
+        # Process event
+        stage_start = time.time()
+        logger.info(f"{API_NAME} [LIFECYCLE] Processing event in service layer (event_id: {event_id})")
+        
+        # Log event loop ID before processing
         try:
-            cloudwatch = boto3.client('cloudwatch', region_name=os.getenv('AWS_REGION', 'us-east-1'))
-            cloudwatch.put_metric_data(
-                Namespace='ProducerAPI',
-                MetricData=[{
-                    'MetricName': 'EventProcessingDuration',
-                    'Value': duration_ms,
-                    'Unit': 'Milliseconds',
-                    'Dimensions': [
-                        {'Name': 'API', 'Value': 'PythonREST-PG'},
-                        {'Name': 'EventName', 'Value': event.event_header.event_name or 'unknown'}
-                    ]
-                }]
-            )
-        except Exception as e:
-            logger.debug(f"Failed to emit CloudWatch metric: {e}")
+            process_loop = asyncio.get_running_loop()
+            process_loop_id = id(process_loop)
+            logger.debug(f"{API_NAME} [LIFECYCLE] About to process event in loop: {process_loop_id}")
+        except RuntimeError:
+            process_loop_id = "unknown"
+        
+        await service.process_event(event)
+        lifecycle_stages['event_processed'] = {
+            'timestamp': time.time(),
+            'duration_ms': int((time.time() - stage_start) * 1000)
+        }
+        
+        total_duration_ms = int((time.time() - lifecycle_start) * 1000)
+        lifecycle_stages['total_duration_ms'] = total_duration_ms
+        
+        logger.info(
+            f"{API_NAME} [LIFECYCLE] Event processed successfully",
+            extra={
+                'event_id': event_id,
+                'event_type': event_type,
+                'event_name': event_name,
+                'total_duration_ms': total_duration_ms,
+                'lifecycle_stages': lifecycle_stages,
+            }
+        )
+        
+        # CloudWatch metrics removed - synchronous put_metric_data() was blocking execution
+        # Metrics can be extracted from CloudWatch Logs using Logs Insights queries
+        # This eliminates blocking operations from the request path
         
         return _create_response(
             200,
             {
                 "success": True,
                 "message": "Event processed successfully",
+                "event_id": event_id,
+                "lifecycle": lifecycle_stages,
             },
         )
     except DuplicateEventError as e:
-        # Handle duplicate event ID (409 Conflict)
-        logger.warning(f"{API_NAME} Duplicate event ID: {e.event_id}")
+        lifecycle_stages['duplicate_event'] = {
+            'timestamp': time.time(),
+            'duration_ms': int((time.time() - lifecycle_start) * 1000),
+            'error': str(e),
+            'event_id': e.event_id
+        }
+        logger.warning(f"{API_NAME} [LIFECYCLE] Duplicate event detected: {e.event_id}")
         return _create_response(
             409,
             {
@@ -335,12 +469,21 @@ async def _handle_process_event(event_body: str) -> Dict[str, Any]:
                 "message": e.message,
                 "eventId": e.event_id,
                 "status": 409,
+                "lifecycle": lifecycle_stages,
             },
         )
     except Exception as e:
+        lifecycle_stages['processing_error'] = {
+            'timestamp': time.time(),
+            'duration_ms': int((time.time() - lifecycle_start) * 1000),
+            'error': str(e),
+            'error_type': type(e).__name__
+        }
+        logger.error(f"{API_NAME} [LIFECYCLE] Error processing event: {e}", exc_info=True)
+        
         # Check if it's a database connection error
         if _is_database_connection_error(e):
-            logger.warning(f"{API_NAME} Database connection error detected: {e}")
+            logger.warning(f"{API_NAME} [LIFECYCLE] Database connection error detected: {e}")
             # Try to start the database
             start_response = await _try_start_database()
             if start_response:
@@ -353,16 +496,17 @@ async def _handle_process_event(event_body: str) -> Dict[str, Any]:
                     "message": "Unable to connect to the database. The database may be starting. Please retry your request in a few moments.",
                     "status": 503,
                     "retry_after": 60,
+                    "lifecycle": lifecycle_stages,
                 },
                 headers={"Retry-After": "60"}
             )
         
-        logger.error(f"{API_NAME} Error processing event: {e}", exc_info=True)
         return _create_response(
             500,
             {
                 "error": f"Error processing event: {str(e)}",
                 "status": 500,
+                "lifecycle": lifecycle_stages,
             },
         )
 
@@ -450,14 +594,14 @@ async def _handle_bulk_events(event_body: str) -> Dict[str, Any]:
                 failed_count += 1
                 continue
             
-            if not event.event_body.entities:
+            if not event.entities:
                 failed_count += 1
                 continue
             
-            # Validate entities
+            # Validate entities (Pydantic models handle validation automatically)
             valid = True
-            for entity in event.event_body.entities:
-                if not entity.entity_type or not entity.entity_id:
+            for entity in event.entities:
+                if not entity.entity_header.entity_type or not entity.entity_header.entity_id:
                     valid = False
                     break
             
@@ -515,19 +659,15 @@ async def _handle_bulk_events(event_body: str) -> Dict[str, Any]:
     )
 
 
-# Module-level dedicated event loop for Lambda handler
-# This ensures we always use the same loop for asyncpg pool creation/usage
-_lambda_loop: Optional[asyncio.AbstractEventLoop] = None
-
-
 def handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
     """
     Main Lambda handler for API Gateway HTTP API v2.
     
-    Uses a deterministic single event loop strategy to ensure asyncpg pools
-    are always created and used in the same loop context.
+    Uses asyncio.run() to create a fresh event loop per invocation.
+    This ensures asyncpg connections are created and used in the same loop context,
+    preventing connection hangs due to loop mismatches.
     """
-    global _lambda_loop, _import_error
+    global _import_error
     
     # Check for import errors first
     if _import_error is not None:
@@ -543,37 +683,10 @@ def handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
         }
     
     try:
-        # Check if we're already in a running loop (shouldn't happen in real Lambda/SAM)
-        try:
-            running_loop = asyncio.get_running_loop()
-            # This is unexpected for Lambda - fail fast with clear error
-            logger.error(
-                f"{API_NAME} CRITICAL: handler() called from within a running event loop. "
-                f"Loop ID: {id(running_loop)}. This indicates a test harness or async caller issue. "
-                f"For async callers, use _async_handler() directly instead of handler()."
-            )
-            return _create_response(
-                500,
-                {
-                    "error": "Internal Server Error",
-                    "message": "Handler called from within running event loop",
-                    "status": 500,
-                },
-            )
-        except RuntimeError:
-            # No running loop - this is the expected case for Lambda/SAM
-            pass
-        
-        # Get or create the module-level dedicated loop
-        if _lambda_loop is None or _lambda_loop.is_closed():
-            _lambda_loop = asyncio.new_event_loop()
-            asyncio.set_event_loop(_lambda_loop)
-            logger.info(f"{API_NAME} Created new dedicated event loop: {id(_lambda_loop)}")
-        else:
-            logger.debug(f"{API_NAME} Reusing existing event loop: {id(_lambda_loop)}")
-        
-        # Run the async handler in the dedicated loop
-        return _lambda_loop.run_until_complete(_async_handler(event, context))
+        # Use asyncio.run() to create a fresh event loop per invocation
+        # This ensures all async operations (including asyncpg connections) 
+        # are created and used in the same loop context
+        return asyncio.run(_async_handler(event, context))
     except Exception as e:
         # Log to CloudWatch before returning error response
         logger.error(f"{API_NAME} Handler initialization or execution failed: {e}", exc_info=True)
@@ -591,6 +704,15 @@ def handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
 async def _async_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
     """Async handler implementation."""
     try:
+        # Log event loop ID for debugging
+        try:
+            handler_loop = asyncio.get_running_loop()
+            handler_loop_id = id(handler_loop)
+            logger.debug(f"{API_NAME} Async handler running in event loop: {handler_loop_id}")
+        except RuntimeError:
+            handler_loop_id = "unknown"
+            logger.warning(f"{API_NAME} No running loop detected in async handler")
+        
         # Extract path and method
         request_context = event.get("requestContext", {})
         http_context = request_context.get("http", {})
@@ -601,13 +723,14 @@ async def _async_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
         # LambdaContext uses 'aws_request_id', not 'request_id'
         request_id = request_context.get("requestId", context.aws_request_id if context else "unknown")
         
-        # Log with structured context
+        # Log with structured context including loop ID
         logger.info(
             f"{API_NAME} Lambda request",
             extra={
                 "request_id": request_id,
                 "method": method,
                 "path": path,
+                "loop_id": handler_loop_id,
             }
         )
         

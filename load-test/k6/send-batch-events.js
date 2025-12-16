@@ -158,37 +158,58 @@ if (dbType === 'pg' || dbType === 'dsql') {
 const AUTH_ENABLED = __ENV.AUTH_ENABLED === 'true' || __ENV.AUTH_ENABLED === '1';
 const JWT_TOKEN = __ENV.JWT_TOKEN || '';
 
-// Generate unique UUID using VU ID, iteration, timestamp, and random component
-// This ensures uniqueness across all VUs and iterations
-function generateUUID(vuId = null, iteration = null, eventIndex = null) {
-    // Use VU ID and iteration if provided to ensure uniqueness
-    const timestamp = Date.now();
-    const random = Math.random().toString(36).substring(2, 15);
-    // Use a counter-based approach instead of performance.now() (not available in k6)
-    const counter = (timestamp % 1000000).toString().padStart(6, '0');
-    
-    // Create a unique seed from VU ID, iteration, and event index
-    // This ensures each VU generates unique UUIDs for each event
+/**
+ * Generate deterministic UUID using VU ID, iteration, event type index, and event index.
+ * 
+ * This function guarantees uniqueness by including all unique components in the seed,
+ * similar to UUID v5 (name-based) approach. Deterministic generation ensures:
+ * - The same inputs always produce the same UUID
+ * - No collisions within a test run
+ * - Uniqueness across all VUs, iterations, event types, and event indices
+ * 
+ * Seed components:
+ * - vuId: Virtual User ID (1 to TOTAL_VUS)
+ * - iteration: Global iteration number (unique across all VUs)
+ * - eventTypeIndex: Event type (0=Car, 1=Loan, 2=Payment, 3=Service)
+ * - eventIndex: Event index within the event type (0 to EVENTS_PER_TYPE-1)
+ * 
+ * @param {number|null} vuId - Virtual User ID
+ * @param {number|null} iteration - Global iteration number
+ * @param {number|null} eventTypeIndex - Event type index (0-3)
+ * @param {number|null} eventIndex - Event index within type
+ * @returns {string} UUID v4 formatted string
+ */
+function generateUUID(vuId = null, iteration = null, eventTypeIndex = null, eventIndex = null) {
+    // Create a deterministic seed from all unique components
+    // This ensures each combination of (VU ID, iteration, event type, event index) produces a unique UUID
     let seed = '';
-    if (vuId !== null && iteration !== null) {
-        // Combine VU ID, iteration, event index, timestamp, counter, and random for maximum uniqueness
-        seed = `${vuId}-${iteration}-${eventIndex !== null ? eventIndex : '0'}-${timestamp}-${counter}-${random}`;
+    if (vuId !== null && iteration !== null && eventTypeIndex !== null) {
+        // Combine all unique components: VU ID, iteration, event type index, and event index
+        // This guarantees uniqueness because each combination is unique within the test run
+        seed = `${vuId}-${iteration}-${eventTypeIndex}-${eventIndex !== null ? eventIndex : '0'}`;
+    } else if (vuId !== null && iteration !== null) {
+        // Fallback for cases where eventTypeIndex is not provided (backward compatibility)
+        seed = `${vuId}-${iteration}-${eventIndex !== null ? eventIndex : '0'}`;
     } else {
-        // Fallback for schema check (no VU context)
-        seed = `${timestamp}-${counter}-${random}`;
+        // Fallback for schema check (no VU context) - use timestamp for uniqueness
+        const timestamp = Date.now();
+        seed = `schema-check-${timestamp}`;
     }
     
-    // Generate UUID v4 format with deterministic components for uniqueness
-    // Use a simple hash-like function to convert seed to hex
+    // Generate UUID v4 format using deterministic hash-like function
+    // Convert seed string to hex representation for UUID formatting
+    // This ensures consistent UUID generation from the same seed
     let hex = '';
     for (let i = 0; i < seed.length && hex.length < 32; i++) {
         const charCode = seed.charCodeAt(i);
         hex += charCode.toString(16).padStart(2, '0');
     }
     
-    // Pad or truncate to exactly 32 hex characters
+    // Pad or truncate to exactly 32 hex characters (required for UUID format)
     if (hex.length < 32) {
-        hex = hex.padEnd(32, '0');
+        // If seed is too short, pad with repeating pattern based on seed hash
+        const padValue = seed.length > 0 ? seed.charCodeAt(0) % 16 : 0;
+        hex = hex.padEnd(32, padValue.toString(16));
     } else {
         hex = hex.substring(0, 32);
     }
@@ -217,12 +238,16 @@ function generateTimestamp() {
     return new Date().toISOString();
 }
 
-// Generate event payloads based on samples
+/**
+ * Generate Car Created event payload.
+ * Uses deterministic UUID generation with eventTypeIndex = 0 to guarantee uniqueness.
+ */
 function generateCarCreatedEvent(carId = null, vuId = null, iteration = null, eventIndex = null) {
     const timestamp = generateTimestamp();
+    const eventTypeIndex = 0; // CarCreated
     // Use provided carId (UUID) or generate a new UUID
-    const id = carId || generateUUID(vuId || 1, (iteration || 0) * 4 + 0, (eventIndex || 0) + 20000);
-    const uuid = generateUUID(vuId, iteration, eventIndex);
+    const id = carId || generateUUID(vuId || 1, (iteration || 0) * 4 + 0, eventTypeIndex, (eventIndex || 0) + 20000);
+    const uuid = generateUUID(vuId, iteration, eventTypeIndex, eventIndex);
     
     return JSON.stringify({
         eventHeader: {
@@ -254,11 +279,16 @@ function generateCarCreatedEvent(carId = null, vuId = null, iteration = null, ev
     });
 }
 
+/**
+ * Generate Loan Created event payload.
+ * Uses deterministic UUID generation with eventTypeIndex = 1 to guarantee uniqueness.
+ */
 function generateLoanCreatedEvent(carId, loanId = null, vuId = null, iteration = null, eventIndex = null) {
     const timestamp = generateTimestamp();
+    const eventTypeIndex = 1; // LoanCreated
     // Use provided loanId (UUID) or generate a new UUID
-    const id = loanId || generateUUID(vuId || 1, (iteration || 0) * 4 + 1, (eventIndex || 0) + 20000);
-    const uuid = generateUUID(vuId, iteration, eventIndex);
+    const id = loanId || generateUUID(vuId || 1, (iteration || 0) * 4 + 1, eventTypeIndex, (eventIndex || 0) + 20000);
+    const uuid = generateUUID(vuId, iteration, eventTypeIndex, eventIndex);
     const loanAmount = randomIntBetween(10000, 100000);
     const interestRate = (2.5 + Math.random() * 5).toFixed(2); // 2.5% - 7.5%
     const termMonths = [24, 36, 48, 60, 72][randomIntBetween(0, 4)];
@@ -294,11 +324,16 @@ function generateLoanCreatedEvent(carId, loanId = null, vuId = null, iteration =
     });
 }
 
+/**
+ * Generate Loan Payment Submitted event payload.
+ * Uses deterministic UUID generation with eventTypeIndex = 2 to guarantee uniqueness.
+ */
 function generateLoanPaymentEvent(loanId, amount = null, vuId = null, iteration = null, eventIndex = null) {
     const timestamp = generateTimestamp();
+    const eventTypeIndex = 2; // LoanPaymentSubmitted
     // Generate UUID for payment entity
-    const paymentId = generateUUID(vuId || 1, (iteration || 0) * 4 + 2, (eventIndex || 0) + 20000);
-    const uuid = generateUUID(vuId, iteration, eventIndex);
+    const paymentId = generateUUID(vuId || 1, (iteration || 0) * 4 + 2, eventTypeIndex, (eventIndex || 0) + 20000);
+    const uuid = generateUUID(vuId, iteration, eventTypeIndex, eventIndex);
     const paymentAmount = amount || (500 + Math.random() * 1500).toFixed(2); // $500-$2000
     
     return JSON.stringify({
@@ -324,11 +359,16 @@ function generateLoanPaymentEvent(loanId, amount = null, vuId = null, iteration 
     });
 }
 
+/**
+ * Generate Car Service Done event payload.
+ * Uses deterministic UUID generation with eventTypeIndex = 3 to guarantee uniqueness.
+ */
 function generateCarServiceEvent(carId, serviceId = null, vuId = null, iteration = null, eventIndex = null) {
     const timestamp = generateTimestamp();
+    const eventTypeIndex = 3; // CarServiceDone
     // Use provided serviceId (UUID) or generate a new UUID
-    const id = serviceId || generateUUID(vuId || 1, (iteration || 0) * 4 + 3, (eventIndex || 0) + 20000);
-    const uuid = generateUUID(vuId, iteration, eventIndex);
+    const id = serviceId || generateUUID(vuId || 1, (iteration || 0) * 4 + 3, eventTypeIndex, (eventIndex || 0) + 20000);
+    const uuid = generateUUID(vuId, iteration, eventTypeIndex, eventIndex);
     const amountPaid = (100 + Math.random() * 1000).toFixed(2); // $100-$1100
     const mileageAtService = randomIntBetween(1000, 100000);
     const dealers = [
@@ -392,9 +432,10 @@ export function setup() {
     console.log('Checking database schema...');
     
     // Create a minimal test event to check if the schema exists
+    // Use special event type index (-1) for schema check to ensure uniqueness
     const testEvent = JSON.stringify({
         eventHeader: {
-            uuid: generateUUID(),
+            uuid: generateUUID(null, null, -1, null),
             eventName: "Car Created",
             eventType: "CarCreated",
             createdDate: generateTimestamp(),
@@ -424,7 +465,8 @@ export function setup() {
     }
     
     // Make a test request to check if schema exists
-    const testResponse = http.post(apiUrl, testEvent, { headers: headers, timeout: '30s' });
+    // Use 60s timeout to accommodate Lambda cold starts and VPC database connections
+    const testResponse = http.post(apiUrl, testEvent, { headers: headers, timeout: '60s' });
     
     // Check response
     if (testResponse.status === 0) {
@@ -495,13 +537,15 @@ export function setup() {
     
     // Generate linked UUIDs for all events
     // Use a base VU ID and iteration offset to ensure uniqueness
+    // Include event type index to guarantee uniqueness across different entity types
     for (let i = 0; i < EVENTS_PER_TYPE; i++) {
         // Generate UUIDs for entities using a deterministic approach
         // Use a large offset (10000) to avoid conflicts with event UUIDs
-        carIds.push(generateUUID(1, i * 4 + 0, 10000 + i)); // Car entities
-        loanIds.push(generateUUID(1, i * 4 + 1, 10000 + i)); // Loan entities
+        // Event type indices: 0=Car, 1=Loan, 3=Service (Payment entities are generated inline)
+        carIds.push(generateUUID(1, i * 4 + 0, 0, 10000 + i)); // Car entities (eventTypeIndex = 0)
+        loanIds.push(generateUUID(1, i * 4 + 1, 1, 10000 + i)); // Loan entities (eventTypeIndex = 1)
         monthlyPayments.push((500 + Math.random() * 1500).toFixed(2));
-        serviceIds.push(generateUUID(1, i * 4 + 2, 10000 + i)); // Service entities
+        serviceIds.push(generateUUID(1, i * 4 + 2, 3, 10000 + i)); // Service entities (eventTypeIndex = 3)
     }
     
     return {

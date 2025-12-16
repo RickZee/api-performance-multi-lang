@@ -49,6 +49,13 @@ EVENTS_FILE="/tmp/k6-sent-events-$(date +%s).json"
 echo -e "${BLUE}========================================${NC}"
 echo -e "${BLUE}k6 Batch Test with Validation${NC}"
 echo -e "${BLUE}========================================${NC}"
+
+# Pre-warm Lambdas if requested
+if [ "${PRE_WARM_LAMBDAS:-true}" = "true" ]; then
+    log_progress "Pre-warming Lambda functions..." "$BLUE"
+    bash "$SCRIPT_DIR/pre-warm-lambdas.sh" 3 > /dev/null 2>&1 || true
+    log_progress "Pre-warming complete" "$GREEN"
+fi
 echo ""
 echo "Database Type: $DB_TYPE"
 echo "Events per Type: $EVENTS_PER_TYPE"
@@ -283,3 +290,26 @@ echo ""
 echo "Events file saved at: $EVENTS_FILE"
 echo "You can re-validate using:"
 echo "  python3 scripts/validate-against-sent-events.py --events-file $EVENTS_FILE --aurora --dsql"
+echo ""
+echo "Generate detailed lifecycle report:"
+if [ "$DB_TYPE" = "pg" ]; then
+    LAMBDA_NAME="producer-api-python-rest-lambda-pg"
+elif [ "$DB_TYPE" = "dsql" ]; then
+    LAMBDA_NAME="producer-api-python-rest-lambda-dsql"
+else
+    LAMBDA_NAME=""
+fi
+
+if [ -n "$LAMBDA_NAME" ] && [ -f "$EVENTS_FILE" ]; then
+    REPORT_FILE="${EVENTS_FILE%.json}-lifecycle-report.txt"
+    log_progress "Generating lifecycle report..." "$BLUE"
+    python3 "$SCRIPT_DIR/generate-event-lifecycle-report.py" \
+        --events-file "$EVENTS_FILE" \
+        --lambda-name "$LAMBDA_NAME" \
+        --output "$REPORT_FILE" \
+        --format text \
+        --since 1h 2>&1 | tail -20 || true
+    if [ -f "$REPORT_FILE" ]; then
+        log_progress "Lifecycle report saved to: $REPORT_FILE" "$GREEN"
+    fi
+fi

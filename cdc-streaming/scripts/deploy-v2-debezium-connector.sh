@@ -125,3 +125,4 @@ echo "  3. Verify events in raw-business-events topic have __op, __table, __ts_m
 echo "  4. Proceed with Flink statement deployment"
 echo ""
 
+

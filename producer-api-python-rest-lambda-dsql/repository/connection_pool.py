@@ -81,7 +81,9 @@ async def get_connection(database_url_or_config: Union[str, LambdaConfig]) -> as
             )
             
             # Create direct connection (no pooling)
+            print(f"[DSQL] About to call asyncpg.connect - host={dsql_host}, port={config.aurora_dsql_port}")
             connect_start = time.time()
+            print(f"[DSQL] Calling asyncpg.connect now...")
             conn = await asyncpg.connect(
                 host=dsql_host,  # Use direct endpoint - asyncpg will use this for SNI
                 port=config.aurora_dsql_port,
@@ -94,9 +96,11 @@ async def get_connection(database_url_or_config: Union[str, LambdaConfig]) -> as
                     'search_path': 'car_entities_schema'
                 }
             )
+            print(f"[DSQL] asyncpg.connect returned successfully")
             connect_duration = int((time.time() - connect_start) * 1000)
             total_duration = int((time.time() - connection_start) * 1000)
             
+            print(f"[DSQL] Connection created - duration: {connect_duration}ms")
             logger.info(
                 f"Direct DSQL connection created successfully",
                 extra={

@@ -63,7 +63,11 @@ async def _initialize_service():
         
         # Create connection factory for direct connections (DSQL pattern)
         async def connection_factory():
-            return await get_connection(_config)
+            print(f"{API_NAME} connection_factory called - PRINT")
+            print(f"{API_NAME} Calling get_connection...")
+            conn = await get_connection(_config)
+            print(f"{API_NAME} get_connection returned successfully")
+            return conn
         
         _service = EventProcessingService(
             business_event_repo=business_event_repo,
@@ -222,78 +226,144 @@ def _is_database_connection_error(error: Exception) -> bool:
 
 
 async def _handle_process_event(event_body: str) -> Dict[str, Any]:
-    """Handle single event processing."""
-    logger.info(f"{API_NAME} _handle_process_event called, parsing JSON...")
+    """Handle single event processing with detailed lifecycle tracking."""
+    lifecycle_start = time.time()
+    lifecycle_stages = {}
+    
+    stage_start = time.time()
+    logger.info(f"{API_NAME} [LIFECYCLE] Event processing started")
+    lifecycle_stages['request_received'] = {'timestamp': stage_start, 'duration_ms': 0}
+    
     try:
         # Parse request body
-        logger.info(f"{API_NAME} Parsing event_body (length: {len(event_body)})")
+        stage_start = time.time()
+        logger.info(f"{API_NAME} [LIFECYCLE] Parsing JSON (body length: {len(event_body)})")
         event_data = json.loads(event_body)
-        logger.info(f"{API_NAME} JSON parsed, creating Event object...")
+        lifecycle_stages['json_parsed'] = {
+            'timestamp': time.time(),
+            'duration_ms': int((time.time() - stage_start) * 1000)
+        }
+        
+        # Create Event object
+        stage_start = time.time()
+        logger.info(f"{API_NAME} [LIFECYCLE] Creating Event object from parsed data")
         event = Event(**event_data)
-        logger.info(f"{API_NAME} Event object created successfully")
+        lifecycle_stages['event_created'] = {
+            'timestamp': time.time(),
+            'duration_ms': int((time.time() - stage_start) * 1000)
+        }
+        logger.info(f"{API_NAME} [LIFECYCLE] Event object created successfully")
     except json.JSONDecodeError as e:
-        logger.warning(f"{API_NAME} Invalid JSON: {e}")
+        lifecycle_stages['json_parse_failed'] = {
+            'timestamp': time.time(),
+            'duration_ms': int((time.time() - lifecycle_start) * 1000),
+            'error': str(e)
+        }
+        logger.error(f"{API_NAME} [LIFECYCLE] JSON parse failed: {e}", exc_info=True)
         return _create_response(
             400,
             {
                 "error": "Invalid JSON",
                 "status": 400,
+                "lifecycle": lifecycle_stages,
             },
         )
     except Exception as e:
-        logger.warning(f"{API_NAME} Invalid event structure: {e}")
+        lifecycle_stages['event_creation_failed'] = {
+            'timestamp': time.time(),
+            'duration_ms': int((time.time() - lifecycle_start) * 1000),
+            'error': str(e)
+        }
+        logger.error(f"{API_NAME} [LIFECYCLE] Event creation failed: {e}", exc_info=True)
         return _create_response(
             422,
             {
                 "error": f"Invalid event structure: {str(e)}",
                 "status": 422,
+                "lifecycle": lifecycle_stages,
             },
         )
     
     # Validate event
-    if not event.event_header.event_name:
-        return _create_response(
-            422,
-            {
-                "error": "Event header event_name is required",
-                "status": 422,
-            },
-        )
-    
-    if not event.entities:
-        return _create_response(
-            422,
-            {
-                "error": "Event must contain at least one entity",
-                "status": 422,
-            },
-        )
-    
-    # Validate each entity (Pydantic models handle validation automatically)
-    for entity in event.entities:
-        if not entity.entity_header.entity_type:
-            return _create_response(
-                422,
-                {
-                    "error": "Entity type cannot be empty",
-                    "status": 422,
-                },
-            )
-        if not entity.entity_header.entity_id:
-            return _create_response(
-                422,
-                {
-                    "error": "Entity ID cannot be empty",
-                    "status": 422,
-                },
-            )
+    stage_start = time.time()
+    logger.info(f"{API_NAME} [LIFECYCLE] Starting event validation")
     
     event_id = event.event_header.uuid or "unknown"
     event_type = event.event_header.event_type or "unknown"
     event_name = event.event_header.event_name or "unknown"
     
+    if not event.event_header.event_name:
+        lifecycle_stages['validation_failed'] = {
+            'timestamp': time.time(),
+            'duration_ms': int((time.time() - stage_start) * 1000),
+            'error': 'Event header event_name is required'
+        }
+        logger.warning(f"{API_NAME} [LIFECYCLE] Validation failed: missing event_name")
+        return _create_response(
+            422,
+            {
+                "error": "Event header event_name is required",
+                "status": 422,
+                "lifecycle": lifecycle_stages,
+            },
+        )
+    
+    if not event.entities:
+        lifecycle_stages['validation_failed'] = {
+            'timestamp': time.time(),
+            'duration_ms': int((time.time() - stage_start) * 1000),
+            'error': 'Event must contain at least one entity'
+        }
+        logger.warning(f"{API_NAME} [LIFECYCLE] Validation failed: no entities")
+        return _create_response(
+            422,
+            {
+                "error": "Event must contain at least one entity",
+                "status": 422,
+                "lifecycle": lifecycle_stages,
+            },
+        )
+    
+    # Validate each entity (Pydantic models handle validation automatically)
+    for idx, entity in enumerate(event.entities):
+        if not entity.entity_header.entity_type:
+            lifecycle_stages['validation_failed'] = {
+                'timestamp': time.time(),
+                'duration_ms': int((time.time() - stage_start) * 1000),
+                'error': f'Entity {idx} missing entity_type'
+            }
+            logger.warning(f"{API_NAME} [LIFECYCLE] Validation failed: entity {idx} missing type")
+            return _create_response(
+                422,
+                {
+                    "error": "Entity type cannot be empty",
+                    "status": 422,
+                    "lifecycle": lifecycle_stages,
+                },
+            )
+        if not entity.entity_header.entity_id:
+            lifecycle_stages['validation_failed'] = {
+                'timestamp': time.time(),
+                'duration_ms': int((time.time() - stage_start) * 1000),
+                'error': f'Entity {idx} missing entity_id'
+            }
+            logger.warning(f"{API_NAME} [LIFECYCLE] Validation failed: entity {idx} missing id")
+            return _create_response(
+                422,
+                {
+                    "error": "Entity ID cannot be empty",
+                    "status": 422,
+                    "lifecycle": lifecycle_stages,
+                },
+            )
+    
+    lifecycle_stages['validation_passed'] = {
+        'timestamp': time.time(),
+        'duration_ms': int((time.time() - stage_start) * 1000)
+    }
+    
     logger.info(
-        f"{API_NAME} Received event: {event_name}",
+        f"{API_NAME} [LIFECYCLE] Event validated: {event_name}",
         extra={
             'event_id': event_id,
             'event_type': event_type,
@@ -304,63 +374,56 @@ async def _handle_process_event(event_body: str) -> Dict[str, Any]:
     )
     
     # Process event
+    stage_start = time.time()
+    logger.info(f"{API_NAME} [LIFECYCLE] Initializing service")
     try:
-        logger.info(f"{API_NAME} Initializing service...")
         service = await _initialize_service()
-        logger.info(f"{API_NAME} Service initialized, starting event processing...")
-        start_time = time.time()
+        lifecycle_stages['service_initialized'] = {
+            'timestamp': time.time(),
+            'duration_ms': int((time.time() - stage_start) * 1000)
+        }
+        logger.info(f"{API_NAME} [LIFECYCLE] Service initialized")
         
-        logger.info(
-            f"{API_NAME} Starting event processing",
-            extra={
-                'event_id': event_id,
-                'event_type': event_type,
-                'timestamp': start_time,
-            }
-        )
-        
-        logger.info(f"{API_NAME} Calling service.process_event...")
+        # Process event
+        stage_start = time.time()
+        logger.info(f"{API_NAME} [LIFECYCLE] Processing event in service layer")
         await service.process_event(event)
-        logger.info(f"{API_NAME} service.process_event completed")
-        duration_ms = int((time.time() - start_time) * 1000)
+        lifecycle_stages['event_processed'] = {
+            'timestamp': time.time(),
+            'duration_ms': int((time.time() - stage_start) * 1000)
+        }
+        
+        total_duration_ms = int((time.time() - lifecycle_start) * 1000)
+        lifecycle_stages['total_duration_ms'] = total_duration_ms
         
         logger.info(
-            f"{API_NAME} Event processed successfully in {duration_ms}ms",
+            f"{API_NAME} [LIFECYCLE] Event processed successfully",
             extra={
                 'event_id': event_id,
                 'event_type': event_type,
-                'duration_ms': duration_ms,
+                'event_name': event_name,
+                'total_duration_ms': total_duration_ms,
+                'lifecycle_stages': lifecycle_stages,
             }
         )
-        
-        # Emit CloudWatch metric (non-blocking)
-        try:
-            cloudwatch = boto3.client('cloudwatch', region_name=os.getenv('AWS_REGION', 'us-east-1'))
-            cloudwatch.put_metric_data(
-                Namespace='ProducerAPI',
-                MetricData=[{
-                    'MetricName': 'EventProcessingDuration',
-                    'Value': duration_ms,
-                    'Unit': 'Milliseconds',
-                    'Dimensions': [
-                        {'Name': 'API', 'Value': 'PythonREST-DSQL'},
-                        {'Name': 'EventName', 'Value': event.event_header.event_name or 'unknown'}
-                    ]
-                }]
-            )
-        except Exception as e:
-            logger.debug(f"Failed to emit CloudWatch metric: {e}")
         
         return _create_response(
             200,
             {
                 "success": True,
                 "message": "Event processed successfully",
+                "event_id": event_id,
+                "lifecycle": lifecycle_stages,
             },
         )
     except DuplicateEventError as e:
-        # Handle duplicate event ID (409 Conflict)
-        logger.warning(f"{API_NAME} Duplicate event ID: {e.event_id}")
+        lifecycle_stages['duplicate_event'] = {
+            'timestamp': time.time(),
+            'duration_ms': int((time.time() - lifecycle_start) * 1000),
+            'error': str(e),
+            'event_id': e.event_id
+        }
+        logger.warning(f"{API_NAME} [LIFECYCLE] Duplicate event detected: {e.event_id}")
         return _create_response(
             409,
             {
@@ -368,9 +431,17 @@ async def _handle_process_event(event_body: str) -> Dict[str, Any]:
                 "message": e.message,
                 "eventId": e.event_id,
                 "status": 409,
+                "lifecycle": lifecycle_stages,
             },
         )
     except Exception as e:
+        lifecycle_stages['processing_error'] = {
+            'timestamp': time.time(),
+            'duration_ms': int((time.time() - lifecycle_start) * 1000),
+            'error': str(e),
+            'error_type': type(e).__name__
+        }
+        logger.error(f"{API_NAME} [LIFECYCLE] Error processing event: {e}", exc_info=True)
         # Check if it's a database connection error
         if _is_database_connection_error(e):
             logger.warning(f"{API_NAME} Database connection error detected: {e}")
@@ -650,12 +721,15 @@ def handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
     are always created and used in the same loop context.
     """
     global _lambda_loop
+    print(f"{API_NAME} handler() called - START - PRINT STATEMENT")  # Force output
     logger.info(f"{API_NAME} handler() called - START")
     
     # Check if we're already in a running loop (shouldn't happen in real Lambda/SAM)
+    print(f"{API_NAME} Checking for running loop...")
     try:
         running_loop = asyncio.get_running_loop()
         # This is unexpected for Lambda - fail fast with clear error
+        print(f"{API_NAME} ERROR: Running loop detected!")
         logger.error(
             f"{API_NAME} CRITICAL: handler() called from within a running event loop. "
             f"Loop ID: {id(running_loop)}. This indicates a test harness or async caller issue. "
@@ -667,41 +741,56 @@ def handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
         )
     except RuntimeError:
         # No running loop - this is the expected case for Lambda/SAM
+        print(f"{API_NAME} No running loop (expected)")
         pass
     
     # Get or create the module-level dedicated loop
+    print(f"{API_NAME} Getting/creating event loop...")
     if _lambda_loop is None or _lambda_loop.is_closed():
+        print(f"{API_NAME} Creating new event loop...")
         _lambda_loop = asyncio.new_event_loop()
         asyncio.set_event_loop(_lambda_loop)
+        print(f"{API_NAME} Created new dedicated event loop: {id(_lambda_loop)}")
         logger.info(f"{API_NAME} Created new dedicated event loop: {id(_lambda_loop)}")
     else:
+        print(f"{API_NAME} Reusing existing event loop: {id(_lambda_loop)}")
         logger.debug(f"{API_NAME} Reusing existing event loop: {id(_lambda_loop)}")
     
     # Run the async handler in the dedicated loop
+    print(f"{API_NAME} About to run async handler in event loop...")
     try:
         logger.info(f"{API_NAME} About to run async handler in event loop")
+        print(f"{API_NAME} Calling run_until_complete...")
         result = _lambda_loop.run_until_complete(_async_handler(event, context))
+        print(f"{API_NAME} run_until_complete returned successfully")
         logger.info(f"{API_NAME} Async handler completed successfully")
         return result
     except Exception as e:
+        print(f"{API_NAME} ERROR in handler: {e}")
         logger.error(f"{API_NAME} Error in handler: {e}", exc_info=True)
         raise
 
 
 async def _async_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
     """Async handler implementation."""
+    print(f"{API_NAME} _async_handler called - PRINT")
     logger.info(f"{API_NAME} _async_handler called")
     # Extract path and method
+    print(f"{API_NAME} Extracting request context...")
     request_context = event.get("requestContext", {})
     http_context = request_context.get("http", {})
     path = http_context.get("path", "")
     method = http_context.get("method", "")
+    print(f"{API_NAME} Path: {path}, Method: {method}")
     logger.info(f"{API_NAME} Path: {path}, Method: {method}")
     
     # Extract request ID for correlation
+    print(f"{API_NAME} Extracting request ID...")
     request_id = request_context.get("requestId", context.aws_request_id if context else "unknown")
+    print(f"{API_NAME} Request ID: {request_id}")
     
     # Log with structured context
+    print(f"{API_NAME} Logging request...")
     logger.info(
         f"{API_NAME} Lambda request",
         extra={
@@ -712,14 +801,19 @@ async def _async_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
     )
     
     # Route requests
+    print(f"{API_NAME} Routing request to path: {path}")
     logger.info(f"{API_NAME} Routing request to path: {path}")
     if path == "/api/v1/events/health" and method == "GET":
+        print(f"{API_NAME} Routing to health check")
         logger.info(f"{API_NAME} Routing to health check")
         return await _handle_health_check()
     elif path == "/api/v1/events" and method == "POST":
+        print(f"{API_NAME} Routing to process event")
         logger.info(f"{API_NAME} Routing to process event")
         body = event.get("body", "{}")
+        print(f"{API_NAME} Body length: {len(body)}")
         logger.info(f"{API_NAME} Body length: {len(body)}")
+        print(f"{API_NAME} Calling _handle_process_event...")
         return await _handle_process_event(body)
     elif path == "/api/v1/events/bulk" and method == "POST":
         body = event.get("body", "[]")

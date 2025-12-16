@@ -57,24 +57,41 @@ class EventProcessingService:
         All database operations (business_events, event_headers, entities) are executed
         atomically within a single transaction. If any operation fails, all changes are rolled back.
         """
-        logger.info(f"{self.api_name} Processing event: {event.event_header.event_name}")
+        import asyncio
+        
+        # Log event loop ID for debugging
+        try:
+            process_loop = asyncio.get_running_loop()
+            process_loop_id = id(process_loop)
+            logger.debug(f"{self.api_name} process_event running in event loop: {process_loop_id}")
+        except RuntimeError:
+            process_loop_id = "unknown"
+            logger.warning(f"{self.api_name} No running loop detected in process_event")
         
         event_id = event.event_header.uuid or f"event-{datetime.utcnow().isoformat()}"
+        logger.info(f"{self.api_name} Starting event processing: {event_id} (loop_id={process_loop_id})")
         
         # Get connection from factory
+        logger.debug(f"{self.api_name} Calling connection factory (loop_id={process_loop_id})")
         conn = await self.connection_factory()
+        logger.info(f"{self.api_name} Connection obtained successfully (loop_id={process_loop_id})")
         
         try:
+            logger.debug(f"{self.api_name} Starting transaction (loop_id={process_loop_id})")
             async with conn.transaction():
+                logger.debug(f"{self.api_name} Transaction started, saving business event")
                 try:
                     # 1. Save entire event to business_events table
                     await self.save_business_event(event, conn=conn)
+                    logger.debug(f"{self.api_name} Business event saved")
                     
                     # 2. Save event header to event_headers table
                     await self.save_event_header(event, event_id, conn=conn)
+                    logger.debug(f"{self.api_name} Event header saved")
                     
                     # 3. Extract and save entities to their respective tables
-                    for entity in event.entities:
+                    for idx, entity in enumerate(event.entities):
+                        logger.debug(f"{self.api_name} Processing entity {idx+1}/{len(event.entities)}")
                         await self.process_entity_update(entity, event_id, conn=conn)
                     
                     self._log_persisted_event_count()
@@ -85,6 +102,7 @@ class EventProcessingService:
                     raise
         finally:
             # Clean up connection
+            logger.debug(f"{self.api_name} Cleaning up connection (loop_id={process_loop_id})")
             if self.should_close_connection:
                 # Check if connection is from a pool (has _pool attribute)
                 if hasattr(conn, '_pool') and conn._pool is not None:
