@@ -244,7 +244,7 @@ header_data: {
 }
 ```
 
-**In Kafka (raw-business-events topic)**:
+**In Kafka (raw-event-headers topic)**:
 
 The event structure in Kafka depends on the connector configuration:
 
@@ -391,7 +391,7 @@ For detailed Flink setup, configuration, and SQL job deployment, see [CONFLUENT_
 
 **Overview**:
 
-- **Consumes from Kafka**: Reads events from `raw-business-events` topic (acts as Kafka consumer)
+- **Consumes from Kafka**: Reads events from `raw-event-headers` topic (acts as Kafka consumer)
 - **Applies Filtering**: Applies filtering logic defined in Flink SQL statements using relational columns (`event_type`, `__op`)
 - **Writes to Kafka**: Writes filtered events to consumer-specific Kafka topics (acts as Kafka producer)
   - `filtered-loan-created-events`
@@ -550,7 +550,7 @@ See `consumers/loan-consumer/consumer.py` for a complete implementation example.
 
 - Filtered topics are automatically created by Flink when it first writes to them
 - No manual topic creation is required for filtered topics
-- Only the `raw-business-events` topic needs to be created manually before deploying the CDC connector
+- Only the `raw-event-headers` topic needs to be created manually before deploying the CDC connector
 
 **Consumer Deployment**:
 

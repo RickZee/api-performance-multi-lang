@@ -240,6 +240,27 @@ confluent kafka topic list
 confluent flink statement list --compute-pool <compute-pool-id>
 ```
 
+### Event Headers CDC Verification
+
+To quickly verify that CDC is capturing changes from the `event_headers` table:
+
+```bash
+# Quick verification script (checks connector, topics, Flink, replication slots)
+./cdc-streaming/scripts/quick-verify-event-headers-cdc.sh
+
+# Monitor the full pipeline
+./cdc-streaming/scripts/monitor-pipeline.sh
+
+# Verify replication slot specifically
+./cdc-streaming/scripts/verify-event-headers-replication-slot.sh
+```
+
+The verification scripts check:
+- CDC connector is running and configured for `event_headers` table
+- `raw-event-headers` topic exists and receives messages
+- Flink SQL statements are processing events
+- Database replication slot exists and is active (if database credentials provided)
+
 ### Database Validation via Bastion Host
 
 To verify events are being stored in the database, use one of these methods:

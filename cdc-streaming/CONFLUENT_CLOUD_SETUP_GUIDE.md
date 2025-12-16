@@ -837,13 +837,13 @@ FROM `raw-event-headers`
 WHERE `event_type` = 'LoanPaymentSubmitted' AND `__op` = 'c';
 
 INSERT INTO `filtered-car-created-events`
-SELECT CAST(`id` AS BYTES) AS `key`, `id`, `event_name`, `event_type`, `created_date`, `saved_date`, `event_data`, `__op`, `__table`
-FROM `raw-business-events`
+SELECT CAST(`id` AS BYTES) AS `key`, `id`, `event_name`, `event_type`, `created_date`, `saved_date`, `header_data`, `__op`, `__table`
+FROM `raw-event-headers`
 WHERE `event_type` = 'CarCreated' AND `__op` = 'c';
 
 INSERT INTO `filtered-service-events`
-SELECT CAST(`id` AS BYTES) AS `key`, `id`, `event_name`, `event_type`, `created_date`, `saved_date`, `event_data`, `__op`, `__table`
-FROM `raw-business-events`
+SELECT CAST(`id` AS BYTES) AS `key`, `id`, `event_name`, `event_type`, `created_date`, `saved_date`, `header_data`, `__op`, `__table`
+FROM `raw-event-headers`
 WHERE `event_type` = 'CarServiceDone' AND `__op` = 'c';
 ```
 
@@ -1239,7 +1239,7 @@ docker run --rm -i -e PGPASSWORD="$DATABASE_PASSWORD" postgres:15-alpine \
 #### Issue 5: Flink Source Table Schema Registry Mismatch
 
 **Symptoms:**
-- Flink statement fails with: `"Schema Registry subject 'raw-business-events-value' doesn't match the existing one"`
+- Flink statement fails with: `"Schema Registry subject 'raw-event-headers-value' doesn't match the existing one"`
 - Cannot recreate source table after cleanup
 - Source table status is FAILED
 - Existing RUNNING statements may still work but stop processing new events
@@ -1249,11 +1249,11 @@ docker run --rm -i -e PGPASSWORD="$DATABASE_PASSWORD" postgres:15-alpine \
 ```bash
 # Option 1: Delete and recreate Schema Registry subject (if safe to do)
 # Note: This will delete existing schemas for the topic
-confluent schema-registry subject delete raw-business-events-value --force
+confluent schema-registry subject delete raw-event-headers-value --force
 
 # Then recreate the source table
-SOURCE_SQL="CREATE TABLE \`raw-business-events\` ( \`id\` STRING, \`event_name\` STRING, \`event_type\` STRING, \`created_date\` STRING, \`saved_date\` STRING, \`event_data\` STRING, \`__op\` STRING, \`__table\` STRING, \`__ts_ms\` BIGINT ) WITH ( 'connector' = 'confluent', 'value.format' = 'json-registry', 'scan.startup.mode' = 'earliest-offset' );"
-confluent flink statement create "source-raw-business-events" \
+SOURCE_SQL="CREATE TABLE \`raw-event-headers\` ( \`id\` STRING, \`event_name\` STRING, \`event_type\` STRING, \`created_date\` STRING, \`saved_date\` STRING, \`header_data\` STRING, \`__op\` STRING, \`__table\` STRING, \`__ts_ms\` BIGINT ) WITH ( 'connector' = 'confluent', 'value.format' = 'json-registry', 'scan.startup.mode' = 'earliest-offset' );"
+confluent flink statement create "source-raw-event-headers" \
   --compute-pool <compute-pool-id> \
   --database <kafka-cluster-id> \
   --sql "$SOURCE_SQL"
@@ -1299,7 +1299,7 @@ if result.returncode == 0:
     data = json.loads(result.stdout)
     
     # Source table status
-    source_tables = [s for s in data if 'source-raw-business-events' in s.get('name', '')]
+    source_tables = [s for s in data if 'source-raw-event-headers' in s.get('name', '')]
     print("Source Tables:")
     for s in source_tables:
         print(f"  {s['name']}: {s.get('status')} - {s.get('status_detail', 'N/A')[:100]}")
@@ -1347,12 +1347,12 @@ The Flink statement expects CDC metadata fields (`__op`, `__table`, `__ts_ms`) t
 **Example Flink Statement:**
 ```sql
 INSERT INTO `filtered-service-events`
-SELECT `id`, `event_name`, `event_type`, `created_date`, `saved_date`, `event_data`, `__op`, `__table`
-FROM `raw-business-events`
+SELECT `id`, `event_name`, `event_type`, `created_date`, `saved_date`, `header_data`, `__op`, `__table`
+FROM `raw-event-headers`
 WHERE `event_name` = 'CarServiceDone' AND `__op` = 'c';
 ```
 
-**Expected Data Structure in raw-business-events:**
+**Expected Data Structure in raw-event-headers:**
 ```json
 {
   "id": "uuid",
@@ -1360,9 +1360,9 @@ WHERE `event_name` = 'CarServiceDone' AND `__op` = 'c';
   "event_type": "CarServiceDone",
   "created_date": "2025-12-11T21:26:10Z",
   "saved_date": "2025-12-11T21:26:10Z",
-  "event_data": "{...}",
+  "header_data": "{...}",
   "__op": "c",           // ← REQUIRED by Flink filter
-  "__table": "business_events",
+  "__table": "event_headers",
   "__ts_ms": 1733941570000
 }
 ```
@@ -1423,7 +1423,7 @@ confluent connect describe <connector-name> --output json | \
 
 ```bash
 # Check source table status
-confluent flink statement list --compute-pool <compute-pool-id> | grep source-raw-business-events
+confluent flink statement list --compute-pool <compute-pool-id> | grep source-raw-event-headers
 
 # Check statement offsets and timestamps
 confluent flink statement describe <statement-name> | grep -E "(Latest Offsets|Timestamp)"
@@ -1443,7 +1443,7 @@ confluent flink statement stop <statement-name>
 confluent flink statement resume <statement-name>
 
 # 3. Check if source topic has new events
-confluent kafka topic describe raw-business-events
+confluent kafka topic describe raw-event-headers
 
 # 4. Verify CDC connector is sending events
 confluent connector describe <connector-name> --output json | jq '.status'
@@ -1464,7 +1464,7 @@ When deploying Flink INSERT statements via CLI, if the SQL extraction process mi
 ```sql
 -- WRONG: Missing INSERT INTO clause
 SELECT CAST(`id` AS BYTES) AS `key`, `id`, `event_name`, `event_type`, ...
-FROM `raw-business-events`
+FROM `raw-event-headers`
 WHERE `event_type` = 'LoanCreated' AND `__op` = 'c';
 ```
 
@@ -1473,7 +1473,7 @@ WHERE `event_type` = 'LoanCreated' AND `__op` = 'c';
 -- CORRECT: Includes INSERT INTO clause
 INSERT INTO `filtered-loan-created-events`
 SELECT CAST(`id` AS BYTES) AS `key`, `id`, `event_name`, `event_type`, ...
-FROM `raw-business-events`
+FROM `raw-event-headers`
 WHERE `event_type` = 'LoanCreated' AND `__op` = 'c';
 ```
 
@@ -1549,10 +1549,130 @@ confluent flink statement list --compute-pool <compute-pool-id> --output json | 
 bash scripts/deploy-business-events-flink.sh
 ```
 
-#### Issue 12: Connector Not Capturing Changes
+#### Issue 12: Connector Connection Error - "no pg_hba.conf entry"
 
 **Symptoms:**
-- Connector is RUNNING but no messages in raw-business-events
+- Connector status is FAILED
+- Error message: "Could not connect to the database because there is no pg_hba.conf entry for host..."
+- This error appears even though security group allows all IPs (0.0.0.0/0)
+
+**Root Cause:**
+In Aurora PostgreSQL, the "pg_hba.conf" error is misleading. Aurora doesn't use pg_hba.conf in the traditional way. This error typically indicates:
+1. **Missing REPLICATION privilege**: The database user needs REPLICATION privilege for CDC connectors
+2. **Network routing issue**: Subnets may not have internet gateway routes (even if security group allows access)
+3. **Authentication failure**: Database credentials may be incorrect
+
+**Diagnosis:**
+
+```bash
+# Run comprehensive troubleshooting script
+./cdc-streaming/scripts/troubleshoot-aurora-connectivity.sh <cluster-id> <connector-id>
+
+# Check if user has REPLICATION privilege
+psql -h <aurora-endpoint> -U postgres -d car_entities \
+  -c "SELECT rolname, rolreplication FROM pg_roles WHERE rolname = 'postgres';"
+```
+
+**Solutions:**
+
+**Solution 1: Grant rds_replication Role (Aurora PostgreSQL Method)**
+
+In Aurora PostgreSQL, use the `rds_replication` role instead of REPLICATION privilege:
+
+```bash
+# Use the Python fix script (recommended - no Docker required)
+python3 cdc-streaming/scripts/fix-postgres-replication-privileges.py
+
+# Or manually via Python:
+python3 << 'EOF'
+import asyncio
+import asyncpg
+
+async def grant_role():
+    conn = await asyncpg.connect(
+        host="<aurora-endpoint>",
+        user="postgres",
+        password="<password>",
+        database="car_entities",
+        ssl='require'
+    )
+    await conn.execute("GRANT rds_replication TO postgres;")
+    await conn.close()
+
+asyncio.run(grant_role())
+EOF
+
+# Verify:
+python3 << 'EOF'
+import asyncio
+import asyncpg
+
+async def check_role():
+    conn = await asyncpg.connect(
+        host="<aurora-endpoint>",
+        user="postgres",
+        password="<password>",
+        database="car_entities",
+        ssl='require'
+    )
+    has_role = await conn.fetchval(
+        "SELECT COUNT(*) > 0 FROM pg_roles r1, pg_roles r2, pg_auth_members m "
+        "WHERE r1.rolname = 'postgres' AND m.member = r1.oid AND m.roleid = r2.oid "
+        "AND r2.rolname = 'rds_replication'"
+    )
+    print(f"Has rds_replication role: {has_role}")
+    await conn.close()
+
+asyncio.run(check_role())
+EOF
+```
+
+**Note**: In Aurora PostgreSQL, the master user has `rds_superuser` role (not full superuser), which allows granting `rds_replication` role. The traditional `ALTER USER ... WITH REPLICATION` command requires full superuser privileges and won't work in Aurora.
+
+**Solution 2: Verify Network Configuration**
+
+```bash
+# Check security group allows 0.0.0.0/0 or Confluent Cloud IPs
+aws ec2 describe-security-groups --group-ids <sg-id> \
+  --query 'SecurityGroups[0].IpPermissions[?FromPort==`5432`]'
+
+# Check subnets have internet gateway routes
+aws ec2 describe-route-tables \
+  --filters "Name=association.subnet-id,Values=<subnet-id>" \
+  --query 'RouteTables[0].Routes[?GatewayId!=`null` && GatewayId!=`local`]'
+
+# Verify instance is in public subnets (if publicly_accessible = true)
+aws rds describe-db-instances \
+  --filters "Name=db-cluster-id,Values=<cluster-id>" \
+  --query 'DBInstances[0].PubliclyAccessible'
+```
+
+**Solution 3: Restart Connector After Fix**
+
+```bash
+# Pause and resume connector to retry connection
+confluent connect cluster pause <connector-id>
+sleep 5
+confluent connect cluster resume <connector-id>
+
+# Wait and check status
+sleep 10
+confluent connect cluster describe <connector-id>
+```
+
+**Prevention:**
+- Always grant REPLICATION privilege to database users used by CDC connectors
+- Use the Terraform module which should configure this automatically
+- Document this requirement in setup guides
+
+**Related Documentation:**
+- See `cdc-streaming/scripts/troubleshoot-aurora-connectivity.sh` for comprehensive diagnostics
+- See `cdc-streaming/scripts/fix-postgres-replication-privileges.sh` for automated fix
+
+#### Issue 13: Connector Not Capturing Changes
+
+**Symptoms:**
+- Connector is RUNNING but no messages in raw-event-headers
 - PostgreSQL changes not appearing in Kafka
 
 **Solutions:**
@@ -1781,7 +1901,7 @@ SELECT * FROM pg_replication_slots;
 ### Common Gotchas
 
 1. **Reserved Keywords in Flink**: `model`, `timestamp`, `date`, `time` - use backticks or rename columns
-2. **Topic Creation**: Only `raw-business-events` topic must exist before deploying connectors. Filtered topics are automatically created by Flink when it writes to them.
+2. **Topic Creation**: Only `raw-event-headers` topic must exist before deploying connectors. Filtered topics are automatically created by Flink when it writes to them.
 3. **Credentials in Multiple Places**: Kafka Connect, Flink SQL, Consumer configs all need auth
 4. **CLI Token Expiration**: `confluent login` tokens expire; re-authenticate if commands fail
 5. **Multiple Statements**: Confluent Cloud Flink CLI doesn't handle multiple CREATE/INSERT well - use Web Console
@@ -1976,8 +2096,8 @@ Replicate topic structure in secondary region:
 # Set cluster context
 confluent kafka cluster use <west-cluster-id>
 
-# Create raw-business-events topic (only topic that needs manual creation)
-confluent kafka topic create raw-business-events --partitions 6
+# Create raw-event-headers topic (only topic that needs manual creation)
+confluent kafka topic create raw-event-headers --partitions 6
 
 # Note: Filtered topics are automatically created by Flink when it writes to them.
 # No manual creation is required for filtered topics in secondary region.
@@ -1987,13 +2107,13 @@ confluent kafka topic create raw-business-events --partitions 6
 
 ```hcl
 # terraform/confluent/modules/region/topics.tf
-# Note: Only raw-business-events needs to be created manually.
+# Note: Only raw-event-headers needs to be created manually.
 # Filtered topics are automatically created by Flink when it writes to them.
-resource "confluent_kafka_topic" "raw_business_events" {
+resource "confluent_kafka_topic" "raw_event_headers" {
   kafka_cluster {
     id = confluent_kafka_cluster.cluster.id
   }
-  topic_name       = "raw-business-events"
+  topic_name       = "raw-event-headers"
   partitions_count = 6
   rest_endpoint    = confluent_kafka_cluster.cluster.rest_endpoint
   credentials {
