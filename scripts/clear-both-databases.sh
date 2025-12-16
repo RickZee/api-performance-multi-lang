@@ -141,6 +141,7 @@ if [ -f "$PROJECT_ROOT/scripts/query-dsql.sh" ]; then
                 echo "  Clearing $TABLE..."
                 
                 # Build command for this table
+                # Use fully qualified table name with schema: car_entities_schema.table_name
                 COMMANDS_JSON=$(jq -n \
                     --arg dsql_host "$DSQL_HOST" \
                     --arg aws_region "$AWS_REGION" \
@@ -150,7 +151,7 @@ if [ -f "$PROJECT_ROOT/scripts/query-dsql.sh" ]; then
                         "export AWS_REGION=" + $aws_region,
                         "TOKEN=$(aws dsql generate-db-connect-admin-auth-token --region $AWS_REGION --hostname $DSQL_HOST)",
                         "export PGPASSWORD=$TOKEN",
-                        "psql -h $DSQL_HOST -U admin -d postgres -p 5432 -c \"DELETE FROM " + $table + ";\""
+                        "psql -h $DSQL_HOST -U admin -d postgres -p 5432 -c \"SET search_path TO car_entities_schema; DELETE FROM " + $table + ";\""
                     ]')
                 
                 # Send command to bastion host
@@ -205,8 +206,8 @@ if [ -f "$PROJECT_ROOT/scripts/query-dsql.sh" ]; then
                         while [ $ITERATION -lt $MAX_ITERATIONS ]; do
                             ITERATION=$((ITERATION + 1))
                             
-                            # Build batch delete command
-                            BATCH_DELETE_SQL="DELETE FROM $TABLE WHERE id IN (SELECT id FROM $TABLE LIMIT $BATCH_SIZE);"
+                            # Build batch delete command with schema
+                            BATCH_DELETE_SQL="SET search_path TO car_entities_schema; DELETE FROM $TABLE WHERE id IN (SELECT id FROM $TABLE LIMIT $BATCH_SIZE);"
                             
                             BATCH_COMMANDS_JSON=$(jq -n \
                                 --arg dsql_host "$DSQL_HOST" \

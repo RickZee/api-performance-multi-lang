@@ -34,15 +34,32 @@ logger = logging.getLogger(__name__)
 _service: EventProcessingService | None = None
 _config = None
 
-# Module-level dedicated event loop for Lambda handler
-# This ensures we always use the same loop for asyncpg pool creation/usage
-_lambda_loop: Optional[asyncio.AbstractEventLoop] = None
+# Removed module-level event loop - using asyncio.run() per invocation instead
 _lambda_client = None
+
+# Track import errors (for error handling in handler)
+_import_error: Optional[Exception] = None
 
 
 async def _initialize_service():
-    """Initialize service (no pool, connections created per invocation)."""
+    """Initialize service with direct connections (no pooling).
+    
+    DSQL uses direct connections per request to avoid compatibility issues
+    (e.g., pg_advisory_unlock_all).
+    
+    Creates a fresh connection factory that uses the current event loop context,
+    preventing loop mismatch issues.
+    """
     global _service, _config, _lambda_client
+    
+    # Get current event loop ID for logging
+    try:
+        current_loop = asyncio.get_running_loop()
+        loop_id = id(current_loop)
+        logger.debug(f"{API_NAME} Initializing service in event loop: {loop_id}")
+    except RuntimeError:
+        loop_id = "unknown"
+        logger.warning(f"{API_NAME} No running event loop detected during service initialization")
     
     if _service is None:
         _config = load_lambda_config()
@@ -61,13 +78,20 @@ async def _initialize_service():
         # Initialize repositories and service with connection factory
         business_event_repo = BusinessEventRepository()
         
-        # Create connection factory for direct connections (DSQL pattern)
+        # Create connection factory that uses current event loop context
+        # This factory will be called later, ensuring it uses the same loop
         async def connection_factory():
-            print(f"{API_NAME} connection_factory called - PRINT")
-            print(f"{API_NAME} Calling get_connection...")
-            conn = await get_connection(_config)
-            print(f"{API_NAME} get_connection returned successfully")
-            return conn
+            # Verify we're in the same loop context
+            try:
+                factory_loop = asyncio.get_running_loop()
+                factory_loop_id = id(factory_loop)
+                logger.debug(f"{API_NAME} Connection factory called in event loop: {factory_loop_id}")
+                if loop_id != "unknown" and factory_loop_id != loop_id:
+                    logger.warning(f"{API_NAME} Loop ID changed: init={loop_id}, factory={factory_loop_id}")
+            except RuntimeError:
+                logger.warning(f"{API_NAME} No running loop in connection factory")
+            
+            return await get_connection(_config)
         
         _service = EventProcessingService(
             business_event_repo=business_event_repo,
@@ -708,121 +732,100 @@ async def _handle_bulk_events(event_body: str) -> Dict[str, Any]:
     )
 
 
-# Module-level dedicated event loop for Lambda handler
-# This ensures we always use the same loop for asyncpg pool creation/usage
-_lambda_loop: Optional[asyncio.AbstractEventLoop] = None
-
-
 def handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
     """
     Main Lambda handler for API Gateway HTTP API v2.
     
-    Uses a deterministic single event loop strategy to ensure asyncpg pools
-    are always created and used in the same loop context.
+    Uses asyncio.run() to create a fresh event loop per invocation.
+    This ensures asyncpg connections are created and used in the same loop context,
+    preventing connection hangs due to loop mismatches.
     """
-    global _lambda_loop
-    print(f"{API_NAME} handler() called - START - PRINT STATEMENT")  # Force output
-    logger.info(f"{API_NAME} handler() called - START")
+    global _import_error
     
-    # Check if we're already in a running loop (shouldn't happen in real Lambda/SAM)
-    print(f"{API_NAME} Checking for running loop...")
+    # Check for import errors first
+    if _import_error is not None:
+        logger.error(f"Handler called but imports failed: {_import_error}", exc_info=True)
+        return {
+            "statusCode": 500,
+            "headers": {"Content-Type": "application/json"},
+            "body": json.dumps({
+                "error": "Internal Server Error",
+                "message": f"Module import failed: {str(_import_error)}",
+                "status": 500,
+            }),
+        }
+    
     try:
-        running_loop = asyncio.get_running_loop()
-        # This is unexpected for Lambda - fail fast with clear error
-        print(f"{API_NAME} ERROR: Running loop detected!")
-        logger.error(
-            f"{API_NAME} CRITICAL: handler() called from within a running event loop. "
-            f"Loop ID: {id(running_loop)}. This indicates a test harness or async caller issue. "
-            f"For async callers, use _async_handler() directly instead of handler()."
-        )
-        raise RuntimeError(
-            "Lambda handler cannot be called from within a running event loop. "
-            "Use _async_handler() directly for async contexts, or fix the test harness."
-        )
-    except RuntimeError:
-        # No running loop - this is the expected case for Lambda/SAM
-        print(f"{API_NAME} No running loop (expected)")
-        pass
-    
-    # Get or create the module-level dedicated loop
-    print(f"{API_NAME} Getting/creating event loop...")
-    if _lambda_loop is None or _lambda_loop.is_closed():
-        print(f"{API_NAME} Creating new event loop...")
-        _lambda_loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(_lambda_loop)
-        print(f"{API_NAME} Created new dedicated event loop: {id(_lambda_loop)}")
-        logger.info(f"{API_NAME} Created new dedicated event loop: {id(_lambda_loop)}")
-    else:
-        print(f"{API_NAME} Reusing existing event loop: {id(_lambda_loop)}")
-        logger.debug(f"{API_NAME} Reusing existing event loop: {id(_lambda_loop)}")
-    
-    # Run the async handler in the dedicated loop
-    print(f"{API_NAME} About to run async handler in event loop...")
-    try:
-        logger.info(f"{API_NAME} About to run async handler in event loop")
-        print(f"{API_NAME} Calling run_until_complete...")
-        result = _lambda_loop.run_until_complete(_async_handler(event, context))
-        print(f"{API_NAME} run_until_complete returned successfully")
-        logger.info(f"{API_NAME} Async handler completed successfully")
-        return result
+        # Use asyncio.run() to create a fresh event loop per invocation
+        # This ensures all async operations (including asyncpg connections) 
+        # are created and used in the same loop context
+        return asyncio.run(_async_handler(event, context))
     except Exception as e:
-        print(f"{API_NAME} ERROR in handler: {e}")
-        logger.error(f"{API_NAME} Error in handler: {e}", exc_info=True)
-        raise
+        # Log to CloudWatch before returning error response
+        logger.error(f"{API_NAME} Handler initialization or execution failed: {e}", exc_info=True)
+        # Return proper error response instead of raising
+        return _create_response(
+            500,
+            {
+                "error": "Internal Server Error",
+                "message": "An error occurred processing the request",
+                "status": 500,
+            },
+        )
 
 
 async def _async_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
     """Async handler implementation."""
-    print(f"{API_NAME} _async_handler called - PRINT")
-    logger.info(f"{API_NAME} _async_handler called")
-    # Extract path and method
-    print(f"{API_NAME} Extracting request context...")
-    request_context = event.get("requestContext", {})
-    http_context = request_context.get("http", {})
-    path = http_context.get("path", "")
-    method = http_context.get("method", "")
-    print(f"{API_NAME} Path: {path}, Method: {method}")
-    logger.info(f"{API_NAME} Path: {path}, Method: {method}")
-    
-    # Extract request ID for correlation
-    print(f"{API_NAME} Extracting request ID...")
-    request_id = request_context.get("requestId", context.aws_request_id if context else "unknown")
-    print(f"{API_NAME} Request ID: {request_id}")
-    
-    # Log with structured context
-    print(f"{API_NAME} Logging request...")
-    logger.info(
-        f"{API_NAME} Lambda request",
-        extra={
-            "request_id": request_id,
-            "method": method,
-            "path": path,
-        }
-    )
-    
-    # Route requests
-    print(f"{API_NAME} Routing request to path: {path}")
-    logger.info(f"{API_NAME} Routing request to path: {path}")
-    if path == "/api/v1/events/health" and method == "GET":
-        print(f"{API_NAME} Routing to health check")
-        logger.info(f"{API_NAME} Routing to health check")
-        return await _handle_health_check()
-    elif path == "/api/v1/events" and method == "POST":
-        print(f"{API_NAME} Routing to process event")
-        logger.info(f"{API_NAME} Routing to process event")
-        body = event.get("body", "{}")
-        print(f"{API_NAME} Body length: {len(body)}")
-        logger.info(f"{API_NAME} Body length: {len(body)}")
-        print(f"{API_NAME} Calling _handle_process_event...")
-        return await _handle_process_event(body)
-    elif path == "/api/v1/events/bulk" and method == "POST":
-        body = event.get("body", "[]")
-        return await _handle_bulk_events(body)
-    else:
-        return _create_response(
-            404,
-            {
-                "error": "Not Found",
-                "status": 404,
-            },
+    try:
+        # Log event loop ID for debugging
+        try:
+            handler_loop = asyncio.get_running_loop()
+            handler_loop_id = id(handler_loop)
+            logger.debug(f"{API_NAME} Async handler running in event loop: {handler_loop_id}")
+        except RuntimeError:
+            logger.warning(f"{API_NAME} No running event loop detected in async handler")
+        
+        # Extract path and method
+        request_context = event.get("requestContext", {})
+        http_context = request_context.get("http", {})
+        path = http_context.get("path", "")
+        method = http_context.get("method", "")
+        logger.info(f"{API_NAME} Path: {path}, Method: {method}")
+        
+        # Extract request ID for correlation
+        request_id = request_context.get("requestId", context.aws_request_id if context else "unknown")
+        
+        # Log with structured context
+        logger.info(
+            f"{API_NAME} Lambda request",
+            extra={
+                "request_id": request_id,
+                "method": method,
+                "path": path,
+            }
         )
+        
+        # Route requests
+        logger.info(f"{API_NAME} Routing request to path: {path}")
+        if path == "/api/v1/events/health" and method == "GET":
+            logger.info(f"{API_NAME} Routing to health check")
+            return await _handle_health_check()
+        elif path == "/api/v1/events" and method == "POST":
+            logger.info(f"{API_NAME} Routing to process event")
+            body = event.get("body", "{}")
+            logger.info(f"{API_NAME} Body length: {len(body)}")
+            return await _handle_process_event(body)
+        elif path == "/api/v1/events/bulk" and method == "POST":
+            body = event.get("body", "[]")
+            return await _handle_bulk_events(body)
+        else:
+            return _create_response(
+                404,
+                {
+                    "error": "Not Found",
+                    "status": 404,
+                },
+            )
+    except Exception as e:
+        logger.error(f"{API_NAME} Error in async handler: {e}", exc_info=True)
+        raise

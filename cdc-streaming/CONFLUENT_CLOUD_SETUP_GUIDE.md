@@ -23,11 +23,10 @@ This guide provides a comprehensive, step-by-step walkthrough for setting up the
 
 ### Advanced Topics (Optional)
 12. [Multi-Region Infrastructure Setup](#multi-region-infrastructure-setup)
-13. [AWS PrivateLink Connectivity](#aws-privatelink-connectivity)
-14. [Multi-Region Cluster Linking](#multi-region-cluster-linking)
-15. [Multi-Region Flink Deployment](#multi-region-flink-deployment)
-16. [Advanced CI/CD Integration](#advanced-cicd-integration)
-17. [Enterprise Features and Best Practices](#enterprise-features-and-best-practices)
+13. [Multi-Region Cluster Linking](#multi-region-cluster-linking)
+14. [Multi-Region Flink Deployment](#multi-region-flink-deployment)
+15. [Advanced CI/CD Integration](#advanced-cicd-integration)
+16. [Enterprise Features and Best Practices](#enterprise-features-and-best-practices)
 
 ## Prerequisites
 
@@ -2006,103 +2005,6 @@ resource "confluent_kafka_topic" "raw_business_events" {
     "retention.ms" = "604800000"  # 7 days
   }
 }
-```
-
-## AWS PrivateLink Connectivity
-
-### Overview
-
-AWS PrivateLink provides secure, private connectivity between your VPC and Confluent Cloud without exposing traffic to the public internet.
-
-### Step 1: Create Confluent Network
-
-**Via Console:**
-1. Navigate to: **Network management** → **Add network**
-2. Select **AWS** → **PrivateLink**
-3. Specify /16 CIDR (non-overlapping, e.g., 10.1.0.0/16)
-4. Select availability zones
-
-**Via Terraform:**
-
-```hcl
-# terraform/confluent/network.tf
-resource "confluent_network" "aws_privatelink" {
-  display_name     = "aws-privatelink-network"
-  cloud            = "AWS"
-  region           = "us-east-1"
-  connection_types = ["PRIVATELINK"]
-  zones            = ["use1-az1", "use1-az2", "use1-az3"]
-  cidr             = "10.1.0.0/16"
-  environment {
-    id = confluent_environment.prod.id
-  }
-}
-```
-
-### Step 2: Create PrivateLink Attachment
-
-**Via Console:**
-1. Navigate to: **Network management** → **Attachments** → **Create attachment**
-2. Select your network and environment
-3. Note the service name provided by Confluent
-
-### Step 3: AWS Side Setup
-
-**Create VPC Endpoint:**
-
-```hcl
-# terraform/aws/privatelink.tf
-resource "aws_vpc_endpoint" "confluent" {
-  vpc_id              = var.vpc_id
-  service_name        = var.confluent_service_name  # From Confluent Console
-  vpc_endpoint_type   = "Interface"
-  subnet_ids          = var.subnet_ids
-  security_group_ids  = [aws_security_group.confluent.id]
-  
-  private_dns_enabled = true
-}
-
-resource "aws_security_group" "confluent" {
-  name        = "confluent-privatelink"
-  description = "Security group for Confluent PrivateLink"
-  vpc_id      = var.vpc_id
-
-  ingress {
-    from_port   = 443
-    to_port     = 443
-    protocol    = "tcp"
-    cidr_blocks = [var.vpc_cidr]
-  }
-
-  egress {
-    from_port   = 0
-    to_port     = 0
-    protocol    = "-1"
-    cidr_blocks = ["0.0.0.0/0"]
-  }
-}
-```
-
-### Step 4: Accept Connection
-
-**Via Console:**
-1. Navigate to: **Network management** → **Attachments**
-2. Find pending attachment from AWS
-3. Click **Accept** to approve the connection
-
-**Verification:**
-
-```bash
-# Test connectivity from EKS pod or EC2 instance
-curl -k https://flink.us-east-1.aws.private.confluent.cloud
-
-# Test Kafka connectivity
-kafka-console-producer \
-  --bootstrap-server pkc-xxxxx.us-east-1.aws.private.confluent.cloud:9092 \
-  --topic test-topic \
-  --producer-property security.protocol=SASL_SSL \
-  --producer-property sasl.mechanism=PLAIN \
-  --producer-property sasl.jaas.config='org.apache.kafka.common.security.plain.PlainLoginModule required username="<key>" password="<secret>";'
 ```
 
 ## Multi-Region Cluster Linking

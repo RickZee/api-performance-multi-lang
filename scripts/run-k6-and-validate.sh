@@ -50,6 +50,17 @@ echo -e "${BLUE}========================================${NC}"
 echo -e "${BLUE}k6 Batch Test with Validation${NC}"
 echo -e "${BLUE}========================================${NC}"
 
+# Clear database if requested (default: true)
+if [ "${CLEAR_DATABASE:-true}" = "true" ]; then
+    log_progress "Clearing database before test..." "$BLUE"
+    # The clear-both-databases.sh script clears both databases
+    # We'll let it run and it will handle errors gracefully
+    bash "$SCRIPT_DIR/clear-both-databases.sh" 2>&1 | grep -E "(Clearing|cleared|✅|❌|⚠️)" | head -30 || {
+        log_progress "Database clear had issues, continuing anyway..." "$YELLOW"
+    }
+    log_progress "Database clear complete" "$GREEN"
+fi
+
 # Pre-warm Lambdas if requested
 if [ "${PRE_WARM_LAMBDAS:-true}" = "true" ]; then
     log_progress "Pre-warming Lambda functions..." "$BLUE"

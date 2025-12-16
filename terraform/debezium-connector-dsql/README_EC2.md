@@ -60,7 +60,6 @@ chmod +x run-e2e.sh
 ```
 
 If it fails at the bootstrap reachability check, you likely need:
-- Confluent Cloud **IPv4** egress (NAT) OR
-- Confluent Cloud **PrivateLink** into your VPC
+- Confluent Cloud **IPv4** egress (NAT Gateway)
 
 

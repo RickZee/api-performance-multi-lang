@@ -131,7 +131,6 @@ You should see Debezium-formatted CDC events like:
 If EC2 can't reach Confluent Cloud:
 - **IPv6**: Your VPC has IPv6 enabled, but Confluent may require IPv4
 - **Solution**: Enable NAT Gateway in Terraform (`enable_nat_gateway = true`)
-- **Or**: Use Confluent Cloud PrivateLink (see `terraform/modules/confluent-privatelink/`)
 
 ## Manual Steps (Alternative)
 
