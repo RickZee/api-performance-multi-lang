@@ -260,18 +260,18 @@ async def _handle_process_event(event_body: str) -> Dict[str, Any]:
             },
         )
     
-    if not event.event_body.entities:
+    if not event.entities:
         return _create_response(
             422,
             {
-                "error": "Event body must contain at least one entity",
+                "error": "Event must contain at least one entity",
                 "status": 422,
             },
         )
     
     # Validate each entity (Pydantic models handle validation automatically)
-    for entity in event.event_body.entities:
-        if not entity.entity_type:
+    for entity in event.entities:
+        if not entity.entity_header.entity_type:
             return _create_response(
                 422,
                 {
@@ -279,7 +279,7 @@ async def _handle_process_event(event_body: str) -> Dict[str, Any]:
                     "status": 422,
                 },
             )
-        if not entity.entity_id:
+        if not entity.entity_header.entity_id:
             return _create_response(
                 422,
                 {
@@ -298,8 +298,8 @@ async def _handle_process_event(event_body: str) -> Dict[str, Any]:
             'event_id': event_id,
             'event_type': event_type,
             'event_name': event_name,
-            'entity_count': len(event.event_body.entities) if event.event_body.entities else 0,
-            'entity_types': [e.entity_type for e in event.event_body.entities] if event.event_body.entities else [],
+            'entity_count': len(event.entities) if event.entities else 0,
+            'entity_types': [e.entity_header.entity_type for e in event.entities] if event.entities else [],
         }
     )
     
@@ -521,14 +521,14 @@ async def _handle_bulk_events(event_body: str) -> Dict[str, Any]:
                 failed_count += 1
                 continue
             
-            if not event.event_body.entities:
+            if not event.entities:
                 failed_count += 1
                 continue
             
             # Validate entities (Pydantic models handle validation automatically)
             valid = True
-            for entity in event.event_body.entities:
-                if not entity.entity_type or not entity.entity_id:
+            for entity in event.entities:
+                if not entity.entity_header.entity_type or not entity.entity_header.entity_id:
                     valid = False
                     break
             
