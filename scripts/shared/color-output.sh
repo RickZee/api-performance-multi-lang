@@ -84,4 +84,3 @@ print_progress() {
         echo ""
     fi
 }
-

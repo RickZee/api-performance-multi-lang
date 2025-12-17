@@ -35,4 +35,3 @@ terraform {
     # This allows the backend to be configured without hardcoding values
   }
 }
-

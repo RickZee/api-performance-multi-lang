@@ -44,4 +44,3 @@ impl From<AppError> for tonic::Status {
         }
     }
 }
-

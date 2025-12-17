@@ -73,4 +73,3 @@ class MetadataClient:
             logger.error(f"Unexpected error during validation: {e}", exc_info=True)
             # Fail open on unexpected errors
             return {"valid": True, "version": ""}
-

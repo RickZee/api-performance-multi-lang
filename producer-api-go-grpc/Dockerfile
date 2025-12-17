@@ -39,4 +39,3 @@ EXPOSE 9092
 
 # Run the binary
 CMD ["./producer-api-go-grpc"]
-

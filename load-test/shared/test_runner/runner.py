@@ -428,4 +428,3 @@ class TestRunner:
         except Exception as e:
             if self.config.verbose:
                 self.console.print(f"[yellow]Warning: Failed to export results: {e}[/yellow]")
-

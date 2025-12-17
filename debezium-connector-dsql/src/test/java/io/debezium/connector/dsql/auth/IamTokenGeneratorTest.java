@@ -43,4 +43,3 @@ class IamTokenGeneratorTest {
         assertThat(tokenGenerator).isNotNull();
     }
 }
-

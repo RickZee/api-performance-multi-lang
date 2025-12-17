@@ -219,4 +219,3 @@ class TestRunnerUI:
     def print_info(self, message: str):
         """Print info message."""
         self.console.print(f"[cyan]ℹ[/cyan] {message}")
-

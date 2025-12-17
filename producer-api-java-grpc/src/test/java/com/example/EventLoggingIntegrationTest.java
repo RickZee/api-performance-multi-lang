@@ -260,4 +260,3 @@ class EventLoggingIntegrationTest {
                 .build();
     }
 }
-

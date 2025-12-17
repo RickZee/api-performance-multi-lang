@@ -162,4 +162,3 @@ public class DsqlSchema {
     public Map<String, Schema> getColumnSchemas() { return columnSchemas; }
     public String getTableName() { return tableName; }
 }
-

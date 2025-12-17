@@ -573,4 +573,3 @@ async fn test_process_event_with_empty_entity_id_should_return_error() {
 
     assert_eq!(response.status(), 422);
 }
-

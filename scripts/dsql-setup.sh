@@ -188,4 +188,3 @@ echo "2. Run k6 tests: k6 run --env API_URL=$DSQL_API_URL --env EVENTS_PER_TYPE=
 echo ""
 echo "To verify connection, run:"
 echo "  psql -h $DSQL_HOST -U admin -d car_entities -c 'SELECT COUNT(*) FROM business_events;'"
-

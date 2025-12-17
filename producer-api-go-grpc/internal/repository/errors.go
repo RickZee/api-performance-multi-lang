@@ -24,4 +24,3 @@ func NewDuplicateEventError(eventID string, message string) *DuplicateEventError
 		Message: message,
 	}
 }
-

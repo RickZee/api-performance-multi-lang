@@ -206,4 +206,3 @@ variable "max_bulk_events" {
   type        = number
   default     = 100
 }
-

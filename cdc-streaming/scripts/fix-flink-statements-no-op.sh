@@ -215,5 +215,3 @@ echo "  - WHERE clause: Removed 'AND __op = c' condition"
 echo ""
 echo -e "${CYAN}Next: Send test events and verify pipeline works${NC}"
 echo ""
-
-

@@ -90,4 +90,3 @@ wait $DSQL_PID
 echo -e "${GREEN}========================================${NC}"
 echo -e "${GREEN}Pre-warming Complete${NC}"
 echo -e "${GREEN}========================================${NC}"
-

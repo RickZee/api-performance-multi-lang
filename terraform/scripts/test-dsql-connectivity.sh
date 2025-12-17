@@ -97,4 +97,3 @@ PGPASSWORD="$TOKEN" psql \
 
 echo ""
 echo "=== Test Complete ==="
-

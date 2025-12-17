@@ -76,4 +76,3 @@ export LOG_LEVEL="info"
 # Start FastAPI with Uvicorn
 echo -e "${BLUE}Starting FastAPI on port 3000...${NC}"
 python -m uvicorn app:app --host 0.0.0.0 --port 3000
-

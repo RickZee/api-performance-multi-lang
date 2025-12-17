@@ -260,4 +260,3 @@ import { generateUUID, generateCarCreatedEvent } from './shared/event-generators
 This eliminates code duplication and ensures consistent event generation across all k6 tests.
 
 For detailed usage information, see the [Shared Scripts Documentation](../scripts/README.md#shared-scripts).
-

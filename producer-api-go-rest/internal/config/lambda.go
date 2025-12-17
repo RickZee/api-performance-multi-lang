@@ -57,4 +57,3 @@ func LoadLambdaConfig() (*LambdaConfig, error) {
 
 	return cfg, nil
 }
-

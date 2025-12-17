@@ -10,4 +10,3 @@ CREATE TABLE car_entities (
 
 -- Basic indexes
 CREATE INDEX IF NOT EXISTS idx_car_entities_entity_type ON car_entities(entity_type);
-

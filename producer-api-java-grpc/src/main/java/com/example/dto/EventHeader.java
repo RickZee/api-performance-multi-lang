@@ -16,4 +16,3 @@ public class EventHeader {
     private OffsetDateTime savedDate;
     private String eventType;
 }
-

@@ -291,4 +291,3 @@ echo "  1. Wait for connector to reach RUNNING status"
 echo "  2. Verify messages in raw-business-events topic have flat structure"
 echo "  3. Check Flink statements to see if they process messages"
 echo "  4. Monitor filtered topics for events"
-

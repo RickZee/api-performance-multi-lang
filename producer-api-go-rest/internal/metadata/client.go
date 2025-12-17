@@ -93,4 +93,3 @@ func (c *Client) ValidateEvent(event interface{}) (*ValidateEventResponse, error
 
 	return &validationResp, nil
 }
-

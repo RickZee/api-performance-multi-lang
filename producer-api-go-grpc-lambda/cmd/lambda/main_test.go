@@ -24,4 +24,3 @@ func TestParseMethodPath(t *testing.T) {
 	// This is tested in the grpcweb package, but we can add integration tests here
 	t.Skip("Skipping test - path parsing is tested in grpcweb package")
 }
-

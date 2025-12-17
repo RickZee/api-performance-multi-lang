@@ -176,4 +176,3 @@ if __name__ == '__main__':
         print("0|0|0|0.00|0.00|0.00|0.00|0.00", file=sys.stderr)
         sys.exit(1)
     extract_metrics(sys.argv[1])
-

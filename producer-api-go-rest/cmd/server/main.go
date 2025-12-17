@@ -129,4 +129,3 @@ func corsMiddleware() gin.HandlerFunc {
 		c.Next()
 	}
 }
-

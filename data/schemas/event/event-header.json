@@ -33,4 +33,3 @@
   "required": ["uuid", "eventName", "eventType", "createdDate", "savedDate"],
   "additionalProperties": false
 }
-

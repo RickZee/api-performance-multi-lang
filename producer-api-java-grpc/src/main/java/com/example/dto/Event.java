@@ -13,4 +13,3 @@ public class Event {
     private EventHeader eventHeader;
     private List<Entity> entities;
 }
-

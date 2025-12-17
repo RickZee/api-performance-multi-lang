@@ -6,4 +6,3 @@ const apiName = "[producer-api-go-rest-lambda]"
 func APIName() string {
 	return apiName
 }
-

@@ -10,4 +10,3 @@ public class StreamProcessorApplication {
         SpringApplication.run(StreamProcessorApplication.class, args);
     }
 }
-

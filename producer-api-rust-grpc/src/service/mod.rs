@@ -5,4 +5,3 @@ pub mod event_service;
 mod event_processing_test;
 
 pub use event_processing::EventProcessingService;
-

@@ -62,4 +62,3 @@ func (r *BusinessEventRepository) Create(
 
 	return nil
 }
-

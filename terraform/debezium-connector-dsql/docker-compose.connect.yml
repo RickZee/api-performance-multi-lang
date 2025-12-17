@@ -47,5 +47,3 @@ services:
     volumes:
       # Custom connector plugin directory
       - ./plugins:/usr/share/confluent-hub-components
-
-

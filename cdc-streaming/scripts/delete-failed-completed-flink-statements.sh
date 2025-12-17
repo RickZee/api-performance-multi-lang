@@ -106,6 +106,3 @@ else
     echo "  (none)"
 fi
 echo ""
-
-
-

@@ -244,4 +244,3 @@ with open('$endpoints_file', 'r') as f:
 
 # Run main function
 main "$@"
-

@@ -13,5 +13,3 @@ Notes:
   - `terraform/scripts/rotate-aurora-password.sh`
   - `terraform/scripts/rollback-aurora-password.sh`
 - `.env` is used by some local/docker testing scripts (k6 stack).
-
-

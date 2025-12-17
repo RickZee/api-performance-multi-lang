@@ -173,4 +173,3 @@ resource "aws_lambda_function" "dsql_iam_grant" {
 #
 # Once the Lambda role is mapped, this function can grant other IAM roles automatically.
 # For now, the function is created but the initial postgres mapping must be done manually.
-

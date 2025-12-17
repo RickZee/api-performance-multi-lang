@@ -65,4 +65,3 @@ func NewJSONError(err error) *AppError {
 		Err:        err,
 	}
 }
-

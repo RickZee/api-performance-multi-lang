@@ -6,4 +6,3 @@ const apiName = "[producer-api-go-grpc]"
 func APIName() string {
 	return apiName
 }
-

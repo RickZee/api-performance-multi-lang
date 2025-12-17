@@ -211,4 +211,3 @@ export function generateLinkedEventSet() {
         serviceEvent: JSON.parse(generateCarServiceDoneEvent(carId, serviceId))
     };
 }
-

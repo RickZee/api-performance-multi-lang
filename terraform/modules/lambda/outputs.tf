@@ -47,4 +47,3 @@ output "dlq_url" {
   description = "Dead Letter Queue URL (if enabled)"
   value       = var.enable_dlq ? aws_sqs_queue.lambda_dlq[0].url : null
 }
-

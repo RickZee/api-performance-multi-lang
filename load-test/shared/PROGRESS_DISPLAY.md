@@ -132,4 +132,3 @@ python3 load-test/shared/test-progress-display.py \
 │ Error Rate:     0.00%                                  │
 └─────────────────────────────────────────────────────────┘
 ```
-

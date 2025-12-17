@@ -141,4 +141,3 @@ public class MultiRegionEndpoint {
         return currentEndpoint.get() == EndpointState.SECONDARY;
     }
 }
-

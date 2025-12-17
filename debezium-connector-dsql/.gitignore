@@ -43,4 +43,3 @@ bin/
 
 # JAR files (keep source, ignore built)
 build/libs/*.jar
-

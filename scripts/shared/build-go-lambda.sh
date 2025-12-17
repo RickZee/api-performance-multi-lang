@@ -86,4 +86,3 @@ zip -r "$API_DIR/lambda-deployment.zip" . > /dev/null
 
 echo "Build complete! Deployment package: $API_DIR/lambda-deployment.zip"
 echo "Binary size: $(du -h "$BUILD_DIR/bootstrap" | cut -f1)"
-

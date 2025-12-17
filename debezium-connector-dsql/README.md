@@ -382,4 +382,3 @@ For issues and questions:
 - [Amazon Aurora DSQL Documentation](https://docs.aws.amazon.com/AmazonRDS/latest/AuroraUserGuide/aurora-dsql.html)
 - [Kafka Connect Documentation](https://kafka.apache.org/documentation/#connect)
 - [Debezium Documentation](https://debezium.io/documentation/)
-

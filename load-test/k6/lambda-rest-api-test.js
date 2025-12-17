@@ -138,4 +138,3 @@ function textSummary(data, options) {
     summary += '\n';
     return summary;
 }
-

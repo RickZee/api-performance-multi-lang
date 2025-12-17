@@ -88,4 +88,3 @@ task connectorPackage(type: Zip) {
     
     into 'debezium-connector-dsql'
 }
-

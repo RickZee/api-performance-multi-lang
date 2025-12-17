@@ -245,4 +245,3 @@ echo "  List connectors: confluent connect list"
 echo "  Check status:    confluent connect describe <connector-id>"
 echo "  View logs:       confluent connect logs <connector-id>"
 echo ""
-

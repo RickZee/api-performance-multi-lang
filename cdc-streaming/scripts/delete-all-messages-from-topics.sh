@@ -176,5 +176,3 @@ echo ""
 echo "  3. Check Flink statement metrics:"
 echo "     confluent flink statement list"
 echo ""
-
-

@@ -169,4 +169,3 @@ class EventHeaderRepository:
                 exc_info=True
             )
             raise
-

@@ -13,4 +13,3 @@ echo ""
 echo "See data/schema.sql for the new database schema."
 echo ""
 exit 0
-

@@ -33,4 +33,3 @@ public class EntityRepositoryFactory {
         return new EntityRepository(databaseClient, objectMapper, tableName);
     }
 }
-

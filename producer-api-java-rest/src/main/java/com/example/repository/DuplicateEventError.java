@@ -19,4 +19,3 @@ public class DuplicateEventError extends RuntimeException {
         return message;
     }
 }
-

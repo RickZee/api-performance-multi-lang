@@ -70,4 +70,3 @@
   "required": ["eventHeader", "entities"],
   "additionalProperties": false
 }
-

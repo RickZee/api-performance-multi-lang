@@ -391,4 +391,3 @@ if __name__ == '__main__':
         )
         import json
         print(json.dumps(costs, indent=2))
-

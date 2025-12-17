@@ -127,4 +127,3 @@ class SimpleEventControllerTest {
         return event;
     }
 }
-

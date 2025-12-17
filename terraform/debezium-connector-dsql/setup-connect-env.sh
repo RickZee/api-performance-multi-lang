@@ -112,5 +112,3 @@ if [ -f "$ENV_FILE_ROOT" ]; then
   echo "  - KAFKA_API_KEY -> CC_KAFKA_API_KEY"
   echo "  - KAFKA_API_SECRET -> CC_KAFKA_API_SECRET"
 fi
-
-

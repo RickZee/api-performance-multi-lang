@@ -388,4 +388,3 @@ variable "aurora_auto_stop_admin_email" {
   type        = string
   default     = ""
 }
-

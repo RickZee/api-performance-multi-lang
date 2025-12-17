@@ -106,4 +106,3 @@ while true; do
     echo "----------------------------------------"
     sleep "$INTERVAL"
 done
-

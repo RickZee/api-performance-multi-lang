@@ -138,4 +138,3 @@ export IAM_USER="lambda_dsql_user"
 TOKEN=$(aws rds generate-db-auth-token --hostname $DSQL_ENDPOINT --port 5432 --username $IAM_USER --region us-east-1)
 PGPASSWORD="$TOKEN" psql -h $DSQL_ENDPOINT -p 5432 -U $IAM_USER -d car_entities -c "SELECT COUNT(*) FROM event_headers;"
 ```
-

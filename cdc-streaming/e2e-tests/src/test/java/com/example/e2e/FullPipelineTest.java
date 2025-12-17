@@ -180,4 +180,3 @@ public class FullPipelineTest {
         assertThat(duplicateCount).isGreaterThanOrEqualTo(2);
     }
 }
-

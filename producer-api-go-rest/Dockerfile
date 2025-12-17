@@ -32,4 +32,3 @@ EXPOSE 9083
 
 # Run the binary
 CMD ["./producer-api-go"]
-

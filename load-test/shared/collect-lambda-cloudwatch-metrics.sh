@@ -186,4 +186,3 @@ if [ "${BASH_SOURCE[0]}" = "${0}" ]; then
     
     collect_lambda_metrics "$FUNCTION_NAME" "$START_TIME" "$END_TIME" "$API_NAME"
 fi
-

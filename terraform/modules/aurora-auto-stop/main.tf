@@ -148,7 +148,7 @@ def handler(event, context):
     Check API Gateway invocations and stop Aurora if no activity for specified hours
     """
     cluster_id = os.environ['AURORA_CLUSTER_ID']
-    region = os.environ['AWS_REGION']
+    region = os.environ.get('AWS_REGION') or context.invoked_function_arn.split(':')[3]
     api_gateway_id = os.environ.get('API_GATEWAY_ID', '')
     inactivity_hours = int(os.environ.get('INACTIVITY_HOURS', '3'))
     sns_topic_arn = os.environ.get('SNS_TOPIC_ARN', '')
@@ -286,7 +286,7 @@ resource "aws_lambda_function" "aurora_auto_stop" {
     variables = merge(
       {
         AURORA_CLUSTER_ID = var.aurora_cluster_id
-        # AWS_REGION is automatically provided by Lambda runtime, no need to set it
+        # AWS_REGION is automatically provided by Lambda runtime
         API_GATEWAY_ID   = var.api_gateway_id
         INACTIVITY_HOURS = var.inactivity_hours
       },
@@ -328,4 +328,3 @@ resource "aws_lambda_permission" "aurora_auto_stop_eventbridge" {
   principal     = "events.amazonaws.com"
   source_arn    = aws_cloudwatch_event_rule.aurora_auto_stop_schedule.arn
 }
-

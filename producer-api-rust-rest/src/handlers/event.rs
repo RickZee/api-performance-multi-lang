@@ -118,4 +118,3 @@ async fn process_bulk_events(
         "processingTimeMs": 100
     })))
 }
-

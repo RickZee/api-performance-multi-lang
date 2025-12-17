@@ -65,4 +65,3 @@ func (r *CarEntityRepository) Update(ctx context.Context, entity *models.CarEnti
 	)
 	return err
 }
-

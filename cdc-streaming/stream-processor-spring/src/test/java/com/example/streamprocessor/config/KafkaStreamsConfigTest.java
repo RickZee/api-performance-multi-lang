@@ -287,4 +287,3 @@ class KafkaStreamsConfigTest {
         assertThat(serviceOutputTopic.isEmpty()).isTrue();
     }
 }
-

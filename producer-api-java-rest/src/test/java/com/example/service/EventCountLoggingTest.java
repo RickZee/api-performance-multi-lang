@@ -261,4 +261,3 @@ class EventCountLoggingTest {
         return entity;
     }
 }
-

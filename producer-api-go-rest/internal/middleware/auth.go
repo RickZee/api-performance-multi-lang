@@ -73,4 +73,3 @@ func JWTAuthMiddleware(logger *zap.Logger, enabled bool) gin.HandlerFunc {
 		c.Next()
 	}
 }
-

@@ -16,4 +16,3 @@ fi
 echo "Comparing outputs from topic: $TOPIC"
 echo "Note: This is a placeholder script. Use the ComparisonUtils Java class"
 echo "or implement a CLI tool to compare event outputs."
-

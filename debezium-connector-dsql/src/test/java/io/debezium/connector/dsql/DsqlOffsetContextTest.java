@@ -78,4 +78,3 @@ class DsqlOffsetContextTest {
         assertThat(partition.get("table")).isEqualTo("event_headers");
     }
 }
-

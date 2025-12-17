@@ -60,4 +60,3 @@ async def get_connection(config: LambdaConfig) -> asyncpg.Connection:
     except Exception as e:
         logger.error(f"Failed to create direct connection to {endpoint}: {e}", exc_info=True)
         raise
-

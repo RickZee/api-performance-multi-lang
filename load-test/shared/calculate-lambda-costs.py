@@ -337,4 +337,3 @@ if __name__ == '__main__':
             data_transfer_gb=1.0
         )
         print(json.dumps(costs, indent=2))
-

@@ -448,4 +448,3 @@ export function generateSimpleEventPayload() {
     
     return JSON.stringify(payload);
 }
-

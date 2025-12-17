@@ -33,4 +33,3 @@ resource "null_resource" "schema_init" {
     on_failure = fail
   }
 }
-

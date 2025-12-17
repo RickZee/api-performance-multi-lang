@@ -28,4 +28,3 @@ aws ssm get-command-invocation \
     --region "$AWS_REGION" \
     --query "StandardOutputContent" \
     --output text 2>&1
-

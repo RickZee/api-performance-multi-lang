@@ -11,4 +11,3 @@ impl DuplicateEventError {
         Self { event_id }
     }
 }
-

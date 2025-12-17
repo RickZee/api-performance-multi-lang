@@ -67,4 +67,3 @@ class DsqlConnectorTest {
         return props;
     }
 }
-

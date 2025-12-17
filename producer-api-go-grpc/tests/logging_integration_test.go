@@ -241,4 +241,3 @@ func TestProcessEntityUpdateShouldLogAllRequiredPatternsWithAPIName(t *testing.T
 		t.Error("Logs should contain 'Successfully created entity' message")
 	}
 }
-

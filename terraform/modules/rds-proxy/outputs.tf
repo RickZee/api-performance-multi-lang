@@ -39,4 +39,3 @@ output "connection_string_template" {
   value       = "postgresql://${var.database_user}:${var.database_password}@${aws_db_proxy.this.endpoint}:5432"
   sensitive   = true
 }
-

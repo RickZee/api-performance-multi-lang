@@ -105,4 +105,3 @@ else
         --region "$AWS_REGION" 2>&1 | jq -r '.StandardErrorContent // .Status' 2>&1
     exit 1
 fi
-

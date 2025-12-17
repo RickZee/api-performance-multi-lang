@@ -5,4 +5,3 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .compile(&["proto/event_service.proto"], &["proto"])?;
     Ok(())
 }
-

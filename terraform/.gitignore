@@ -35,4 +35,3 @@ terraform.rc
 # Generated archive files (Lambda deployment packages)
 *.zip
 **/*.zip
-

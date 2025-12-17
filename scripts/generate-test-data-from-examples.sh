@@ -288,4 +288,3 @@ echo "     docker logs cdc-loan-consumer"
 echo ""
 echo -e "${GREEN}Test data generation completed!${NC}"
 echo -e "${BLUE}Generated 3 events: Car Created → Loan Created → Loan Payment Submitted${NC}"
-

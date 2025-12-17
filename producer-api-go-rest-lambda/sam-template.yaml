@@ -152,4 +152,3 @@ Outputs:
     Value: !GetAtt ProducerApiRestFunction.Arn
     Export:
       Name: !Sub "${AWS::StackName}-FunctionArn"
-

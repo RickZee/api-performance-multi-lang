@@ -44,4 +44,3 @@ protoc \
 
 echo "Proto code generation completed successfully!"
 echo "Generated files are in: $OUTPUT_DIR"
-

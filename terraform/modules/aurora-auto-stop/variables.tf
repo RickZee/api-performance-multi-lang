@@ -52,4 +52,3 @@ variable "admin_email" {
     error_message = "Admin email must be a valid email address or empty string to disable notifications."
   }
 }
-

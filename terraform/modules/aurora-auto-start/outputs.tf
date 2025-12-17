@@ -7,4 +7,3 @@ output "function_arn" {
   description = "Lambda function ARN"
   value       = aws_lambda_function.aurora_auto_start.arn
 }
-

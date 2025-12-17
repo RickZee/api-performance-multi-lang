@@ -134,4 +134,3 @@ func ReadGRPCWebFrame(data []byte) ([]byte, []byte, error) {
 
 	return message, remaining, nil
 }
-

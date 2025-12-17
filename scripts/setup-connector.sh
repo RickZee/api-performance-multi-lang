@@ -51,14 +51,3 @@ curl -s "$KAFKA_CONNECT_URL/connectors/$CONNECTOR_NAME/status" | jq '.'
 
 echo ""
 echo "Connector setup complete!"
-
-
-
-
-
-
-
-
-
-
-

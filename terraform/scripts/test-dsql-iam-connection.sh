@@ -58,4 +58,3 @@ else
   echo "3. Verify IAM user exists in database"
   exit 1
 fi
-

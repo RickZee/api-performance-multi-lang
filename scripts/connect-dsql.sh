@@ -48,4 +48,3 @@ echo ""
 
 # Connect via SSM
 aws ssm start-session --target "$BASTION_INSTANCE_ID" --region "$AWS_REGION"
-

@@ -171,5 +171,3 @@ echo ""
 echo "=== SUCCESS: end-to-end flow validated ==="
 echo "Connector: $CONNECTOR_NAME"
 echo "Topic:     $ROUTED_TOPIC"
-
-

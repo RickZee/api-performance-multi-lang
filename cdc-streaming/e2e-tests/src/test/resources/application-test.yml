@@ -13,4 +13,3 @@ test:
   timeouts:
     event-processing: 10000
     topic-consumption: 30000
-

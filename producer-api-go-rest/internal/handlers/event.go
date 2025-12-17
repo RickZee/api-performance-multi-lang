@@ -215,4 +215,3 @@ func (h *EventHandler) ProcessBulkEvents(c *gin.Context) {
 		"processingTimeMs": 100,
 	})
 }
-

@@ -56,5 +56,3 @@ cd /tmp/api-performance-multi-lang/terraform/debezium-connector-dsql
 5. Deploys the connector to the local Connect REST API
 6. Inserts test events into DSQL (requires `psql` + IAM token)
 7. Consumes messages from Confluent Cloud topic to validate end-to-end flow
-
-

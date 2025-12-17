@@ -239,4 +239,3 @@ require_directory() {
         exit 1
     fi
 }
-

@@ -213,4 +213,3 @@ UNION ALL
 SELECT 'service_record_entities', COUNT(*) FROM service_record_entities
 ORDER BY table_name;
 EOF
-

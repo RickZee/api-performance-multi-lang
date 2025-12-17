@@ -335,4 +335,3 @@ resource "aws_lambda_permission" "ec2_auto_stop_eventbridge" {
   principal     = "events.amazonaws.com"
   source_arn    = aws_cloudwatch_event_rule.ec2_auto_stop_schedule.arn
 }
-

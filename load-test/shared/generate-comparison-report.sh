@@ -201,4 +201,3 @@ echo "Quick view:"
 head -20 "$REPORT_FILE"
 echo "..."
 echo "(Full report: $REPORT_FILE)"
-

@@ -11,4 +11,3 @@ data:
 {{ $value | indent 4 }}
   {{- end }}
 {{- end }}
-

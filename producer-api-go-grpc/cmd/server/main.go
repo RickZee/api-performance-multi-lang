@@ -80,5 +80,3 @@ func main() {
 		logger.Fatal("Failed to serve", zap.Error(err))
 	}
 }
-
-

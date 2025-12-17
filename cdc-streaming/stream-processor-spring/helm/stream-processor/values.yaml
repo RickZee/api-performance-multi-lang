@@ -123,4 +123,3 @@ secrets:
   name: stream-processor-secrets
   # Create secret with: kubectl create secret generic stream-processor-secrets \
   #   --from-literal=kafka-api-key=xxx --from-literal=kafka-api-secret=yyy
-

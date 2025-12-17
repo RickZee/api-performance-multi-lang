@@ -12,4 +12,3 @@ async fn health_check() -> Json<serde_json::Value> {
         "message": "Producer API is healthy"
     }))
 }
-

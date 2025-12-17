@@ -117,4 +117,3 @@ class DsqlConnectorIT {
         return config;
     }
 }
-

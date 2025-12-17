@@ -39,4 +39,3 @@ echo "  curl -X POST https://api.confluent.cloud/connect/v1/environments/<env-id
 echo "    -H 'Content-Type: application/json' \\"
 echo "    -H 'Authorization: Basic <base64-encoded-api-key:secret>' \\"
 echo "    -d @$CONFIG_FILE"
-

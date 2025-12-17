@@ -2385,4 +2385,3 @@ if __name__ == '__main__':
     
     html_file = generate_html_report(results_dir, test_mode, timestamp)
     print(f"HTML report generated: {html_file}")
-

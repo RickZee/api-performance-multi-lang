@@ -318,4 +318,3 @@ async fn test_process_event_should_log_all_required_patterns() {
     assert_eq!(entity.id, "loan-grpc-complete-001");
     assert_eq!(entity.entity_type, "Loan");
 }
-

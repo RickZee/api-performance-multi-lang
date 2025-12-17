@@ -71,4 +71,3 @@ func CloseConnectionPool() {
 		poolOnce = sync.Once{}
 	}
 }
-

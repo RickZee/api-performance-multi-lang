@@ -61,4 +61,3 @@ CREATE INDEX IF NOT EXISTS idx_db_connection_pool_stats_snapshot_id
 COMMENT ON TABLE db_query_metrics_snapshots IS 'Stores snapshots of database query metrics for each test run';
 COMMENT ON TABLE db_query_details IS 'Stores individual query performance metrics from pg_stat_statements';
 COMMENT ON TABLE db_connection_pool_stats IS 'Stores connection pool statistics at snapshot time';
-

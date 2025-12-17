@@ -209,4 +209,3 @@ if __name__ == '__main__':
     else:
         print("\nTo install psycopg2: pip install psycopg2-binary", file=sys.stderr)
         sys.exit(1)
-

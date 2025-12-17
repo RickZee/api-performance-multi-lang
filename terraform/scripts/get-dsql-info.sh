@@ -45,4 +45,3 @@ echo "aurora_dsql_port = 5432"
 echo "iam_database_user = \"YOUR-IAM-DB-USER\""
 echo "aurora_dsql_cluster_resource_id = \"YOUR-CLUSTER-RESOURCE-ID\""
 echo ""
-

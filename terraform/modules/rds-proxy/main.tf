@@ -154,4 +154,3 @@ resource "aws_cloudwatch_log_group" "rds_proxy" {
 
   tags = var.tags
 }
-

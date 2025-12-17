@@ -90,4 +90,3 @@ COMMENT ON TABLE test_runs IS 'Stores metadata for each test execution';
 COMMENT ON TABLE performance_metrics IS 'Stores aggregated performance metrics per test run';
 COMMENT ON TABLE resource_metrics IS 'Stores time-series resource utilization data';
 COMMENT ON TABLE test_phases IS 'Stores phase-specific metrics for multi-phase tests';
-

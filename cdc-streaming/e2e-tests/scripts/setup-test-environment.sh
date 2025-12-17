@@ -43,4 +43,3 @@ done
 
 echo "Warning: Stream processor did not become healthy within $timeout seconds"
 exit 1
-

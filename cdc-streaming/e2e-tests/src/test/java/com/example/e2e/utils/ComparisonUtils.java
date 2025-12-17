@@ -125,4 +125,3 @@ public class ComparisonUtils {
         public Map<String, String> getMismatches() { return mismatches; }
     }
 }
-

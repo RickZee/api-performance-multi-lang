@@ -144,4 +144,3 @@ docker logs dsql-kafka-connect | tail -50
 # On bastion host
 curl -X POST http://localhost:8083/connectors/dsql-cdc-source-event-headers/restart
 ```
-

@@ -143,12 +143,76 @@ async def _handle_health_check() -> Dict[str, Any]:
 
 
 async def _try_start_database() -> Optional[Dict[str, Any]]:
-    """Attempt to start the database if it's stopped. Returns error response if DB is starting, None otherwise."""
+    """Attempt to resume/start the database if it's paused/stopped. Returns error response if DB is resuming, None otherwise."""
     global _lambda_client
     
+    # Check for DSQL auto-resume function first (DSQL-specific)
+    auto_resume_function = os.getenv('DSQL_AUTO_RESUME_FUNCTION_NAME')
+    if auto_resume_function:
+        try:
+            # Invoke the auto-resume Lambda with timeout handling
+            import asyncio
+            
+            # Use asyncio timeout to prevent hanging
+            timeout_seconds = float(os.getenv('AUTO_START_TIMEOUT', '5.0'))
+            
+            try:
+                # Run Lambda invocation with timeout (boto3 is sync, so use to_thread)
+                response = await asyncio.wait_for(
+                    asyncio.to_thread(
+                        _lambda_client.invoke,
+                        FunctionName=auto_resume_function,
+                        InvocationType='RequestResponse'
+                    ),
+                    timeout=timeout_seconds
+                )
+            except asyncio.TimeoutError:
+                logger.warning(f"{API_NAME} Auto-resume Lambda invocation timed out after {timeout_seconds}s")
+                return None
+            
+            # Check response status
+            if response.get('StatusCode') != 200:
+                logger.warning(f"{API_NAME} Auto-resume Lambda returned non-200 status: {response.get('StatusCode')}")
+                return None
+            
+            response_payload = json.loads(response['Payload'].read().decode('utf-8'))
+            
+            if response_payload.get('statusCode') == 200:
+                body = json.loads(response_payload.get('body', '{}'))
+                status = body.get('status', '')
+                
+                if status == 'scaling':
+                    # Database is scaling up, return user-friendly message
+                    return _create_response(
+                        503,
+                        {
+                            "error": "Service Temporarily Unavailable",
+                            "message": "The database is currently scaling up. Please retry your request in 30-60 seconds.",
+                            "status": 503,
+                            "retry_after": 60,  # seconds
+                        },
+                        headers={"Retry-After": "60"}
+                    )
+                elif status in ['available', 'transitioning']:
+                    # Database is available or transitioning, allow request to proceed
+                    return None
+        except asyncio.TimeoutError:
+            logger.warning(f"{API_NAME} Auto-resume Lambda invocation timed out")
+            return None
+        except ClientError as e:
+            logger.warning(f"{API_NAME} Failed to invoke auto-resume Lambda: {e}")
+            return None
+        except Exception as e:
+            logger.warning(f"{API_NAME} Failed to check/resume database: {e}")
+            # Don't block the request if we can't check database status
+            return None
+        
+        return None
+    
+    # Fallback to Aurora auto-start function (for backward compatibility)
     auto_start_function = os.getenv('AURORA_AUTO_START_FUNCTION_NAME')
     if not auto_start_function:
-        # Auto-start not configured, skip
+        # Auto-start/resume not configured, skip
         return None
     
     try:

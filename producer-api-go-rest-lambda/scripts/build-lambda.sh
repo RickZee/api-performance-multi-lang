@@ -14,4 +14,3 @@ if [ ! -f "$SHARED_SCRIPT" ]; then
 fi
 
 exec "$SHARED_SCRIPT" "producer-api-go-rest-lambda"
-

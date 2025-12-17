@@ -31,13 +31,3 @@ public class SimpleEventEntity {
     @Column("event_type")
     private String eventType;
 }
-
-
-
-
-
-
-
-
-
-

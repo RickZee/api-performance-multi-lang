@@ -81,4 +81,3 @@ public class DsqlConnector extends SourceConnector {
         return "1.0.0";
     }
 }
-

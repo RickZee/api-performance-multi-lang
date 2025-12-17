@@ -47,4 +47,3 @@ k6 run --env HOST=localhost --env PORT=3000 send-batch-events.js
 
 echo ""
 echo -e "${GREEN}✓ k6 batch test completed${NC}"
-

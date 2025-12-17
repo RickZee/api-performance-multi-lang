@@ -117,4 +117,3 @@ else
         --instance-id "$INSTANCE_ID" \
         --region "$AWS_REGION" 2>&1 | jq -r '.StandardErrorContent' 2>&1
 fi
-

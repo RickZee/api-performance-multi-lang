@@ -146,4 +146,3 @@ echo "  2. Check topics: confluent kafka topic list | grep aurora"
 echo "  3. Verify messages: python3 cdc-streaming/scripts/verify-messages.py aurora-cdc.public.car_entities 10 50"
 echo "  4. Check Flink processing: confluent flink statement list"
 echo ""
-

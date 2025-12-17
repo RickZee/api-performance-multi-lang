@@ -49,4 +49,3 @@ logging:
     com.example.streamprocessor: INFO
     org.apache.kafka: WARN
     org.springframework.kafka: INFO
-

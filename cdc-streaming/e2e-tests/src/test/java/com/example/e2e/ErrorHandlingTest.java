@@ -104,4 +104,3 @@ public class ErrorHandlingTest {
         return kafkaUtils.consumeAllEvents(topic, maxCount, Duration.ofSeconds(30));
     }
 }
-

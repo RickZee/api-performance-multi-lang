@@ -16,4 +16,3 @@ func (h *HealthHandler) HealthCheck(c *gin.Context) {
 		"message": "Producer API is healthy",
 	})
 }
-

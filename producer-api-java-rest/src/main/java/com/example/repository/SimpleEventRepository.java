@@ -7,13 +7,3 @@ import org.springframework.stereotype.Repository;
 @Repository
 public interface SimpleEventRepository extends ReactiveCrudRepository<SimpleEventEntity, String> {
 }
-
-
-
-
-
-
-
-
-
-

@@ -117,4 +117,3 @@ func TestReadGRPCWebFrame_TooShort(t *testing.T) {
 	_, _, err := ReadGRPCWebFrame(shortFrame)
 	assert.Error(t, err)
 }
-

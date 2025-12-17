@@ -13,4 +13,3 @@ spec:
       name: http
   selector:
     {{- include "stream-processor.selectorLabels" . | nindent 4 }}
-

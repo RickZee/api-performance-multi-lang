@@ -167,4 +167,3 @@ public class PerformanceComparisonTest {
         assertThat(totalProcessed).isGreaterThan(largeBatchSize * 0.8);
     }
 }
-

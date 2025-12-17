@@ -12,4 +12,3 @@ output "schedule_rule_arn" {
   description = "ARN of the EventBridge schedule rule"
   value       = aws_cloudwatch_event_rule.ec2_auto_stop_schedule.arn
 }
-

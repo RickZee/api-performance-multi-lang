@@ -138,4 +138,3 @@ class EventHeaderRepository:
             # Raise custom exception for duplicate key violations
             logger.warning(f"Duplicate event header ID detected: {event_id}")
             raise DuplicateEventError(event_id, f"Event header with ID '{event_id}' already exists") from e
-

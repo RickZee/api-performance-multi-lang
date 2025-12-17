@@ -250,4 +250,3 @@ public class FunctionalParityTest {
         assertThat(flinkEvents).hasSize(1);
     }
 }
-

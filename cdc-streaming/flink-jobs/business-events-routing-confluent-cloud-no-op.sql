@@ -159,5 +159,3 @@ SELECT
     'event_headers' AS `__table`    -- Add __table in Flink
 FROM `raw-event-headers`
 WHERE `event_name` = 'CarServiceDone';
-
-

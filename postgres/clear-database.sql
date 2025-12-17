@@ -19,4 +19,3 @@ DO $$
 BEGIN
     RAISE NOTICE 'Database cleared successfully at %', NOW();
 END $$;
-

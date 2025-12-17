@@ -38,4 +38,3 @@ output "connection_string" {
   value       = "postgresql://${aws_db_instance.this.username}@${aws_db_instance.this.address}:${aws_db_instance.this.port}/${aws_db_instance.this.db_name}"
   sensitive   = false
 }
-

@@ -27,4 +27,3 @@ output "ssm_command" {
   description = "SSM command to connect to bastion host"
   value       = "aws ssm start-session --target ${aws_instance.bastion.id} --region ${var.aws_region}"
 }
-

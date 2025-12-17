@@ -86,7 +86,7 @@ def handler(event, context):
     Called by API Lambda when database connection fails.
     """
     cluster_id = os.environ['AURORA_CLUSTER_ID']
-    region = os.environ['AWS_REGION']
+    region = os.environ.get('AWS_REGION') or context.invoked_function_arn.split(':')[3]
     
     rds = boto3.client('rds', region_name=region)
     
@@ -186,4 +186,3 @@ resource "aws_lambda_function" "aurora_auto_start" {
 
   tags = var.tags
 }
-

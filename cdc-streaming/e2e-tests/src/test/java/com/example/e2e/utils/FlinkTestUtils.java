@@ -58,4 +58,3 @@ public class FlinkTestUtils {
         return "statement-" + System.currentTimeMillis();
     }
 }
-

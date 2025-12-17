@@ -17,4 +17,3 @@ fi
 
 echo "Build complete!"
 echo "JAR location: build/libs/debezium-connector-dsql-1.0.0.jar"
-

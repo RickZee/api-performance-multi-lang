@@ -671,4 +671,3 @@ class TestExecutor:
             if self.config.verbose if hasattr(self, 'config') else False:
                 self.console.print(f"[yellow]Warning: Error extracting metrics: {e}[/yellow]")
             return None
-

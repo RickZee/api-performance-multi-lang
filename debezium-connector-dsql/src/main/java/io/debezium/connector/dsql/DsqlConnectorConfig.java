@@ -196,4 +196,3 @@ public class DsqlConnectorConfig extends AbstractConfig {
         return tables.split(",");
     }
 }
-

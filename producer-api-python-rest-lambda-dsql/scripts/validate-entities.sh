@@ -84,4 +84,3 @@ fi
 
 echo ""
 echo -e "${GREEN}✓ Validation complete${NC}"
-

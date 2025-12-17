@@ -118,4 +118,3 @@ EOF
 
 echo "✅ Detailed comparison report generated: $REPORT_FILE"
 cat "$REPORT_FILE"
-

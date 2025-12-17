@@ -48,4 +48,3 @@ testcontainers-modules = { version = "0.1.0-beta.1", features = ["postgres"] }
 tracing-test = "0.2"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
 async-trait = "0.1"
-

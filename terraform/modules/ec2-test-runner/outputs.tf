@@ -12,4 +12,3 @@ output "ssm_managed_instance_hint" {
   description = "Instance ID for SSM Session Manager (use with: aws ssm start-session --target <this-value>)"
   value       = aws_instance.test_runner.id
 }
-

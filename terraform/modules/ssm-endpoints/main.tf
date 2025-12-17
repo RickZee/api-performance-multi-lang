@@ -84,4 +84,3 @@ resource "aws_vpc_endpoint" "ec2messages" {
     }
   )
 }
-

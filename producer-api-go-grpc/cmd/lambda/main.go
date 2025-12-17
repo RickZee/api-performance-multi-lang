@@ -226,5 +226,3 @@ func createErrorResponseFromError(err error, contentType string) events.APIGatew
 	}
 	return createErrorResponse(st.Code(), st.Message(), contentType)
 }
-
-

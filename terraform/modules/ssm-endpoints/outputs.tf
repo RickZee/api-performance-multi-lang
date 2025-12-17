@@ -17,4 +17,3 @@ output "security_group_id" {
   description = "Security group ID for SSM endpoints"
   value       = aws_security_group.ssm_endpoints.id
 }
-

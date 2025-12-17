@@ -448,6 +448,69 @@ resource "aws_lambda_permission" "aurora_auto_start_python_lambda" {
   source_arn    = module.python_rest_lambda_pg[0].function_arn
 }
 
+# DSQL Auto-Resume Lambda (enabled for test and dev environments)
+# Ensures DSQL cluster is available when API requests arrive
+module "dsql_auto_resume" {
+  count  = var.enable_aurora_dsql_cluster && (local.is_test || local.is_dev) && var.enable_python_lambda_dsql ? 1 : 0
+  source = "./modules/dsql-auto-resume"
+
+  function_name                  = "${var.project_name}-dsql-auto-resume"
+  dsql_cluster_resource_id       = module.aurora_dsql[0].cluster_resource_id
+  dsql_cluster_arn               = module.aurora_dsql[0].cluster_arn
+  dsql_target_min_capacity       = 1  # Scale up to 1 ACU when resuming
+  cloudwatch_logs_retention_days = local.cloudwatch_logs_retention
+
+  tags = local.common_tags
+}
+
+# DSQL Auto-Pause Lambda (enabled for test and dev environments)
+# Monitors API Gateway invocations and scales down DSQL if no activity for 3 hours
+module "dsql_auto_pause" {
+  count  = var.enable_aurora_dsql_cluster && (local.is_test || local.is_dev) && var.enable_python_lambda_dsql ? 1 : 0
+  source = "./modules/dsql-auto-pause"
+
+  function_name                  = "${var.project_name}-dsql-auto-pause"
+  dsql_cluster_resource_id       = module.aurora_dsql[0].cluster_resource_id
+  dsql_cluster_arn               = module.aurora_dsql[0].cluster_arn
+  api_gateway_id                 = module.python_rest_lambda_dsql[0].api_id
+  inactivity_hours               = 3
+  dsql_min_capacity              = 0  # Scale down to 0 ACU (pause) when inactive
+  cloudwatch_logs_retention_days = local.cloudwatch_logs_retention
+  admin_email                    = var.aurora_auto_stop_admin_email  # Reuse same email config
+
+  tags = local.common_tags
+}
+
+# IAM policy to allow DSQL Lambda to invoke auto-resume Lambda
+resource "aws_iam_role_policy" "dsql_lambda_auto_resume" {
+  count = var.enable_aurora_dsql_cluster && (local.is_test || local.is_dev) && var.enable_python_lambda_dsql ? 1 : 0
+  name  = "${var.project_name}-dsql-lambda-auto-resume-policy"
+  role  = module.python_rest_lambda_dsql[0].role_name
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect = "Allow"
+        Action = [
+          "lambda:InvokeFunction"
+        ]
+        Resource = module.dsql_auto_resume[0].function_arn
+      }
+    ]
+  })
+}
+
+# Lambda permission to allow DSQL Lambda to invoke auto-resume Lambda
+resource "aws_lambda_permission" "dsql_auto_resume_dsql_lambda" {
+  count         = var.enable_aurora_dsql_cluster && (local.is_test || local.is_dev) && var.enable_python_lambda_dsql ? 1 : 0
+  statement_id  = "AllowExecutionFromDsqlLambda"
+  action        = "lambda:InvokeFunction"
+  function_name = module.dsql_auto_resume[0].function_name
+  principal     = "lambda.amazonaws.com"
+  source_arn    = module.python_rest_lambda_dsql[0].function_arn
+}
+
 # Python REST Lambda DSQL module (separate from regular Python Lambda)
 module "python_rest_lambda_dsql" {
   count  = var.enable_python_lambda_dsql ? 1 : 0
@@ -480,7 +543,9 @@ module "python_rest_lambda_dsql" {
   dsql_host                       = var.enable_aurora_dsql_cluster ? try(module.aurora_dsql[0].dsql_host, "") : ""
   dsql_kms_key_arn                = var.enable_aurora_dsql_cluster ? try(module.aurora_dsql[0].kms_key_arn, "") : ""
 
-  additional_environment_variables = {}
+  additional_environment_variables = var.enable_aurora_dsql_cluster && (local.is_test || local.is_dev) ? {
+    DSQL_AUTO_RESUME_FUNCTION_NAME = module.dsql_auto_resume[0].function_name
+  } : {}
 
   # DSQL uses VPC endpoints - Lambda must be in VPC to access the endpoint
   vpc_config = var.enable_aurora_dsql_cluster ? {
@@ -614,4 +679,3 @@ resource "null_resource" "grant_bastion_iam_access" {
     module.aurora_dsql,
   ]
 }
-

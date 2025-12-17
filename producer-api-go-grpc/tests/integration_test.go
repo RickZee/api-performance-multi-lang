@@ -104,4 +104,3 @@ func TestEventProcessingService(t *testing.T) {
 		t.Errorf("Expected id=loan-12345, got %s", entity.ID)
 	}
 }
-

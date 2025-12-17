@@ -63,4 +63,3 @@ fi
 echo ""
 echo "3. All role mappings:"
 psql "postgresql://admin@${DSQL_HOST}:5432/postgres?sslmode=require" -c "SELECT pg_role_name, arn FROM sys.iam_pg_role_mappings;" 2>&1
-

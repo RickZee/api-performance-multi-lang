@@ -158,4 +158,3 @@ impl<'de> Deserialize<'de> for Entity {
         })
     }
 }
-

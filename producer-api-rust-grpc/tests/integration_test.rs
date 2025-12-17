@@ -424,4 +424,3 @@ async fn test_process_event_with_empty_entity_id_should_return_error() {
     let status = response.unwrap_err();
     assert!(status.message().contains("entityId cannot be empty"));
 }
-

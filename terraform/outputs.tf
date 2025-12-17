@@ -174,4 +174,3 @@ output "bastion_host_ssm_command" {
   description = "SSM command to connect to bastion host"
   value       = var.enable_bastion_host && var.enable_aurora_dsql_cluster ? module.bastion_host[0].ssm_command : null
 }
-

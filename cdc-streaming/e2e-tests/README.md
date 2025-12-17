@@ -203,4 +203,3 @@ These tests should be run:
 - Spring Boot service runs in Docker Compose
 - Flink SQL statements must be deployed separately
 - Tests may take several minutes to complete due to real Kafka operations
-

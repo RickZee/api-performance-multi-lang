@@ -242,5 +242,3 @@ func createResponse(statusCode int, body interface{}) events.APIGatewayV2HTTPRes
 		Body:       string(bodyBytes),
 	}
 }
-
-

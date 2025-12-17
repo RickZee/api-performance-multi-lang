@@ -44,4 +44,3 @@ EXPOSE 9090
 
 # Run the application
 CMD ["./producer-api-rust-grpc"]
-

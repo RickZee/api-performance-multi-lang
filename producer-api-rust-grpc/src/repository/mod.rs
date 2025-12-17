@@ -9,4 +9,3 @@ pub use business_event_repo::BusinessEventRepository;
 pub use event_header_repo::EventHeaderRepository;
 pub use entity_repo::EntityRepository;
 pub use errors::DuplicateEventError;
-

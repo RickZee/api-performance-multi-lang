@@ -80,4 +80,3 @@ public class EventHeaderSerde implements Serde<EventHeader> {
         }
     }
 }
-

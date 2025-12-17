@@ -45,4 +45,3 @@ public class EventHeader {
     @JsonProperty("__ts_ms")
     private Long tsMs; // CDC timestamp in milliseconds
 }
-

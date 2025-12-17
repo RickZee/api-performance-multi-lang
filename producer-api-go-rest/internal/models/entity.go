@@ -22,4 +22,3 @@ func NewCarEntity(id, entityType, data string) *CarEntity {
 		Data:       data,
 	}
 }
-

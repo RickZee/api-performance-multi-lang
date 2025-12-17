@@ -48,4 +48,3 @@ func Load() (*Config, error) {
 		JWTSecretKey: jwtSecretKey,
 	}, nil
 }
-

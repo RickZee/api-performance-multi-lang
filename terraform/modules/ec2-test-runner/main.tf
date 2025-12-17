@@ -215,4 +215,3 @@ resource "aws_instance" "test_runner" {
     }
   )
 }
-

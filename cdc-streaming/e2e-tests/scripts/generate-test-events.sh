@@ -29,4 +29,3 @@ echo "Generating $EVENT_COUNT events of type: $EVENT_TYPE"
 # to generate and publish events. For now, it's a placeholder.
 echo "Note: Use the TestEventGenerator Java class or implement a CLI tool"
 echo "to generate and publish test events."
-

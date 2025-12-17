@@ -58,4 +58,3 @@ message HealthResponse {
   bool healthy = 1;
   string message = 2;
 }
-

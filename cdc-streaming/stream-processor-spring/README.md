@@ -236,4 +236,3 @@ This Spring Boot implementation provides:
 - **Java ecosystem**: Consistent with other Spring Boot services
 
 See [spring-boot-alternative-architecture.md](../spring-boot-alternative-architecture.md) for detailed comparison.
-

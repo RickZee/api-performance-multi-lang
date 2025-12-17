@@ -38,4 +38,3 @@ func Load() (*Config, error) {
 		LogLevel:    logLevel,
 	}, nil
 }
-

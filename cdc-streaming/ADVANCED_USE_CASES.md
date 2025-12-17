@@ -291,4 +291,3 @@ confluent kafka topic consume filtered-loan-created-events --max-messages 10
 - [ARCHITECTURE.md](ARCHITECTURE.md): System architecture details
 - [CONFLUENT_CLOUD_SETUP_GUIDE.md](CONFLUENT_CLOUD_SETUP_GUIDE.md): Complete Confluent Cloud setup guide
 - [BACKEND_IMPLEMENTATION.md](BACKEND_IMPLEMENTATION.md): Back-end infrastructure details
-

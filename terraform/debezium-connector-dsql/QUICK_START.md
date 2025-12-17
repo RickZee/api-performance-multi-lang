@@ -175,4 +175,3 @@ confluent kafka topic consume raw-event-headers --from-beginning
 - **`docker-compose.connect.yml`**: Kafka Connect container config
 - **`connector.json.tmpl`**: DSQL connector configuration template
 - **`connect.env.example`**: Example environment file (copy to `connect.env`)
-
