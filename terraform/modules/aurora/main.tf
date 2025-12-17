@@ -118,7 +118,8 @@ resource "aws_rds_cluster_parameter_group" "this" {
 
   lifecycle {
     create_before_destroy = true
-    ignore_changes        = [parameter]
+    # Removed ignore_changes to allow Terraform to manage parameter updates
+    # This ensures rds.logical_replication and other CDC parameters stay in sync
   }
 }
 

@@ -1669,6 +1669,168 @@ confluent connect cluster describe <connector-id>
 - See `cdc-streaming/scripts/troubleshoot-aurora-connectivity.sh` for comprehensive diagnostics
 - See `cdc-streaming/scripts/fix-postgres-replication-privileges.sh` for automated fix
 
+#### Issue 14: Connector Connection Error - Logical Replication Disabled
+
+**Symptoms:**
+- Connector status is FAILED
+- Error message: "Could not connect to the database because there is no pg_hba.conf entry for host..."
+- This error appears even though:
+  - Security group allows all IPs (0.0.0.0/0)
+  - User has `rds_replication` role
+  - Password is correct
+  - Network connectivity is verified
+
+**Root Cause:**
+The "pg_hba.conf" error is misleading. The actual root cause is that **logical replication is disabled** in Aurora PostgreSQL:
+- `rds.logical_replication` parameter is set to `0` (disabled)
+- `wal_level` is `replica` instead of `logical`
+- Without logical replication, PostgreSQL cannot create replication slots or stream changes for CDC
+
+**Why This Happens:**
+- The Terraform configuration may have `ignore_changes = [parameter]` in the lifecycle block, preventing parameter updates
+- Parameter group was created before CDC requirements were added
+- Parameter group was manually modified outside of Terraform
+- Cluster was never rebooted after parameter was set (static parameters require reboot)
+
+**Diagnosis:**
+
+```bash
+# Check wal_level (should be 'logical')
+python3 << 'EOF'
+import asyncio
+import asyncpg
+
+async def check_wal():
+    conn = await asyncpg.connect(
+        host="<aurora-endpoint>",
+        user="postgres",
+        password="<password>",
+        database="car_entities",
+        ssl='require'
+    )
+    wal_level = await conn.fetchval("SHOW wal_level;")
+    print(f"wal_level: {wal_level}")
+    await conn.close()
+
+asyncio.run(check_wal())
+EOF
+
+# Check parameter group setting
+aws rds describe-db-cluster-parameters \
+  --db-cluster-parameter-group-name <parameter-group-name> \
+  --query 'Parameters[?ParameterName==`rds.logical_replication`]' \
+  --output json
+```
+
+**Solutions:**
+
+**Solution 1: Enable Logical Replication (Required for CDC)**
+
+```bash
+# Step 1: Update parameter group
+aws rds modify-db-cluster-parameter-group \
+  --db-cluster-parameter-group-name <parameter-group-name> \
+  --parameters "ParameterName=rds.logical_replication,ParameterValue=1,ApplyMethod=pending-reboot"
+
+# Step 2: Reboot Aurora instance (REQUIRED - static parameter)
+aws rds reboot-db-instance \
+  --db-instance-identifier <instance-id>
+
+# Step 3: Wait for instance to be available (3-5 minutes)
+aws rds wait db-instance-available \
+  --db-instance-identifier <instance-id>
+
+# Step 4: Verify wal_level changed to 'logical'
+python3 cdc-streaming/scripts/fix-postgres-replication-privileges.py
+# Or manually:
+# psql -h <endpoint> -U postgres -d car_entities -c "SHOW wal_level;"
+# Should return: logical
+```
+
+**Solution 2: Fix Terraform to Prevent Future Drift**
+
+Remove `ignore_changes = [parameter]` from the lifecycle block in `terraform/modules/aurora/main.tf`:
+
+```hcl
+resource "aws_rds_cluster_parameter_group" "this" {
+  # ... other configuration ...
+  
+  lifecycle {
+    create_before_destroy = true
+    # Remove this line to allow Terraform to manage parameters:
+    # ignore_changes = [parameter]
+  }
+}
+```
+
+This ensures Terraform can detect and apply parameter changes.
+
+**Verification:**
+
+After enabling logical replication and rebooting:
+
+```bash
+# 1. Verify wal_level is 'logical'
+python3 << 'EOF'
+import asyncio
+import asyncpg
+
+async def verify():
+    conn = await asyncpg.connect(
+        host="<endpoint>", user="postgres", password="<password>",
+        database="car_entities", ssl='require'
+    )
+    wal_level = await conn.fetchval("SHOW wal_level;")
+    if wal_level == "logical":
+        print("✓ wal_level is 'logical' - CDC should work!")
+    else:
+        print(f"✗ wal_level is '{wal_level}' (expected 'logical')")
+    await conn.close()
+
+asyncio.run(verify())
+EOF
+
+# 2. Test replication slot creation
+python3 << 'EOF'
+import asyncio
+import asyncpg
+
+async def test_slot():
+    conn = await asyncpg.connect(
+        host="<endpoint>", user="postgres", password="<password>",
+        database="car_entities", ssl='require'
+    )
+    try:
+        await conn.execute("SELECT pg_create_logical_replication_slot('test_slot', 'pgoutput');")
+        print("✓ Can create replication slot")
+        await conn.execute("SELECT pg_drop_replication_slot('test_slot');")
+    except Exception as e:
+        print(f"✗ Cannot create slot: {e}")
+    await conn.close()
+
+asyncio.run(test_slot())
+EOF
+
+# 3. Restart connector
+confluent connect cluster pause <connector-id>
+sleep 5
+confluent connect cluster resume <connector-id>
+
+# 4. Check connector status
+sleep 30
+confluent connect cluster describe <connector-id>
+```
+
+**Prevention:**
+- Always verify `wal_level = logical` after Aurora cluster creation
+- Remove `ignore_changes = [parameter]` from Terraform lifecycle blocks
+- Document CDC requirements in infrastructure setup guides
+- Add validation checks in CI/CD pipelines
+
+**Related Documentation:**
+- See `cdc-streaming/scripts/fix-postgres-replication-privileges.py` for verification script
+- See `terraform/modules/aurora/main.tf` for parameter group configuration
+
 #### Issue 13: Connector Not Capturing Changes
 
 **Symptoms:**
