@@ -102,7 +102,7 @@ flowchart LR
 
 ### 1. Cost Analysis
 
-| Category | Current (Flink on Confluent Cloud) | Spring Boot (AWS EKS) |
+| Category | Flink on Confluent Cloud | Spring Boot (AWS EKS) |
 |----------|---------------------------|------------------------|
 | **Infrastructure** | | |
 | Kafka Broker (Confluent Cloud) | ~$1,200-3,000/mo (CKU-based) | ~$1,200-3,000/mo (CKU-based, same) |
@@ -113,7 +113,6 @@ flowchart LR
 | EC2 Nodes | ~$100-200/mo (1-2x m5.large, includes connector) | ~$300-600/mo (3x m5.large, includes connector + stream processor + consumers) |
 | **Engineering** | | |
 | Initial Build | Medium (Flink SQL + connector setup) | High (3-4 weeks) |
-| Ongoing Maintenance | Medium (Kafka Connect + Flink SQL) | Medium-High (Kafka Connect + Java code) |
 | **Total Estimated** | **$2,300-5,500/mo** | **$1,700-4,000/mo + eng time** |
 
 **Cost Verdict:** Spring Boot saves on Flink compute costs (included in EKS nodes), but connector costs are the same for both implementations (both self-hosted on EKS). Kafka broker costs remain the same since topics stay in Confluent Cloud. Total savings are ~25-30% on infrastructure, with significant engineering investment upfront and ongoing. The main savings come from eliminating Flink compute costs. Both implementations require EKS infrastructure for the connector.
