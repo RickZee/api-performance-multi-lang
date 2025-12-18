@@ -52,20 +52,28 @@ echo -e "${BLUE}========================================${NC}"
 
 # Clear database if requested (default: true)
 if [ "${CLEAR_DATABASE:-true}" = "true" ]; then
-    log_progress "Clearing database before test..." "$BLUE"
-    # The clear-both-databases.sh script clears both databases
-    # We'll let it run and it will handle errors gracefully
-    bash "$SCRIPT_DIR/clear-both-databases.sh" 2>&1 | grep -E "(Clearing|cleared|✅|❌|⚠️)" | head -30 || {
-        log_progress "Database clear had issues, continuing anyway..." "$YELLOW"
-    }
-    log_progress "Database clear complete" "$GREEN"
+    if [ -f "$SCRIPT_DIR/clear-both-databases.sh" ]; then
+        log_progress "Clearing database before test..." "$BLUE"
+        # The clear-both-databases.sh script clears both databases
+        # We'll let it run and it will handle errors gracefully
+        bash "$SCRIPT_DIR/clear-both-databases.sh" 2>&1 | grep -E "(Clearing|cleared|✅|❌|⚠️)" | head -30 || {
+            log_progress "Database clear had issues, continuing anyway..." "$YELLOW"
+        }
+        log_progress "Database clear complete" "$GREEN"
+    else
+        log_progress "Skipping database clear (clear-both-databases.sh not found)" "$YELLOW"
+    fi
 fi
 
 # Pre-warm Lambdas if requested
 if [ "${PRE_WARM_LAMBDAS:-true}" = "true" ]; then
-    log_progress "Pre-warming Lambda functions..." "$BLUE"
-    bash "$SCRIPT_DIR/pre-warm-lambdas.sh" 3 > /dev/null 2>&1 || true
-    log_progress "Pre-warming complete" "$GREEN"
+    if [ -f "$SCRIPT_DIR/pre-warm-lambdas.sh" ]; then
+        log_progress "Pre-warming Lambda functions..." "$BLUE"
+        bash "$SCRIPT_DIR/pre-warm-lambdas.sh" 3 > /dev/null 2>&1 || true
+        log_progress "Pre-warming complete" "$GREEN"
+    else
+        log_progress "Skipping Lambda pre-warming (pre-warm-lambdas.sh not found)" "$YELLOW"
+    fi
 fi
 echo ""
 echo "Database Type: $DB_TYPE"
@@ -222,19 +230,23 @@ fi
 # Validate only the target database (no CDC between DSQL and PostgreSQL)
 if [ "$DB_TYPE" = "pg" ]; then
     # Validate Aurora PostgreSQL (target database for PG API)
-    if [ -n "$AURORA_ENDPOINT" ] && [ -n "$AURORA_PASSWORD" ]; then
-        echo -e "${BLUE}Validating Aurora PostgreSQL...${NC}"
-        export AURORA_ENDPOINT
-        export AURORA_PASSWORD
-        python3 scripts/validate-against-sent-events.py \
-            --events-file "$EVENTS_FILE" \
-            --aurora \
-            --aurora-endpoint "$AURORA_ENDPOINT" \
-            --aurora-password "$AURORA_PASSWORD" || {
-            echo -e "${YELLOW}⚠️  Aurora validation had issues${NC}"
-        }
+    if [ -f "$PROJECT_ROOT/scripts/validate-against-sent-events.py" ]; then
+        if [ -n "$AURORA_ENDPOINT" ] && [ -n "$AURORA_PASSWORD" ]; then
+            echo -e "${BLUE}Validating Aurora PostgreSQL...${NC}"
+            export AURORA_ENDPOINT
+            export AURORA_PASSWORD
+            python3 "$PROJECT_ROOT/scripts/validate-against-sent-events.py" \
+                --events-file "$EVENTS_FILE" \
+                --aurora \
+                --aurora-endpoint "$AURORA_ENDPOINT" \
+                --aurora-password "$AURORA_PASSWORD" || {
+                echo -e "${YELLOW}⚠️  Aurora validation had issues${NC}"
+            }
+        else
+            echo -e "${YELLOW}⚠️  Skipping Aurora validation (endpoint/password not found)${NC}"
+        fi
     else
-        echo -e "${YELLOW}⚠️  Skipping Aurora validation (endpoint/password not found)${NC}"
+        echo -e "${YELLOW}⚠️  Skipping Aurora validation (validate-against-sent-events.py not found)${NC}"
     fi
 elif [ "$DB_TYPE" = "dsql" ]; then
     # Validate DSQL (target database for DSQL API)
@@ -276,7 +288,7 @@ elif [ "$DB_TYPE" = "dsql" ]; then
                         log_progress "Bastion host is now running. Waiting for SSM to be ready..." "$BLUE"
                         # Wait a bit more for SSM agent to be ready
                         sleep 10
-                        log_success "Bastion host is ready"
+                        log_progress "Bastion host is ready" "$GREEN"
                         break
                     fi
                     
@@ -285,28 +297,32 @@ elif [ "$DB_TYPE" = "dsql" ]; then
                 done
                 
                 if [ "$BASTION_STATUS" != "running" ]; then
-                    log_error "Bastion host did not become running within $max_wait seconds"
+                    log_progress "Bastion host did not become running within $max_wait seconds" "$RED"
                     echo -e "${YELLOW}⚠️  DSQL validation may fail. Bastion host status: $BASTION_STATUS${NC}"
                 fi
             elif [ "$BASTION_STATUS" = "running" ]; then
-                log_success "Bastion host is already running"
+                log_progress "Bastion host is already running" "$GREEN"
             elif [ "$BASTION_STATUS" = "not-found" ]; then
-                log_warn "Bastion host not found. DSQL validation may fail."
+                log_progress "Bastion host not found. DSQL validation may fail." "$YELLOW"
             else
-                log_warn "Bastion host is in state: $BASTION_STATUS. DSQL validation may fail."
+                log_progress "Bastion host is in state: $BASTION_STATUS. DSQL validation may fail." "$YELLOW"
             fi
         else
-            log_warn "Bastion host instance ID not found. DSQL validation may fail."
+            log_progress "Bastion host instance ID not found. DSQL validation may fail." "$YELLOW"
         fi
         
         echo ""
         echo -e "${BLUE}Validating DSQL...${NC}"
-        python3 scripts/validate-against-sent-events.py \
-            --events-file "$EVENTS_FILE" \
-            --dsql \
-            --query-dsql-script scripts/query-dsql.sh || {
-            echo -e "${YELLOW}⚠️  DSQL validation had issues${NC}"
-        }
+        if [ -f "$PROJECT_ROOT/scripts/validate-against-sent-events.py" ]; then
+            python3 "$PROJECT_ROOT/scripts/validate-against-sent-events.py" \
+                --events-file "$EVENTS_FILE" \
+                --dsql \
+                --query-dsql-script "$PROJECT_ROOT/scripts/query-dsql.sh" || {
+                echo -e "${YELLOW}⚠️  DSQL validation had issues${NC}"
+            }
+        else
+            echo -e "${YELLOW}⚠️  Skipping DSQL validation (validate-against-sent-events.py not found)${NC}"
+        fi
     else
         echo -e "${YELLOW}⚠️  Skipping DSQL validation (query-dsql.sh not found)${NC}"
     fi
