@@ -94,78 +94,170 @@ services:
       start_period: 40s
       retries: 3
 
-  # Loan Consumer
+  # ============================================================================
+  # Spring Boot Stream Processor Consumers (-spring topics)
+  # ============================================================================
+
+  # Loan Consumer (Spring)
   loan-consumer:
     build:
       context: ./consumers/loan-consumer
       dockerfile: Dockerfile
-    container_name: cdc-loan-consumer
-    hostname: loan-consumer
+    container_name: cdc-loan-consumer-spring
+    hostname: loan-consumer-spring
     environment:
       # Set KAFKA_BOOTSTRAP_SERVERS to your Confluent Cloud bootstrap servers
       # Example: pkc-xxxxx.us-east-1.aws.confluent.cloud:9092
       KAFKA_BOOTSTRAP_SERVERS: ${KAFKA_BOOTSTRAP_SERVERS}
-      KAFKA_TOPIC: filtered-loan-created-events
+      # Consumes from Spring Boot stream processor topics
+      KAFKA_TOPIC: ${KAFKA_TOPIC_LOAN:-filtered-loan-created-events-spring}
       KAFKA_API_KEY: ${KAFKA_API_KEY:-}
       KAFKA_API_SECRET: ${KAFKA_API_SECRET:-}
-      CONSUMER_GROUP_ID: loan-consumer-group
+      CONSUMER_GROUP_ID: loan-consumer-spring-group
     networks:
       - cdc-network
     restart: unless-stopped
 
-  # Loan Payment Consumer
+  # Loan Payment Consumer (Spring)
   loan-payment-consumer:
     build:
       context: ./consumers/loan-payment-consumer
       dockerfile: Dockerfile
-    container_name: cdc-loan-payment-consumer
-    hostname: loan-payment-consumer
+    container_name: cdc-loan-payment-consumer-spring
+    hostname: loan-payment-consumer-spring
     environment:
       # Set KAFKA_BOOTSTRAP_SERVERS to your Confluent Cloud bootstrap servers
       # Example: pkc-xxxxx.us-east-1.aws.confluent.cloud:9092
       KAFKA_BOOTSTRAP_SERVERS: ${KAFKA_BOOTSTRAP_SERVERS}
-      KAFKA_TOPIC: filtered-loan-payment-submitted-events
+      # Consumes from Spring Boot stream processor topics
+      KAFKA_TOPIC: ${KAFKA_TOPIC_LOAN_PAYMENT:-filtered-loan-payment-submitted-events-spring}
       KAFKA_API_KEY: ${KAFKA_API_KEY:-}
       KAFKA_API_SECRET: ${KAFKA_API_SECRET:-}
-      CONSUMER_GROUP_ID: loan-payment-consumer-group
+      CONSUMER_GROUP_ID: loan-payment-consumer-spring-group
     networks:
       - cdc-network
     restart: unless-stopped
 
-  # Service Consumer
+  # Service Consumer (Spring)
   service-consumer:
     build:
       context: ./consumers/service-consumer
       dockerfile: Dockerfile
-    container_name: cdc-service-consumer
-    hostname: service-consumer
+    container_name: cdc-service-consumer-spring
+    hostname: service-consumer-spring
     environment:
       # Set KAFKA_BOOTSTRAP_SERVERS to your Confluent Cloud bootstrap servers
       # Example: pkc-xxxxx.us-east-1.aws.confluent.cloud:9092
       KAFKA_BOOTSTRAP_SERVERS: ${KAFKA_BOOTSTRAP_SERVERS}
-      KAFKA_TOPIC: filtered-service-events
+      # Consumes from Spring Boot stream processor topics
+      KAFKA_TOPIC: ${KAFKA_TOPIC_SERVICE:-filtered-service-events-spring}
       KAFKA_API_KEY: ${KAFKA_API_KEY:-}
       KAFKA_API_SECRET: ${KAFKA_API_SECRET:-}
-      CONSUMER_GROUP_ID: service-consumer-group
+      CONSUMER_GROUP_ID: service-consumer-spring-group
     networks:
       - cdc-network
     restart: unless-stopped
 
-  # Car Consumer
+  # Car Consumer (Spring)
   car-consumer:
     build:
       context: ./consumers/car-consumer
       dockerfile: Dockerfile
-    container_name: cdc-car-consumer
-    hostname: car-consumer
+    container_name: cdc-car-consumer-spring
+    hostname: car-consumer-spring
     environment:
       # Set KAFKA_BOOTSTRAP_SERVERS to your Confluent Cloud bootstrap servers
       # Example: pkc-xxxxx.us-east-1.aws.confluent.cloud:9092
       KAFKA_BOOTSTRAP_SERVERS: ${KAFKA_BOOTSTRAP_SERVERS}
-      KAFKA_TOPIC: filtered-car-created-events
+      # Consumes from Spring Boot stream processor topics
+      KAFKA_TOPIC: ${KAFKA_TOPIC_CAR:-filtered-car-created-events-spring}
       KAFKA_API_KEY: ${KAFKA_API_KEY:-}
       KAFKA_API_SECRET: ${KAFKA_API_SECRET:-}
-      CONSUMER_GROUP_ID: car-consumer-group
+      CONSUMER_GROUP_ID: car-consumer-spring-group
+    networks:
+      - cdc-network
+    restart: unless-stopped
+
+  # ============================================================================
+  # Flink Stream Processor Consumers (-flink topics)
+  # ============================================================================
+
+  # Loan Consumer (Flink)
+  loan-consumer-flink:
+    build:
+      context: ./consumers/loan-consumer
+      dockerfile: Dockerfile
+    container_name: cdc-loan-consumer-flink
+    hostname: loan-consumer-flink
+    environment:
+      # Set KAFKA_BOOTSTRAP_SERVERS to your Confluent Cloud bootstrap servers
+      # Example: pkc-xxxxx.us-east-1.aws.confluent.cloud:9092
+      KAFKA_BOOTSTRAP_SERVERS: ${KAFKA_BOOTSTRAP_SERVERS}
+      # Consumes from Flink SQL stream processor topics
+      KAFKA_TOPIC: ${KAFKA_TOPIC_LOAN_FLINK:-filtered-loan-created-events-flink}
+      KAFKA_API_KEY: ${KAFKA_API_KEY:-}
+      KAFKA_API_SECRET: ${KAFKA_API_SECRET:-}
+      CONSUMER_GROUP_ID: loan-consumer-flink-group
+    networks:
+      - cdc-network
+    restart: unless-stopped
+
+  # Loan Payment Consumer (Flink)
+  loan-payment-consumer-flink:
+    build:
+      context: ./consumers/loan-payment-consumer
+      dockerfile: Dockerfile
+    container_name: cdc-loan-payment-consumer-flink
+    hostname: loan-payment-consumer-flink
+    environment:
+      # Set KAFKA_BOOTSTRAP_SERVERS to your Confluent Cloud bootstrap servers
+      # Example: pkc-xxxxx.us-east-1.aws.confluent.cloud:9092
+      KAFKA_BOOTSTRAP_SERVERS: ${KAFKA_BOOTSTRAP_SERVERS}
+      # Consumes from Flink SQL stream processor topics
+      KAFKA_TOPIC: ${KAFKA_TOPIC_LOAN_PAYMENT_FLINK:-filtered-loan-payment-submitted-events-flink}
+      KAFKA_API_KEY: ${KAFKA_API_KEY:-}
+      KAFKA_API_SECRET: ${KAFKA_API_SECRET:-}
+      CONSUMER_GROUP_ID: loan-payment-consumer-flink-group
+    networks:
+      - cdc-network
+    restart: unless-stopped
+
+  # Service Consumer (Flink)
+  service-consumer-flink:
+    build:
+      context: ./consumers/service-consumer
+      dockerfile: Dockerfile
+    container_name: cdc-service-consumer-flink
+    hostname: service-consumer-flink
+    environment:
+      # Set KAFKA_BOOTSTRAP_SERVERS to your Confluent Cloud bootstrap servers
+      # Example: pkc-xxxxx.us-east-1.aws.confluent.cloud:9092
+      KAFKA_BOOTSTRAP_SERVERS: ${KAFKA_BOOTSTRAP_SERVERS}
+      # Consumes from Flink SQL stream processor topics
+      KAFKA_TOPIC: ${KAFKA_TOPIC_SERVICE_FLINK:-filtered-service-events-flink}
+      KAFKA_API_KEY: ${KAFKA_API_KEY:-}
+      KAFKA_API_SECRET: ${KAFKA_API_SECRET:-}
+      CONSUMER_GROUP_ID: service-consumer-flink-group
+    networks:
+      - cdc-network
+    restart: unless-stopped
+
+  # Car Consumer (Flink)
+  car-consumer-flink:
+    build:
+      context: ./consumers/car-consumer
+      dockerfile: Dockerfile
+    container_name: cdc-car-consumer-flink
+    hostname: car-consumer-flink
+    environment:
+      # Set KAFKA_BOOTSTRAP_SERVERS to your Confluent Cloud bootstrap servers
+      # Example: pkc-xxxxx.us-east-1.aws.confluent.cloud:9092
+      KAFKA_BOOTSTRAP_SERVERS: ${KAFKA_BOOTSTRAP_SERVERS}
+      # Consumes from Flink SQL stream processor topics
+      KAFKA_TOPIC: ${KAFKA_TOPIC_CAR_FLINK:-filtered-car-created-events-flink}
+      KAFKA_API_KEY: ${KAFKA_API_KEY:-}
+      KAFKA_API_SECRET: ${KAFKA_API_SECRET:-}
+      CONSUMER_GROUP_ID: car-consumer-flink-group
     networks:
       - cdc-network
     restart: unless-stopped

@@ -30,3 +30,9 @@ variable "tags" {
   type        = map(string)
   default     = {}
 }
+
+variable "bastion_role_arn" {
+  description = "ARN of the bastion host IAM role (for detecting DSQL API calls)"
+  type        = string
+  default     = ""
+}

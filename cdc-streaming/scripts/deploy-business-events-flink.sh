@@ -73,6 +73,25 @@ deploy_statement() {
 
 # Extract source table SQL
 echo -e "${BLUE}Step 1: Deploying Source Table${NC}"
+
+# Check if schema exists in Schema Registry (required for json-registry format)
+echo -e "${BLUE}ℹ${NC} Checking if schema exists for raw-event-headers-value..."
+if confluent schema-registry subject list 2>/dev/null | grep -q "raw-event-headers-value"; then
+    echo -e "${GREEN}✓${NC} Schema exists for raw-event-headers-value"
+else
+    echo -e "${YELLOW}⚠${NC} Schema not found for raw-event-headers-value"
+    echo -e "${BLUE}ℹ${NC} Schema is required for json-registry format. Register it first:"
+    echo "   ./cdc-streaming/scripts/register-raw-event-headers-schema.sh"
+    echo ""
+    read -p "Continue anyway? (y/N) " -n 1 -r
+    echo
+    if [[ ! $REPLY =~ ^[Yy]$ ]]; then
+        echo -e "${YELLOW}Deployment cancelled. Please register schema first.${NC}"
+        exit 1
+    fi
+    echo -e "${YELLOW}⚠${NC} Proceeding without schema verification - deployment may fail"
+fi
+
 SOURCE_SQL=$(awk '/CREATE TABLE.*raw-event-headers/,/);/{print; if(/);/) exit}' "$SQL_FILE" | grep -v "^--" | tr '\n' ' ' | sed 's/  */ /g')
 if [ -n "$SOURCE_SQL" ]; then
     deploy_statement "source-raw-event-headers" "$SOURCE_SQL"
@@ -86,24 +105,24 @@ echo ""
 # Extract and deploy sink tables
 echo -e "${BLUE}Step 2: Deploying Sink Tables${NC}"
 
-SINK_CAR_SQL=$(awk '/CREATE TABLE.*filtered-car-created-events/,/);/{print; if(/);/) exit}' "$SQL_FILE" | grep -v "^--" | tr '\n' ' ' | sed 's/  */ /g')
+SINK_CAR_SQL=$(awk '/CREATE TABLE.*filtered-car-created-events-flink/,/);/{print; if(/);/) exit}' "$SQL_FILE" | grep -v "^--" | tr '\n' ' ' | sed 's/  */ /g')
 if [ -n "$SINK_CAR_SQL" ]; then
-    deploy_statement "sink-filtered-car-created-events" "$SINK_CAR_SQL"
+    deploy_statement "sink-filtered-car-created-events-flink" "$SINK_CAR_SQL"
 fi
 
-SINK_LOAN_SQL=$(awk '/CREATE TABLE.*filtered-loan-created-events/,/);/{print; if(/);/) exit}' "$SQL_FILE" | grep -v "^--" | tr '\n' ' ' | sed 's/  */ /g')
+SINK_LOAN_SQL=$(awk '/CREATE TABLE.*filtered-loan-created-events-flink/,/);/{print; if(/);/) exit}' "$SQL_FILE" | grep -v "^--" | tr '\n' ' ' | sed 's/  */ /g')
 if [ -n "$SINK_LOAN_SQL" ]; then
-    deploy_statement "sink-filtered-loan-created-events" "$SINK_LOAN_SQL"
+    deploy_statement "sink-filtered-loan-created-events-flink" "$SINK_LOAN_SQL"
 fi
 
-SINK_PAYMENT_SQL=$(awk '/CREATE TABLE.*filtered-loan-payment-submitted-events/,/);/{print; if(/);/) exit}' "$SQL_FILE" | grep -v "^--" | tr '\n' ' ' | sed 's/  */ /g')
+SINK_PAYMENT_SQL=$(awk '/CREATE TABLE.*filtered-loan-payment-submitted-events-flink/,/);/{print; if(/);/) exit}' "$SQL_FILE" | grep -v "^--" | tr '\n' ' ' | sed 's/  */ /g')
 if [ -n "$SINK_PAYMENT_SQL" ]; then
-    deploy_statement "sink-filtered-loan-payment-submitted-events" "$SINK_PAYMENT_SQL"
+    deploy_statement "sink-filtered-loan-payment-submitted-events-flink" "$SINK_PAYMENT_SQL"
 fi
 
-SINK_SERVICE_SQL=$(awk '/CREATE TABLE.*filtered-service-events/,/);/{print; if(/);/) exit}' "$SQL_FILE" | grep -v "^--" | tr '\n' ' ' | sed 's/  */ /g')
+SINK_SERVICE_SQL=$(awk '/CREATE TABLE.*filtered-service-events-flink/,/);/{print; if(/);/) exit}' "$SQL_FILE" | grep -v "^--" | tr '\n' ' ' | sed 's/  */ /g')
 if [ -n "$SINK_SERVICE_SQL" ]; then
-    deploy_statement "sink-filtered-service-events" "$SINK_SERVICE_SQL"
+    deploy_statement "sink-filtered-service-events-flink" "$SINK_SERVICE_SQL"
 fi
 
 echo ""
@@ -111,24 +130,24 @@ echo ""
 # Extract and deploy INSERT statements
 echo -e "${BLUE}Step 3: Deploying INSERT Statements${NC}"
 
-INSERT_CAR_SQL=$(awk '/INSERT INTO.*filtered-car-created-events/,/;/{print; if(/;/) exit}' "$SQL_FILE" | grep -v "^--" | tr '\n' ' ' | sed 's/  */ /g')
+INSERT_CAR_SQL=$(awk '/INSERT INTO.*filtered-car-created-events-flink/,/;/{print; if(/;/) exit}' "$SQL_FILE" | grep -v "^--" | tr '\n' ' ' | sed 's/  */ /g')
 if [ -n "$INSERT_CAR_SQL" ]; then
-    deploy_statement "insert-car-created-filter" "$INSERT_CAR_SQL"
+    deploy_statement "insert-car-created-filter-flink" "$INSERT_CAR_SQL"
 fi
 
-INSERT_LOAN_SQL=$(awk '/INSERT INTO.*filtered-loan-created-events/,/;/{print; if(/;/) exit}' "$SQL_FILE" | grep -v "^--" | tr '\n' ' ' | sed 's/  */ /g')
+INSERT_LOAN_SQL=$(awk '/INSERT INTO.*filtered-loan-created-events-flink/,/;/{print; if(/;/) exit}' "$SQL_FILE" | grep -v "^--" | tr '\n' ' ' | sed 's/  */ /g')
 if [ -n "$INSERT_LOAN_SQL" ]; then
-    deploy_statement "insert-loan-created-filter" "$INSERT_LOAN_SQL"
+    deploy_statement "insert-loan-created-filter-flink" "$INSERT_LOAN_SQL"
 fi
 
-INSERT_PAYMENT_SQL=$(awk '/INSERT INTO.*filtered-loan-payment-submitted-events/,/;/{print; if(/;/) exit}' "$SQL_FILE" | grep -v "^--" | tr '\n' ' ' | sed 's/  */ /g')
+INSERT_PAYMENT_SQL=$(awk '/INSERT INTO.*filtered-loan-payment-submitted-events-flink/,/;/{print; if(/;/) exit}' "$SQL_FILE" | grep -v "^--" | tr '\n' ' ' | sed 's/  */ /g')
 if [ -n "$INSERT_PAYMENT_SQL" ]; then
-    deploy_statement "insert-loan-payment-submitted-filter" "$INSERT_PAYMENT_SQL"
+    deploy_statement "insert-loan-payment-submitted-filter-flink" "$INSERT_PAYMENT_SQL"
 fi
 
-INSERT_SERVICE_SQL=$(awk '/INSERT INTO.*filtered-service-events/,/;/{print; if(/;/) exit}' "$SQL_FILE" | grep -v "^--" | tr '\n' ' ' | sed 's/  */ /g')
+INSERT_SERVICE_SQL=$(awk '/INSERT INTO.*filtered-service-events-flink/,/;/{print; if(/;/) exit}' "$SQL_FILE" | grep -v "^--" | tr '\n' ' ' | sed 's/  */ /g')
 if [ -n "$INSERT_SERVICE_SQL" ]; then
-    deploy_statement "insert-service-events-filter" "$INSERT_SERVICE_SQL"
+    deploy_statement "insert-service-events-filter-flink" "$INSERT_SERVICE_SQL"
 fi
 
 echo ""
@@ -146,5 +165,7 @@ echo ""
 echo -e "${CYAN}Next steps:${NC}"
 echo "  1. Check statement status: confluent flink statement list --compute-pool $COMPUTE_POOL_ID"
 echo "  2. Verify topics: confluent kafka topic list | grep filtered"
-echo "  3. Check topic messages: confluent kafka topic consume filtered-car-created-events --max-messages 10"
+echo "  3. Check topic messages: confluent kafka topic consume filtered-car-created-events-flink --max-messages 10"
+echo ""
+echo -e "${YELLOW}Note: Topics now use -flink suffix to distinguish from Spring Boot processor${NC}"
 echo ""

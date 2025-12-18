@@ -238,7 +238,68 @@ if [ "$DB_TYPE" = "pg" ]; then
     fi
 elif [ "$DB_TYPE" = "dsql" ]; then
     # Validate DSQL (target database for DSQL API)
+    # First, check if bastion host is running (required for query-dsql.sh)
     if [ -f "scripts/query-dsql.sh" ]; then
+        log_progress "Checking bastion host status..." "$BLUE"
+        
+        # Get bastion instance ID from Terraform
+        BASTION_INSTANCE_ID=$(cd terraform && terraform output -raw bastion_host_instance_id 2>/dev/null || echo "")
+        AWS_REGION=$(cd terraform && terraform output -raw aws_region 2>/dev/null || aws configure get region 2>/dev/null || echo "us-east-1")
+        
+        if [ -n "$BASTION_INSTANCE_ID" ]; then
+            # Check bastion host status
+            BASTION_STATUS=$(aws ec2 describe-instances \
+                --instance-ids "$BASTION_INSTANCE_ID" \
+                --region "$AWS_REGION" \
+                --query 'Reservations[0].Instances[0].State.Name' \
+                --output text 2>/dev/null || echo "not-found")
+            
+            if [ "$BASTION_STATUS" = "stopped" ]; then
+                log_progress "Bastion host is stopped. Starting it..." "$YELLOW"
+                aws ec2 start-instances \
+                    --instance-ids "$BASTION_INSTANCE_ID" \
+                    --region "$AWS_REGION" \
+                    > /dev/null
+                
+                log_progress "Waiting for bastion host to become running..." "$BLUE"
+                max_wait=300  # 5 minutes
+                elapsed=0
+                
+                while [ $elapsed -lt $max_wait ]; do
+                    BASTION_STATUS=$(aws ec2 describe-instances \
+                        --instance-ids "$BASTION_INSTANCE_ID" \
+                        --region "$AWS_REGION" \
+                        --query 'Reservations[0].Instances[0].State.Name' \
+                        --output text 2>/dev/null || echo "not-found")
+                    
+                    if [ "$BASTION_STATUS" = "running" ]; then
+                        log_progress "Bastion host is now running. Waiting for SSM to be ready..." "$BLUE"
+                        # Wait a bit more for SSM agent to be ready
+                        sleep 10
+                        log_success "Bastion host is ready"
+                        break
+                    fi
+                    
+                    sleep 5
+                    elapsed=$((elapsed + 5))
+                done
+                
+                if [ "$BASTION_STATUS" != "running" ]; then
+                    log_error "Bastion host did not become running within $max_wait seconds"
+                    echo -e "${YELLOW}⚠️  DSQL validation may fail. Bastion host status: $BASTION_STATUS${NC}"
+                fi
+            elif [ "$BASTION_STATUS" = "running" ]; then
+                log_success "Bastion host is already running"
+            elif [ "$BASTION_STATUS" = "not-found" ]; then
+                log_warn "Bastion host not found. DSQL validation may fail."
+            else
+                log_warn "Bastion host is in state: $BASTION_STATUS. DSQL validation may fail."
+            fi
+        else
+            log_warn "Bastion host instance ID not found. DSQL validation may fail."
+        fi
+        
+        echo ""
         echo -e "${BLUE}Validating DSQL...${NC}"
         python3 scripts/validate-against-sent-events.py \
             --events-file "$EVENTS_FILE" \

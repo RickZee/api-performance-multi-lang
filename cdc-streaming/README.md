@@ -7,15 +7,22 @@ A configurable streaming architecture that captures PostgreSQL database changes 
 ## What It Does
 
 ```text
-PostgreSQL → CDC Connector → Kafka → Flink SQL → Filtered Topics → Consumers
+PostgreSQL → CDC Connector → Kafka → Stream Processor → Filtered Topics → Consumers
 ```
 
 The system automatically:
 
 - **Captures** database changes via CDC
 - **Streams** events to Kafka
-- **Filters** events by type using Flink SQL
-- **Routes** filtered events to consumer-specific topics
+- **Filters** events by type using Flink SQL or Spring Boot Kafka Streams
+- **Routes** filtered events to processor-specific topics (with `-flink` or `-spring` suffix)
+- **Enables** consumers to distinguish which processor created events
+
+**Stream Processors:**
+- **Flink SQL** (Confluent Cloud): Writes to `filtered-*-events-flink` topics
+- **Spring Boot Kafka Streams**: Writes to `filtered-*-events-spring` topics
+
+Consumers subscribe to the appropriate topic based on which processor is active.
 
 ## Visual Overview
 
@@ -304,26 +311,6 @@ UNION ALL SELECT 'loan_payment_entities', COUNT(*) FROM loan_payment_entities
 UNION ALL SELECT 'service_record_entities', COUNT(*) FROM service_record_entities
 ORDER BY table_name;
 ```
-
-**Option 3: Local Connection (Requires psql Installation)**
-
-If you want to connect directly from your local machine, install `psql` first:
-
-```bash
-# Install psql (macOS)
-brew install postgresql@16
-
-# Or if postgresql@16 not available:
-brew install postgresql
-
-# Then connect (requires DSQL to be publicly accessible)
-export DSQL_HOST=$(cd terraform && terraform output -raw aurora_dsql_host)
-export AWS_REGION=us-east-1
-export PGPASSWORD=$(aws dsql generate-db-connect-admin-auth-token --region $AWS_REGION --hostname $DSQL_HOST)
-psql -h $DSQL_HOST -U admin -d postgres -p 5432
-```
-
-**Note**: Options 1 and 2 work regardless of DSQL public access settings since they connect via the bastion host within the VPC. Option 3 requires DSQL to be publicly accessible and `psql` installed locally.
 
 **Option 3: Local Connection (Requires psql Installation)**
 

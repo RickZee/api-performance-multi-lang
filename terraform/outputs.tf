@@ -174,3 +174,14 @@ output "bastion_host_ssm_command" {
   description = "SSM command to connect to bastion host"
   value       = var.enable_bastion_host && var.enable_aurora_dsql_cluster ? module.bastion_host[0].ssm_command : null
 }
+
+# EC2 Auto-Stop Lambda Outputs
+output "bastion_auto_stop_function_name" {
+  description = "EC2 auto-stop Lambda function name for bastion host"
+  value       = var.enable_bastion_host && var.enable_aurora_dsql_cluster ? module.ec2_auto_stop[0].function_name : null
+}
+
+output "bastion_auto_stop_function_arn" {
+  description = "EC2 auto-stop Lambda function ARN for bastion host"
+  value       = var.enable_bastion_host && var.enable_aurora_dsql_cluster ? module.ec2_auto_stop[0].function_arn : null
+}

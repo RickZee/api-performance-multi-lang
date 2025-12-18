@@ -27,3 +27,8 @@ output "ssm_command" {
   description = "SSM command to connect to bastion host"
   value       = "aws ssm start-session --target ${aws_instance.bastion.id} --region ${var.aws_region}"
 }
+
+output "iam_role_arn" {
+  description = "ARN of the bastion host IAM role"
+  value       = aws_iam_role.bastion.arn
+}

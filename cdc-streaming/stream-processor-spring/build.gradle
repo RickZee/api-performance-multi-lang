@@ -24,7 +24,6 @@ dependencies {
     // Kafka Streams
     implementation 'org.springframework.kafka:spring-kafka'
     implementation 'org.apache.kafka:kafka-streams'
-    implementation 'org.springframework.kafka:spring-kafka-streams'
     
     // Jackson for JSON serialization
     implementation 'com.fasterxml.jackson.core:jackson-databind'

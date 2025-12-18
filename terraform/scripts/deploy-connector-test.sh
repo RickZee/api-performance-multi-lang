@@ -103,25 +103,31 @@ EOF
 
 # Create test database initialization
 cat > init-test-db.sql << EOF
--- Create test database schema matching DSQL
+-- Create test database schema matching event_headers table structure
+-- Based on current production schema from data/schema.sql
 CREATE TABLE event_headers (
     id VARCHAR(255) PRIMARY KEY,
-    event_name VARCHAR(255),
-    event_type VARCHAR(255),
-    created_date TIMESTAMP,
-    saved_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    header_data JSONB
+    event_name VARCHAR(255) NOT NULL,
+    event_type VARCHAR(255) NOT NULL,
+    created_date TIMESTAMP NOT NULL,
+    saved_date TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    header_data JSONB NOT NULL
 );
 
--- Insert test data
+-- Create index on event_type for filtering
+CREATE INDEX idx_event_headers_event_type ON event_headers(event_type);
+
+-- Insert test data matching production event types
 INSERT INTO event_headers (id, event_name, event_type, created_date, saved_date, header_data)
 VALUES
-    ('test-1', 'user.created', 'CREATE', NOW(), NOW(), '{"user_id": "123", "email": "test@example.com"}'),
-    ('test-2', 'user.updated', 'UPDATE', NOW(), NOW(), '{"user_id": "123", "changes": ["email"]}'),
-    ('test-3', 'user.deleted', 'DELETE', NOW(), NOW(), '{"user_id": "123"}');
+    ('test-1', 'CarCreated', 'CarCreated', NOW(), NOW(), '{"uuid": "test-1", "eventName": "CarCreated", "eventType": "CarCreated"}'::jsonb),
+    ('test-2', 'LoanCreated', 'LoanCreated', NOW(), NOW(), '{"uuid": "test-2", "eventName": "LoanCreated", "eventType": "LoanCreated"}'::jsonb),
+    ('test-3', 'LoanPaymentSubmitted', 'LoanPaymentSubmitted', NOW(), NOW(), '{"uuid": "test-3", "eventName": "LoanPaymentSubmitted", "eventType": "LoanPaymentSubmitted"}'::jsonb),
+    ('test-4', 'CarServiceDone', 'CarServiceDone', NOW(), NOW(), '{"uuid": "test-4", "eventName": "CarServiceDone", "eventType": "CarServiceDone"}'::jsonb);
 EOF
 
 # Create connector configuration
+# Updated to match current event_headers table structure and use ExtractNewRecordState transform
 cat > dsql-connector-test.json << EOF
 {
   "name": "dsql-cdc-connector",
@@ -140,7 +146,15 @@ cat > dsql-connector-test.json << EOF
     "key.converter": "org.apache.kafka.connect.json.JsonConverter",
     "value.converter": "org.apache.kafka.connect.json.JsonConverter",
     "key.converter.schemas.enable": "false",
-    "value.converter.schemas.enable": "false"
+    "value.converter.schemas.enable": "false",
+    "transforms": "unwrap,route",
+    "transforms.unwrap.type": "io.debezium.transforms.ExtractNewRecordState",
+    "transforms.unwrap.drop.tombstones": "false",
+    "transforms.unwrap.add.fields": "op,table,ts_ms",
+    "transforms.unwrap.add.fields.prefix": "__",
+    "transforms.route.type": "org.apache.kafka.connect.transforms.RegexRouter",
+    "transforms.route.regex": "dsql-test\\.public\\.event_headers",
+    "transforms.route.replacement": "raw-event-headers-test"
   }
 }
 EOF
@@ -169,10 +183,12 @@ echo "3. Check connector status:"
 echo "   curl -X GET http://localhost:8083/connectors/dsql-cdc-connector/status"
 echo ""
 echo "4. Insert test data into DSQL event_headers table:"
-echo "   PGPASSWORD='$TOKEN' psql -h $DSQL_ENDPOINT -p 5432 -U $IAM_USER -d $DB_NAME -c \"INSERT INTO event_headers (id, event_name, event_type, created_date, saved_date, header_data) VALUES ('test-new', 'test.event', 'CREATE', NOW(), NOW(), '{\\\\"test\\\": \\\\"data\\\"}'::jsonb);\""
+echo "   PGPASSWORD='$TOKEN' psql -h $DSQL_ENDPOINT -p 5432 -U $IAM_USER -d $DB_NAME -c \"INSERT INTO event_headers (id, event_name, event_type, created_date, saved_date, header_data) VALUES ('test-new', 'CarCreated', 'CarCreated', NOW(), NOW(), '{\\\"uuid\\\": \\\"test-new\\\", \\\"eventName\\\": \\\"CarCreated\\\", \\\"eventType\\\": \\\"CarCreated\\\"}'::jsonb);\""
 echo ""
-echo "5. Check Kafka topics:"
-echo "   docker exec \$(docker-compose -f docker-compose.test.yml ps -q kafka) kafka-console-consumer --bootstrap-server localhost:9092 --topic dsql-test.event_headers --from-beginning"
+echo "5. Check Kafka topics (should route to raw-event-headers-test):"
+echo "   docker exec \$(docker-compose -f docker-compose.test.yml ps -q kafka) kafka-console-consumer --bootstrap-server localhost:9092 --topic raw-event-headers-test --from-beginning"
+echo ""
+echo "   Note: Events should have __op, __table, __ts_ms fields from ExtractNewRecordState transform"
 echo ""
 echo "6. Clean up:"
 echo "   docker-compose -f docker-compose.test.yml down -v"

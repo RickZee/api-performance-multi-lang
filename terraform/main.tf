@@ -325,10 +325,12 @@ locals {
     local.is_dev ? 1 : 3
   )
 
-  # Aurora instance class: db.t3.medium for dev (db.t3.small not supported for 15.14), db.r5.large for test
-  # Note: Can be overridden in terraform.tfvars (e.g., db.t4g.medium for ARM-based cost savings)
+  # Aurora instance class: db.t4g.medium for dev (ARM-based for cost savings), db.r5.large for test
+  # Note: Can be overridden in terraform.tfvars
+  # db.t4g.medium is the smallest ARM instance supported for PostgreSQL 15.14 (~20% cheaper than x86 db.t3.medium)
+  # db.t4g.small is NOT supported for Aurora PostgreSQL 15.14
   aurora_instance_class = var.aurora_instance_class != null ? var.aurora_instance_class : (
-    local.is_dev ? "db.t3.medium" : "db.r5.large"
+    local.is_dev ? "db.t4g.medium" : "db.r5.large"
   )
 }
 
@@ -604,7 +606,7 @@ module "s3_endpoint" {
 # Now using bastion host as test runner instead
 # Access via SSM Session Manager or SSH
 
-# EC2 Auto-Stop Lambda - REMOVED (no longer needed with bastion host)
+# EC2 Auto-Stop Lambda - Re-enabled to monitor bastion host for cost optimization
 
 # Bastion Host
 # Creates an EC2 instance in public subnet for database access via SSH
@@ -625,6 +627,22 @@ module "bastion_host" {
   ssh_public_key                  = var.bastion_ssh_public_key
   ssh_allowed_cidr_blocks         = var.bastion_ssh_allowed_cidr_blocks
   allocate_elastic_ip            = var.bastion_allocate_elastic_ip
+
+  tags = local.common_tags
+}
+
+# EC2 Auto-Stop Lambda for Bastion Host
+# Monitors SSM sessions, DSQL API calls, and EC2 activity, stops bastion if no activity for 3 hours
+module "ec2_auto_stop" {
+  count  = var.enable_bastion_host && var.enable_aurora_dsql_cluster ? 1 : 0
+  source = "./modules/ec2-auto-stop"
+
+  function_name                  = "${var.project_name}-bastion-auto-stop"
+  ec2_instance_id                = module.bastion_host[0].instance_id
+  bastion_role_arn               = module.bastion_host[0].iam_role_arn
+  inactivity_hours               = 3
+  aws_region                     = var.aws_region
+  cloudwatch_logs_retention_days = local.cloudwatch_logs_retention
 
   tags = local.common_tags
 }

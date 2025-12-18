@@ -6,11 +6,14 @@
 -- 4. Service Events (CarServiceDone)
 --
 -- Source: event_headers table from Aurora PostgreSQL
--- Target: Filtered Kafka topics for each event type
+-- Target: Filtered Kafka topics for each event type (with -flink suffix)
+--
+-- NOTE: Flink writes to -flink suffixed topics to distinguish from Spring Boot processor.
+-- Consumers should subscribe to the appropriate topic based on which processor is active.
 --
 -- DEPLOYMENT NOTE: Deploy statements in order:
 -- 1. Source table (raw-event-headers)
--- 2. Sink tables (filtered-*-events)
+-- 2. Sink tables (filtered-*-events-flink)
 -- 3. INSERT statements (one per filter)
 
 -- ============================================================================
@@ -40,8 +43,9 @@ CREATE TABLE `raw-event-headers` (
 -- Step 2: Create Sink Tables
 -- ============================================================================
 
--- Sink Table: Car Created Events Filter
-CREATE TABLE `filtered-car-created-events` (
+-- Sink Table: Car Created Events Filter (Flink)
+-- Note: Flink writes to -flink suffixed topics to distinguish from Spring Boot processor
+CREATE TABLE `filtered-car-created-events-flink` (
     `key` BYTES,
     `id` STRING,
     `event_name` STRING,
@@ -56,8 +60,8 @@ CREATE TABLE `filtered-car-created-events` (
     'value.format' = 'json-registry'
 );
 
--- Sink Table: Loan Created Events Filter
-CREATE TABLE `filtered-loan-created-events` (
+-- Sink Table: Loan Created Events Filter (Flink)
+CREATE TABLE `filtered-loan-created-events-flink` (
     `key` BYTES,
     `id` STRING,
     `event_name` STRING,
@@ -72,8 +76,8 @@ CREATE TABLE `filtered-loan-created-events` (
     'value.format' = 'json-registry'
 );
 
--- Sink Table: Loan Payment Submitted Events Filter
-CREATE TABLE `filtered-loan-payment-submitted-events` (
+-- Sink Table: Loan Payment Submitted Events Filter (Flink)
+CREATE TABLE `filtered-loan-payment-submitted-events-flink` (
     `key` BYTES,
     `id` STRING,
     `event_name` STRING,
@@ -88,8 +92,8 @@ CREATE TABLE `filtered-loan-payment-submitted-events` (
     'value.format' = 'json-registry'
 );
 
--- Sink Table: Service Events Filter
-CREATE TABLE `filtered-service-events` (
+-- Sink Table: Service Events Filter (Flink)
+CREATE TABLE `filtered-service-events-flink` (
     `key` BYTES,
     `id` STRING,
     `event_name` STRING,
@@ -108,9 +112,10 @@ CREATE TABLE `filtered-service-events` (
 -- Step 3: Deploy INSERT Statements (one per filter)
 -- ============================================================================
 
--- INSERT Statement: Car Created Events Filter
+-- INSERT Statement: Car Created Events Filter (Flink)
 -- Filters CarCreated events by eventType
-INSERT INTO `filtered-car-created-events`
+-- Writes to filtered-car-created-events-flink topic
+INSERT INTO `filtered-car-created-events-flink`
 SELECT 
     CAST(`id` AS BYTES) AS `key`,
     `id`,
@@ -124,9 +129,10 @@ SELECT
 FROM `raw-event-headers`
 WHERE `event_type` = 'CarCreated' AND `__op` = 'c';
 
--- INSERT Statement: Loan Created Events Filter
+-- INSERT Statement: Loan Created Events Filter (Flink)
 -- Filters LoanCreated events by eventType
-INSERT INTO `filtered-loan-created-events`
+-- Writes to filtered-loan-created-events-flink topic
+INSERT INTO `filtered-loan-created-events-flink`
 SELECT 
     CAST(`id` AS BYTES) AS `key`,
     `id`,
@@ -140,9 +146,10 @@ SELECT
 FROM `raw-event-headers`
 WHERE `event_type` = 'LoanCreated' AND `__op` = 'c';
 
--- INSERT Statement: Loan Payment Submitted Events Filter
+-- INSERT Statement: Loan Payment Submitted Events Filter (Flink)
 -- Filters LoanPaymentSubmitted events by eventType
-INSERT INTO `filtered-loan-payment-submitted-events`
+-- Writes to filtered-loan-payment-submitted-events-flink topic
+INSERT INTO `filtered-loan-payment-submitted-events-flink`
 SELECT 
     CAST(`id` AS BYTES) AS `key`,
     `id`,
@@ -156,9 +163,10 @@ SELECT
 FROM `raw-event-headers`
 WHERE `event_type` = 'LoanPaymentSubmitted' AND `__op` = 'c';
 
--- INSERT Statement: Service Events Filter
+-- INSERT Statement: Service Events Filter (Flink)
 -- Filters CarServiceDone events by eventType
-INSERT INTO `filtered-service-events`
+-- Writes to filtered-service-events-flink topic
+INSERT INTO `filtered-service-events-flink`
 SELECT 
     CAST(`id` AS BYTES) AS `key`,
     `id`,

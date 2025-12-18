@@ -218,13 +218,80 @@ flowchart TB
 - **testTopicNotFoundHandling**: Test behavior when topics don't exist
 - **testConsumerGroupOffsetManagement**: Verify offset management after restarts
 
-For more details, see the [E2E Tests README](../e2e-tests/README.md).
+## Performance Characteristics
+
+### Throughput
+
+- **Target**: >= 10,000 events/second per processor instance
+- **Scaling**: Linear scaling with number of instances and partitions
+- **Bottlenecks**: Network I/O, Kafka broker capacity, processor resources
+
+### Latency
+
+- **P50 Target**: < 50ms (publish to filtered topic)
+- **P95 Target**: < 200ms
+- **P99 Target**: < 500ms
+- **Factors**: Network latency to Kafka, processing time, Kafka broker latency
+
+### Resource Usage
+
+- **CPU**: Typically 20-40% under normal load (varies by instance size)
+- **Memory**: ~512MB-1GB per instance (depends on state store size)
+- **Network**: Depends on event size and throughput
+
+### Performance Validation
+
+Performance is validated through comprehensive test suite:
+- `PerformanceComparisonTest`: Throughput and latency comparison
+- `LatencyBenchmarkTest`: Latency percentile measurements
+- `LoadTest`: Sustained load, ramp-up, spike load testing
 
 ## Monitoring
 
-- **Metrics**: Exposed via Spring Boot Actuator `/actuator/metrics`
-- **Health**: Kafka Streams health indicators included in `/actuator/health`
-- **Logging**: Structured logging with event routing information
+### Metrics
+
+Metrics are exposed via Spring Boot Actuator:
+
+- **Prometheus Endpoint**: `/actuator/prometheus`
+- **Metrics Endpoint**: `/actuator/metrics`
+- **Health Endpoint**: `/actuator/health`
+
+### Key Metrics Exposed
+
+**Kafka Streams Metrics**:
+- `kafka_streams_*`: Stream processing metrics
+- `kafka_consumer_*`: Consumer metrics (throughput, lag)
+- `kafka_producer_*`: Producer metrics
+
+**Custom Business Metrics** (if implemented):
+- `events_processed_total`: Total events processed
+- `events_routed_total{event_type="CarCreated"}`: Events routed by type
+- `processing_latency_seconds`: Processing latency histogram
+
+**JVM Metrics**:
+- `jvm_memory_*`: Memory usage
+- `jvm_gc_*`: Garbage collection metrics
+- `jvm_threads_*`: Thread metrics
+
+### Health Checks
+
+- **Liveness Probe**: `/actuator/health/liveness`
+- **Readiness Probe**: `/actuator/health/readiness`
+- **Kafka Streams Health**: Included in `/actuator/health`
+
+### Logging
+
+- **Format**: Structured JSON logging (configurable)
+- **Level**: INFO by default, DEBUG for troubleshooting
+- **Correlation IDs**: Event IDs traceable across logs
+- **Log Aggregation**: CloudWatch, ELK, or similar
+
+### Observability Validation
+
+Observability is validated through test suite:
+- `MetricsValidationTest`: Prometheus metrics exposure
+- `HealthCheckTest`: Health endpoint validation
+- `ObservabilityTest`: Logging and tracing validation
 
 ## Comparison with Flink
 

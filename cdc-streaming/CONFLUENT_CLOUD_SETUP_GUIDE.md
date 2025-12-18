@@ -262,6 +262,64 @@ confluent kafka topic update raw-event-headers \
   --config min.insync.replicas=2
 ```
 
+### Step 4: Processor-Specific Topic Naming Scheme
+
+To distinguish between events processed by Flink SQL and Spring Boot Kafka Streams, the system uses processor-specific topic suffixes:
+
+- **Flink SQL**: Topics suffixed with `-flink`
+- **Spring Boot Kafka Streams**: Topics suffixed with `-spring`
+
+**Flink Topics:**
+
+| Event Type | Topic Name |
+|------------|------------|
+| CarCreated | `filtered-car-created-events-flink` |
+| LoanCreated | `filtered-loan-created-events-flink` |
+| LoanPaymentSubmitted | `filtered-loan-payment-submitted-events-flink` |
+| CarServiceDone | `filtered-service-events-flink` |
+
+**Spring Boot Topics:**
+
+| Event Type | Topic Name |
+|------------|------------|
+| CarCreated | `filtered-car-created-events-spring` |
+| LoanCreated | `filtered-loan-created-events-spring` |
+| LoanPaymentSubmitted | `filtered-loan-payment-submitted-events-spring` |
+| CarServiceDone | `filtered-service-events-spring` |
+
+**Important Notes:**
+- Filtered topics are **automatically created** by Flink or Spring Boot when they write to them
+- Only `raw-event-headers` needs manual creation
+- Consumers must be configured to subscribe to the appropriate suffixed topic based on which processor is active
+- Both processors can run simultaneously for comparison testing
+
+**Benefits:**
+1. **Clear Distinction**: Consumers can easily identify which processor created events
+2. **Parallel Testing**: Both processors can run simultaneously for comparison testing
+3. **Easy Switching**: Simple topic name change to switch between processors
+4. **No Event Modification**: Events themselves remain unchanged; only topic names differ
+
+**Example: Switching Processors**
+
+To switch from Flink to Spring Boot:
+
+1. **Stop Flink SQL jobs** (or disable them in Confluent Cloud)
+2. **Start Spring Boot stream processor**:
+   ```bash
+   docker-compose up -d stream-processor
+   ```
+3. **Update consumer topic configuration**:
+   ```bash
+   export KAFKA_TOPIC_LOAN=filtered-loan-created-events-spring
+   export KAFKA_TOPIC_LOAN_PAYMENT=filtered-loan-payment-submitted-events-spring
+   export KAFKA_TOPIC_SERVICE=filtered-service-events-spring
+   export KAFKA_TOPIC_CAR=filtered-car-created-events-spring
+   ```
+4. **Restart consumers**:
+   ```bash
+   docker-compose restart loan-consumer loan-payment-consumer service-consumer car-consumer
+   ```
+
 ## Schema Registry Configuration
 
 ### Step 1: Get Schema Registry Endpoint
@@ -796,9 +854,9 @@ CREATE TABLE `raw-event-headers` (
 );
 
 -- ============================================================================
--- Step 2: Create Sink Table
+-- Step 2: Create Sink Table (with -flink suffix)
 -- ============================================================================
-CREATE TABLE `filtered-loan-created-events` (
+CREATE TABLE `filtered-loan-created-events-flink` (
     `key` BYTES,
     `id` STRING,
     `event_name` STRING,
@@ -814,9 +872,9 @@ CREATE TABLE `filtered-loan-created-events` (
 );
 
 -- ============================================================================
--- Step 3: INSERT Statement - Filter and Route
+-- Step 3: INSERT Statement - Filter and Route (to -flink topic)
 -- ============================================================================
-INSERT INTO `filtered-loan-created-events`
+INSERT INTO `filtered-loan-created-events-flink`
 SELECT 
     CAST(`id` AS BYTES) AS `key`,
     `id`,
@@ -830,18 +888,18 @@ SELECT
 FROM `raw-event-headers`
 WHERE `event_type` = 'LoanCreated' AND `__op` = 'c';
 
--- Additional filters for other event types:
-INSERT INTO `filtered-loan-payment-submitted-events`
+-- Additional filters for other event types (all with -flink suffix):
+INSERT INTO `filtered-loan-payment-submitted-events-flink`
 SELECT CAST(`id` AS BYTES) AS `key`, `id`, `event_name`, `event_type`, `created_date`, `saved_date`, `header_data`, `__op`, `__table`
 FROM `raw-event-headers`
 WHERE `event_type` = 'LoanPaymentSubmitted' AND `__op` = 'c';
 
-INSERT INTO `filtered-car-created-events`
+INSERT INTO `filtered-car-created-events-flink`
 SELECT CAST(`id` AS BYTES) AS `key`, `id`, `event_name`, `event_type`, `created_date`, `saved_date`, `header_data`, `__op`, `__table`
 FROM `raw-event-headers`
 WHERE `event_type` = 'CarCreated' AND `__op` = 'c';
 
-INSERT INTO `filtered-service-events`
+INSERT INTO `filtered-service-events-flink`
 SELECT CAST(`id` AS BYTES) AS `key`, `id`, `event_name`, `event_type`, `created_date`, `saved_date`, `header_data`, `__op`, `__table`
 FROM `raw-event-headers`
 WHERE `event_type` = 'CarServiceDone' AND `__op` = 'c';
@@ -921,6 +979,160 @@ confluent flink statement create <statement-name> \
 - Error messages are less detailed than Web Console
 - No interactive syntax validation
 - Best for simple queries or automation after development
+
+### Processor-Specific Topics Setup
+
+With the processor-specific topic naming scheme, Flink SQL statements must write to `-flink` suffixed topics. If you have existing Flink statements that write to topics without suffixes, you need to migrate them.
+
+#### Step 1: Remove Old Flink Statements (if they exist)
+
+If you have existing Flink statements that write to topics without suffixes, remove them first:
+
+```bash
+# List existing statements
+confluent flink statement list --compute-pool <compute-pool-id>
+
+# Delete old statements (if they exist)
+confluent flink statement delete "sink-filtered-car-created-events" --force
+confluent flink statement delete "sink-filtered-loan-created-events" --force
+confluent flink statement delete "sink-filtered-loan-payment-submitted-events" --force
+confluent flink statement delete "sink-filtered-service-events" --force
+confluent flink statement delete "insert-car-created-filter" --force
+confluent flink statement delete "insert-loan-created-filter" --force
+confluent flink statement delete "insert-loan-payment-submitted-filter" --force
+confluent flink statement delete "insert-service-events-filter" --force
+```
+
+#### Step 2: Deploy New Flink SQL Statements with `-flink` Suffix
+
+Use the deployment script to deploy the new statements with `-flink` suffixed topics:
+
+```bash
+cd cdc-streaming
+./scripts/deploy-business-events-flink.sh
+```
+
+This script will:
+1. Deploy source table (`source-raw-event-headers`)
+2. Deploy 4 sink tables (with `-flink` suffix):
+   - `sink-filtered-car-created-events-flink`
+   - `sink-filtered-loan-created-events-flink`
+   - `sink-filtered-loan-payment-submitted-events-flink`
+   - `sink-filtered-service-events-flink`
+3. Deploy 4 INSERT statements:
+   - `insert-car-created-filter-flink`
+   - `insert-loan-created-filter-flink`
+   - `insert-loan-payment-submitted-filter-flink`
+   - `insert-service-events-filter-flink`
+
+**Environment Variables:**
+
+The deployment script uses these environment variables (with defaults):
+
+```bash
+export FLINK_COMPUTE_POOL_ID="lfcp-2xqo0m"  # Your compute pool ID
+export KAFKA_CLUSTER_ID="lkc-rno3vp"        # Your Kafka cluster ID
+```
+
+#### Step 3: Verify Deployment
+
+```bash
+# Check statement status
+confluent flink statement list --compute-pool <compute-pool-id>
+
+# Verify topics were created
+confluent kafka topic list | grep filtered
+
+# You should see topics with -flink suffix:
+# - filtered-car-created-events-flink
+# - filtered-loan-created-events-flink
+# - filtered-loan-payment-submitted-events-flink
+# - filtered-service-events-flink
+```
+
+#### Step 4: Test the Pipeline
+
+```bash
+# Submit test events
+./scripts/submit-test-events.sh <lambda-api-url> /tmp/test-events.json
+
+# Wait for processing
+sleep 30
+
+# Check topics have messages
+confluent kafka topic consume filtered-car-created-events-flink --max-messages 5
+confluent kafka topic consume filtered-loan-created-events-flink --max-messages 5
+```
+
+#### Manual Deployment (Alternative)
+
+If the script doesn't work, you can deploy manually via Confluent Cloud Console:
+
+1. Go to: https://confluent.cloud/environments/<env-id>/flink
+2. Click "Open SQL Workspace"
+3. Select your compute pool
+4. Copy statements from: `cdc-streaming/flink-jobs/business-events-routing-confluent-cloud.sql`
+5. Deploy in order:
+   - Source table (raw-event-headers)
+   - Sink tables (4 tables with `-flink` suffix)
+   - INSERT statements (4 statements)
+
+**Important:** When deploying manually, ensure all sink table names and INSERT INTO statements use the `-flink` suffix (e.g., `filtered-car-created-events-flink` instead of `filtered-car-created-events`).
+
+#### Troubleshooting Processor-Specific Topics
+
+**Statements Already Exist:**
+
+If you get "already exists" errors, delete the old statements first:
+
+```bash
+confluent flink statement delete <statement-name> --force
+```
+
+**Topics Not Created:**
+
+Topics are created automatically when Flink writes to them. If topics don't appear:
+1. Check statement status: `confluent flink statement describe <name>`
+2. Check for errors in statement logs
+3. Verify events are flowing to `raw-event-headers` topic
+
+**No Messages in Topics:**
+
+1. Verify CDC connector is running: `confluent connect list`
+2. Check `raw-event-headers` topic has messages
+3. Verify INSERT statements are running (not paused)
+4. Check statement status for errors
+
+**Consumer Not Receiving Events:**
+
+1. **Check which processor is active**:
+   ```bash
+   # Check Spring Boot
+   docker-compose ps stream-processor
+   
+   # Check Flink
+   confluent flink statement list
+   ```
+
+2. **Verify topic name matches processor**:
+   ```bash
+   # List topics
+   confluent kafka topic list | grep filtered
+   
+   # Check consumer configuration
+   docker-compose exec loan-consumer env | grep KAFKA_TOPIC
+   ```
+
+3. **Check topic has messages**:
+   ```bash
+   confluent kafka topic consume filtered-loan-created-events-flink --max-messages 5
+   ```
+
+**Next Steps After Deployment:**
+
+1. Configure consumers to use `-flink` topics (if using Flink)
+2. Or configure consumers to use `-spring` topics (if using Spring Boot)
+3. Run E2E test: `./scripts/test-e2e-pipeline.sh`
 
 ### Step 2: Verify Deployment
 

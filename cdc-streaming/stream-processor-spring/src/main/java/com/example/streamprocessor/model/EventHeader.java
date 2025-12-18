@@ -1,5 +1,6 @@
 package com.example.streamprocessor.model;
 
+import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import com.fasterxml.jackson.annotation.JsonProperty;
 import lombok.AllArgsConstructor;
 import lombok.Builder;
@@ -11,11 +12,14 @@ import lombok.NoArgsConstructor;
  * 
  * Structure from Flink SQL:
  * - id, event_name, event_type, created_date, saved_date, header_data (JSON string), __op, __table, __ts_ms
+ * 
+ * Note: Additional fields from Debezium (like __deleted) are ignored.
  */
 @Data
 @Builder
 @NoArgsConstructor
 @AllArgsConstructor
+@JsonIgnoreProperties(ignoreUnknown = true)
 public class EventHeader {
     
     @JsonProperty("id")

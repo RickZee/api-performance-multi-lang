@@ -86,6 +86,27 @@ resource "aws_iam_role_policy" "ec2_auto_stop_cloudwatch" {
   })
 }
 
+# IAM policy for SSM and CloudTrail
+resource "aws_iam_role_policy" "ec2_auto_stop_ssm_cloudtrail" {
+  name = "${var.function_name}-ssm-cloudtrail-policy"
+  role = aws_iam_role.ec2_auto_stop.id
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect = "Allow"
+        Action = [
+          "ssm:DescribeSessions",
+          "ssm:DescribeInstanceInformation",
+          "cloudtrail:LookupEvents"
+        ]
+        Resource = "*"
+      }
+    ]
+  })
+}
+
 # CloudWatch Log Group
 resource "aws_cloudwatch_log_group" "ec2_auto_stop" {
   name              = "/aws/lambda/${var.function_name}"
@@ -107,16 +128,19 @@ import json
 
 def handler(event, context):
     """
-    Check EC2 instance activity (SSM logins and CloudWatch metrics) 
+    Check EC2 instance activity (SSM sessions, DSQL API calls, CloudWatch metrics) 
     and stop EC2 if no activity for specified hours
     """
     instance_id = os.environ['EC2_INSTANCE_ID']
     region = os.environ['AWS_REGION']
     inactivity_hours = int(os.environ.get('INACTIVITY_HOURS', '3'))
+    bastion_role_arn = os.environ.get('BASTION_ROLE_ARN', '')
     
     ec2 = boto3.client('ec2', region_name=region)
     cloudwatch = boto3.client('cloudwatch', region_name=region)
     logs = boto3.client('logs', region_name=region)
+    ssm = boto3.client('ssm', region_name=region)
+    cloudtrail = boto3.client('cloudtrail', region_name=region)
     
     # Check current instance status
     try:
@@ -147,30 +171,86 @@ def handler(event, context):
             'body': json.dumps({'error': f'Failed to check instance status: {str(e)}'})
         }
     
-    # Check for SSM Session Manager logins in the last N hours
+    # Check for activity in the last N hours
     end_time = datetime.utcnow()
     start_time = end_time - timedelta(hours=inactivity_hours)
     
     ssm_activity = False
+    dsql_activity = False
+    
+    # Method 1: Check for active SSM sessions
     try:
-        # Check SSM Session Manager logs
-        # SSM sessions are logged to /aws/ssm/sessions
-        log_group_name = "/aws/ssm/sessions"
-        
-        # Filter logs for this instance
-        response = logs.filter_log_events(
-            logGroupName=log_group_name,
-            startTime=int(start_time.timestamp() * 1000),
-            endTime=int(end_time.timestamp() * 1000),
-            filterPattern=f'"{instance_id}"'
+        response = ssm.describe_sessions(
+            State='Active',
+            MaxResults=50
         )
-        
-        if response.get('events'):
-            ssm_activity = True
-            print(f"Found {len(response['events'])} SSM session events for instance {instance_id}")
+        for session in response.get('Sessions', []):
+            if session.get('Target') == instance_id:
+                ssm_activity = True
+                print(f"Found active SSM session {session.get('SessionId')} for instance {instance_id}")
+                break
     except Exception as e:
-        # If log group doesn't exist or no permissions, continue to check metrics
-        print(f"Warning: Could not check SSM logs: {str(e)}")
+        print(f"Warning: Could not check active SSM sessions: {str(e)}")
+    
+    # Method 2: Check SSM Session Manager logs (historical)
+    if not ssm_activity:
+        try:
+            log_group_name = "/aws/ssm/sessions"
+            response = logs.filter_log_events(
+                logGroupName=log_group_name,
+                startTime=int(start_time.timestamp() * 1000),
+                endTime=int(end_time.timestamp() * 1000),
+                filterPattern=f'"{instance_id}"'
+            )
+            if response.get('events'):
+                ssm_activity = True
+                print(f"Found {len(response['events'])} SSM session events for instance {instance_id}")
+        except Exception as e:
+            print(f"Warning: Could not check SSM logs: {str(e)}")
+    
+    # Method 3: Check CloudTrail for DSQL API calls from bastion role
+    if bastion_role_arn:
+        try:
+            # Look for DSQL API calls (DbConnect, DbConnectAdmin) in the last N hours
+            dsql_event_names = ['DbConnect', 'DbConnectAdmin']
+            for event_name in dsql_event_names:
+                try:
+                    response = cloudtrail.lookup_events(
+                        LookupAttributes=[
+                            {
+                                'AttributeKey': 'EventName',
+                                'AttributeValue': event_name
+                            }
+                        ],
+                        StartTime=start_time,
+                        EndTime=end_time,
+                        MaxResults=50
+                    )
+                    
+                    # Check if any events are from the bastion role
+                    for event in response.get('Events', []):
+                        try:
+                            event_data = json.loads(event.get('CloudTrailEvent', '{}'))
+                            user_identity = event_data.get('userIdentity', {})
+                            user_arn = user_identity.get('arn', '')
+                            
+                            # Check if event is from bastion role
+                            if bastion_role_arn in user_arn or bastion_role_arn.split('/')[-1] in user_arn:
+                                dsql_activity = True
+                                print(f"Found DSQL API call ({event_name}) from bastion role at {event.get('EventTime')}")
+                                break
+                        except Exception as parse_error:
+                            # Skip events that can't be parsed
+                            continue
+                    
+                    if dsql_activity:
+                        break
+                except Exception as lookup_error:
+                    # Continue to next event name if lookup fails
+                    print(f"Warning: Could not lookup {event_name} events: {str(lookup_error)}")
+                    continue
+        except Exception as e:
+            print(f"Warning: Could not check CloudTrail for DSQL activity: {str(e)}")
     
     # Check EC2 CloudWatch metrics for activity
     metrics_activity = False
@@ -215,7 +295,8 @@ def handler(event, context):
         )
         
         # Check if there was any significant activity
-        # CPU > 1% or network activity > 1MB
+        # Increased CPU threshold to 5% to avoid false positives from baseline system activity
+        # Network threshold remains at 1MB to catch actual data transfers
         cpu_values = [point['Average'] for point in cpu_response.get('Datapoints', [])]
         network_in_values = [point['Sum'] for point in network_in_response.get('Datapoints', [])]
         network_out_values = [point['Sum'] for point in network_out_response.get('Datapoints', [])]
@@ -225,7 +306,8 @@ def handler(event, context):
         total_network_out = sum(network_out_values) if network_out_values else 0
         
         # 1MB = 1048576 bytes
-        if max_cpu > 1.0 or total_network_in > 1048576 or total_network_out > 1048576:
+        # CPU threshold increased to 5% to distinguish real usage from baseline activity
+        if max_cpu > 5.0 or total_network_in > 1048576 or total_network_out > 1048576:
             metrics_activity = True
             print(f"Instance {instance_id} activity detected: CPU={max_cpu:.2f}%, NetworkIn={total_network_in:.0f} bytes, NetworkOut={total_network_out:.0f} bytes")
     except Exception as e:
@@ -240,13 +322,14 @@ def handler(event, context):
         }
     
     # Check if there was any activity
-    if ssm_activity or metrics_activity:
-        print(f"Activity detected (SSM: {ssm_activity}, Metrics: {metrics_activity}), keeping instance running")
+    if ssm_activity or dsql_activity or metrics_activity:
+        print(f"Activity detected (SSM: {ssm_activity}, DSQL: {dsql_activity}, Metrics: {metrics_activity}), keeping instance running")
         return {
             'statusCode': 200,
             'body': json.dumps({
                 'message': 'Activity detected, instance kept running',
                 'ssm_activity': ssm_activity,
+                'dsql_activity': dsql_activity,
                 'metrics_activity': metrics_activity
             })
         }
@@ -262,6 +345,7 @@ def handler(event, context):
                 'message': f'Instance stopped due to {inactivity_hours} hours of inactivity',
                 'instance_id': instance_id,
                 'ssm_activity': ssm_activity,
+                'dsql_activity': dsql_activity,
                 'metrics_activity': metrics_activity
             })
         }
@@ -300,11 +384,13 @@ resource "aws_lambda_function" "ec2_auto_stop" {
       EC2_INSTANCE_ID = var.ec2_instance_id
       # AWS_REGION is automatically provided by Lambda runtime
       INACTIVITY_HOURS = var.inactivity_hours
+      BASTION_ROLE_ARN = var.bastion_role_arn
     }
   }
 
   depends_on = [
     aws_iam_role_policy.ec2_auto_stop_logs,
+    aws_iam_role_policy.ec2_auto_stop_ssm_cloudtrail,
     aws_cloudwatch_log_group.ec2_auto_stop
   ]
 

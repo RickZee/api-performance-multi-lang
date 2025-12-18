@@ -165,7 +165,7 @@ Aurora DSQL (DynamoDB SQL) is a serverless, distributed SQL database released by
 
 - DSQL supports CDC via Debezium connector
 - Custom Debezium connector available: `debezium-connector-dsql/`
-- See [DEPLOY_DSQL_CONNECTOR.md](DEPLOY_DSQL_CONNECTOR.md) for setup details
+- See [Debezium DSQL Connector README](../debezium-connector-dsql/README.md) for setup details
 
 ### When to Use DSQL
 

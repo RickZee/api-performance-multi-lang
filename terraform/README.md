@@ -1,7 +1,5 @@
 # Terraform Setup for Serverless APIs
 
-> ⚠️ **IMPORTANT**: See [`IMPORTANT_DSQL_CONNECTOR_DEPLOYMENT.md`](./IMPORTANT_DSQL_CONNECTOR_DEPLOYMENT.md) for complete documentation of the DSQL connector deployment, infrastructure migration, and troubleshooting. **DO NOT DELETE** that file.
-
 This directory contains Terraform configuration to deploy the Python REST Lambda function with API Gateway HTTP API, using S3 for Lambda code deployment.
 
 ## Overview
@@ -12,8 +10,8 @@ The Terraform setup includes:
 - **S3 Bucket**: Versioned S3 bucket for Lambda deployment packages
 - **VPC Support**: Optional VPC configuration with security groups
 - **Aurora PostgreSQL**: Aurora cluster with logical replication enabled
-- **Aurora DSQL**: Optional Aurora DSQL cluster with IAM authentication (see [DSQL_SETUP.md](DSQL_SETUP.md))
-- **EC2 Test Runner**: Optional EC2 instance for testing DSQL connector from within VPC (see [DSQL_TEST_RUNNER.md](DSQL_TEST_RUNNER.md))
+- **Aurora DSQL**: Optional Aurora DSQL cluster with IAM authentication (see [Debezium DSQL Connector README](./debezium-connector-dsql/README.md))
+- **EC2 Test Runner**: Optional EC2 instance for testing DSQL connector from within VPC (see [Debezium DSQL Connector README](./debezium-connector-dsql/README.md) and [README_EC2.md](./debezium-connector-dsql/README_EC2.md))
 - **Schema Initialization**: Automatic database schema initialization from `data/schema.sql`
 
 This setup works alongside the existing SAM templates, providing an alternative deployment method.

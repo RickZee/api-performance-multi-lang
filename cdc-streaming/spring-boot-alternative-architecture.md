@@ -270,6 +270,66 @@ spring-boot-starter-actuator
 
 ---
 
+## Testing Requirements
+
+### SLA Targets
+
+The Spring Boot implementation must meet the following SLA targets, validated through comprehensive test suite:
+
+| Metric | Target | Validation Test |
+|--------|--------|-----------------|
+| **Throughput** | >= 10,000 events/second per processor instance | `PerformanceComparisonTest`, `LoadTest` |
+| **Latency P50** | < 50ms (publish to filtered topic) | `LatencyBenchmarkTest` |
+| **Latency P95** | < 200ms | `LatencyBenchmarkTest` |
+| **Latency P99** | < 500ms | `LatencyBenchmarkTest` |
+| **Error Rate** | < 0.01% | `ErrorHandlingTest`, `LoadTest` |
+| **Recovery Time (RTO)** | < 1 minute | `ResilienceTest` |
+| **Data Loss** | 0% | `ResilienceTest`, `FullPipelineTest` |
+
+### Test Coverage Matrix
+
+The following tests validate the claims made in this architecture document:
+
+| Architecture Claim | Validated By | Test Class |
+|-------------------|--------------|------------|
+| Functional parity with Flink SQL | Functional parity tests | `FunctionalParityTest` |
+| Cost reduction (60-70% cheaper) | Performance tests validate capability | `PerformanceComparisonTest` |
+| Full control over stack | Code ownership and customization | All test classes |
+| Lower latency for simple filtering | Latency benchmarks | `LatencyBenchmarkTest` |
+| Resilience and recovery | Recovery tests | `ResilienceTest` |
+| Observability | Metrics and health checks | `MetricsValidationTest` |
+| Schema evolution support | Schema compatibility tests | `SchemaEvolutionTest` |
+
+### Performance Baseline
+
+*Note: Update these baselines after running performance tests*
+
+| Metric | Flink SQL (Confluent Cloud) | Spring Boot (EKS) | Target |
+|--------|----------------------------|-------------------|--------|
+| Throughput | TBD events/sec | TBD events/sec | >= 10,000 |
+| Latency P50 | TBD ms | TBD ms | < 50ms |
+| Latency P95 | TBD ms | TBD ms | < 200ms |
+| Latency P99 | TBD ms | TBD ms | < 500ms |
+| Infrastructure Cost | $2,300-5,500/mo | $800-1,500/mo | 60-70% reduction |
+
+### Test Execution
+
+Comprehensive test suite available in `cdc-streaming/e2e-tests/`:
+
+```bash
+# Run all tests
+cd cdc-streaming/e2e-tests
+./gradlew test
+
+# Run specific test suites
+./gradlew test --tests FunctionalParityTest
+./gradlew test --tests PerformanceComparisonTest
+./gradlew test --tests LatencyBenchmarkTest
+./gradlew test --tests ResilienceTest
+```
+
+---
+
 ## Recommendation Summary
 
 | Dimension | Winner | Notes |

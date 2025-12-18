@@ -20,6 +20,8 @@ public class EventHeaderSerde implements Serde<EventHeader> {
     public EventHeaderSerde() {
         this.objectMapper = new ObjectMapper();
         this.objectMapper.registerModule(new JavaTimeModule());
+        // Ignore unknown properties (e.g., __deleted from Debezium)
+        this.objectMapper.configure(com.fasterxml.jackson.databind.DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES, false);
     }
 
     @Override

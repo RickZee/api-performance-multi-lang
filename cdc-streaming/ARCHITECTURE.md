@@ -78,26 +78,43 @@ These examples are used throughout the system for:
                                │ Stream Processing
                                ▼
 ┌────────────────────────────────────────────────────────────────────────┐
-│                    Confluent Flink                                     │
+│                    Stream Processors                                    │
 │                                                                        │
-│  Flink SQL Jobs:                                                       │
+│  Option 1: Confluent Flink (SQL-based)                                │
 │  - Filter by event_type, __op (operation type)                         │
-│  - Route to consumer-specific topics                                   │
+│  - Route to filtered-*-events-flink topics                             │
+│  - Preserves relational structure + header_data                        │
+│                                                                        │
+│  Option 2: Spring Boot Kafka Streams (Java-based)                      │
+│  - Filter by event_type, __op (operation type)                         │
+│  - Route to filtered-*-events-spring topics                            │
 │  - Preserves relational structure + header_data                        │
 └──────────────────────────────┬─────────────────────────────────────────┘
                                │
                                │ Filtered & Routed Events (JSON)
                                ▼
 ┌─────────────────────────────────────────────────────────────────────────┐
-│                    Consumer-Specific Kafka Topics                       │
+│                    Processor-Specific Kafka Topics                      │
+│                                                                        │
+│  Flink Topics (-flink suffix):                                        │
 │  ┌──────────────────────────┐    ┌──────────────────────────┐           │
-│  │filtered-loan-created-    │    │filtered-service-events   │           │
-│  │events                    │    └──────────────────────────┘           │
-│  └──────────────────────────┘    ┌──────────────────────────┐           │
-│  ┌──────────────────────────┐    │filtered-car-created-     │           │
-│  │filtered-loan-payment-    │    │events                    │           │
-│  │submitted-events          │    └──────────────────────────┘           │
-│  └──────────────────────────┘                                           │
+│  │filtered-loan-created-    │    │filtered-service-events-  │           │
+│  │events-flink              │    │flink                      │           │
+│  └──────────────────────────┘    └──────────────────────────┘           │
+│  ┌──────────────────────────┐    ┌──────────────────────────┐           │
+│  │filtered-loan-payment-     │    │filtered-car-created-      │           │
+│  │submitted-events-flink     │    │events-flink               │           │
+│  └──────────────────────────┘    └──────────────────────────┘           │
+│                                                                        │
+│  Spring Boot Topics (-spring suffix):                                 │
+│  ┌──────────────────────────┐    ┌──────────────────────────┐           │
+│  │filtered-loan-created-    │    │filtered-service-events-  │           │
+│  │events-spring             │    │spring                     │           │
+│  └──────────────────────────┘    └──────────────────────────┘           │
+│  ┌──────────────────────────┐    ┌──────────────────────────┐           │
+│  │filtered-loan-payment-    │    │filtered-car-created-      │           │
+│  │submitted-events-spring   │    │events-spring               │           │
+│  └──────────────────────────┘    └──────────────────────────┘           │
 └──────────────────────────────┬──────────────────────────────────────────┘
                                │
                                │ Consume Events
@@ -411,22 +428,23 @@ For detailed Flink setup, configuration, and SQL job deployment, see [CONFLUENT_
 The system includes 4 dockerized consumers, one for each filtered topic:
 
 1. **Loan Consumer** (`consumers/loan-consumer/`)
-   - Topic: `filtered-loan-created-events`
+   - Topic: `filtered-loan-created-events-flink` or `filtered-loan-created-events-spring`
    - Consumer Group: `loan-consumer-group`
    - Processes `LoanCreated` events
+   - **Note**: Topic name depends on which processor is active (configured via `KAFKA_TOPIC` env var)
 
 2. **Loan Payment Consumer** (`consumers/loan-payment-consumer/`)
-   - Topic: `filtered-loan-payment-submitted-events`
+   - Topic: `filtered-loan-payment-submitted-events-flink` or `filtered-loan-payment-submitted-events-spring`
    - Consumer Group: `loan-payment-consumer-group`
    - Processes `LoanPaymentSubmitted` events
 
 3. **Service Consumer** (`consumers/service-consumer/`)
-   - Topic: `filtered-service-events`
+   - Topic: `filtered-service-events-flink` or `filtered-service-events-spring`
    - Consumer Group: `service-consumer-group`
    - Processes `CarServiceDone` events
 
 4. **Car Consumer** (`consumers/car-consumer/`)
-   - Topic: `filtered-car-created-events`
+   - Topic: `filtered-car-created-events-flink` or `filtered-car-created-events-spring`
    - Consumer Group: `car-consumer-group`
    - Processes `CarCreated` events
 
@@ -434,16 +452,26 @@ The system includes 4 dockerized consumers, one for each filtered topic:
 
 Consumers **do NOT connect to Flink**. Instead, they connect directly to **Kafka** (local or Confluent Cloud) and subscribe to the filtered topics that Flink writes to. Here's the complete flow:
 
-1. **Flink SQL Jobs Write to Kafka Topics**:
-   - Flink SQL jobs consume from `raw-event-headers` topic
-   - After filtering and transformation, Flink writes filtered events to consumer-specific Kafka topics:
-     - `filtered-loan-created-events`
-     - `filtered-loan-payment-submitted-events`
-     - `filtered-service-events`
-     - `filtered-car-created-events`
-   - These topics are **created in Kafka** automatically by Flink when it first writes to them
-   - Flink acts as a **producer** to these filtered topics
+1. **Stream Processors Write to Kafka Topics**:
+   - Both Flink SQL and Spring Boot Kafka Streams consume from `raw-event-headers` topic
+   - After filtering and transformation, processors write filtered events to processor-specific Kafka topics:
+   
+   **Flink Topics (suffixed with `-flink`)**:
+     - `filtered-loan-created-events-flink`
+     - `filtered-loan-payment-submitted-events-flink`
+     - `filtered-service-events-flink`
+     - `filtered-car-created-events-flink`
+   
+   **Spring Boot Topics (suffixed with `-spring`)**:
+     - `filtered-loan-created-events-spring`
+     - `filtered-loan-payment-submitted-events-spring`
+     - `filtered-service-events-spring`
+     - `filtered-car-created-events-spring`
+   
+   - These topics are **created in Kafka** automatically when processors first write to them
+   - Processors act as **producers** to these filtered topics
    - Events maintain the relational structure: `id`, `event_name`, `event_type`, `created_date`, `saved_date`, `header_data` (JSON string), `__op`, `__table`
+   - **Note**: Consumers must subscribe to the appropriate topic based on which processor is active in production
 
 2. **Consumers Connect to Kafka**:
    - Consumer applications connect to Kafka brokers using `bootstrap.servers`
@@ -460,7 +488,8 @@ All consumers support connecting to both local Kafka (for development) and Confl
 ```yaml
 environment:
   KAFKA_BOOTSTRAP_SERVERS: kafka:29092
-  KAFKA_TOPIC: filtered-loan-created-events
+  # Use -flink or -spring suffix based on active processor
+  KAFKA_TOPIC: filtered-loan-created-events-flink  # or -spring
   CONSUMER_GROUP_ID: loan-consumer-group
 ```
 
@@ -469,11 +498,18 @@ environment:
 ```yaml
 environment:
   KAFKA_BOOTSTRAP_SERVERS: pkc-xxxxx.us-east-1.aws.confluent.cloud:9092
-  KAFKA_TOPIC: filtered-loan-created-events
+  # Use -flink or -spring suffix based on active processor
+  KAFKA_TOPIC: filtered-loan-created-events-flink  # or -spring
   KAFKA_API_KEY: <your-api-key>
   KAFKA_API_SECRET: <your-api-secret>
   CONSUMER_GROUP_ID: loan-consumer-group
 ```
+
+**Processor Selection**:
+- In production, only one processor should be active at a time
+- Consumers should be configured to subscribe to the appropriate topic suffix:
+  - If using Flink: use `-flink` suffixed topics
+  - If using Spring Boot: use `-spring` suffixed topics
 
 When `KAFKA_API_KEY` and `KAFKA_API_SECRET` are provided, consumers automatically use SASL_SSL authentication:
 

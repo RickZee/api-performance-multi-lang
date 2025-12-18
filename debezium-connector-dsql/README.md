@@ -4,15 +4,7 @@ A production-ready Kafka Connect source connector for Amazon Aurora DSQL that ca
 
 ## 📚 Documentation
 
-**Complete deployment and setup documentation:**
-
-- **[DEPLOYMENT_GUIDE.md](./DEPLOYMENT_GUIDE.md)** - Step-by-step deployment guide for bastion host with Kafka Connect
-- **[INFRASTRUCTURE_SETUP.md](./INFRASTRUCTURE_SETUP.md)** - Infrastructure migration from test runner to bastion host
-- **[IAM_AUTHENTICATION.md](./IAM_AUTHENTICATION.md)** - IAM authentication setup, challenges, and solutions
-- **[TROUBLESHOOTING.md](./TROUBLESHOOTING.md)** - Common issues and their solutions
-- **[REAL_DSQL_TESTING.md](./REAL_DSQL_TESTING.md)** - Testing against real DSQL cluster
-
-> **Note**: This documentation covers the complete deployment work including infrastructure migration, Kafka Connect setup, connector deployment, and IAM authentication configuration.
+This README provides complete deployment and setup instructions for the DSQL connector, including infrastructure setup, Kafka Connect installation, connector deployment, and IAM authentication configuration.
 
 ## Overview
 
@@ -98,8 +90,6 @@ See `config/dsql-connector.json` for a complete example configuration.
 
 ## Deployment
 
-> **Important**: For complete deployment instructions, see [DEPLOYMENT_GUIDE.md](./DEPLOYMENT_GUIDE.md). This includes step-by-step instructions for deploying on a bastion host with Kafka Connect and Confluent Cloud.
-
 ### Quick Start
 
 1. **Build the connector JAR**:
@@ -107,7 +97,7 @@ See `config/dsql-connector.json` for a complete example configuration.
    ./gradlew build
    ```
 
-2. **Follow the complete deployment guide**: See [DEPLOYMENT_GUIDE.md](./DEPLOYMENT_GUIDE.md) for:
+2. **Deploy the connector** (see Deployment Options below):
    - Infrastructure setup
    - Kafka Connect installation
    - Connector deployment
@@ -118,9 +108,7 @@ See `config/dsql-connector.json` for a complete example configuration.
 
 #### Option 1: Bastion Host with Kafka Connect (Recommended)
 
-Deploy Kafka Connect on a bastion host in the same VPC as DSQL. This is the current production setup.
-
-**See**: [DEPLOYMENT_GUIDE.md](./DEPLOYMENT_GUIDE.md) for complete instructions.
+Deploy Kafka Connect on a bastion host in the same VPC as DSQL. This is the current production setup. See the Deployment section below for complete instructions.
 
 #### Option 2: Confluent Cloud (Custom Connector)
 
@@ -164,17 +152,9 @@ Deploy Kafka Connect on a bastion host in the same VPC as DSQL. This is the curr
      -d @config/dsql-connector.json
    ```
 
-## Documentation
-
-- **[DEPLOYMENT_GUIDE.md](./DEPLOYMENT_GUIDE.md)** - Complete step-by-step deployment guide
-- **[INFRASTRUCTURE_SETUP.md](./INFRASTRUCTURE_SETUP.md)** - Infrastructure migration and setup details
-- **[IAM_AUTHENTICATION.md](./IAM_AUTHENTICATION.md)** - IAM authentication setup and challenges
-- **[TROUBLESHOOTING.md](./TROUBLESHOOTING.md)** - Common issues and solutions
-- **[REAL_DSQL_TESTING.md](./REAL_DSQL_TESTING.md)** - Testing against real DSQL cluster
-
 ## IAM Authentication Setup
 
-> **Important**: See [IAM_AUTHENTICATION.md](./IAM_AUTHENTICATION.md) for complete IAM authentication setup, including the chicken-and-egg problem and required manual steps.
+> **Important**: IAM authentication setup requires manual configuration. See the IAM Authentication Setup section below for details, including the chicken-and-egg problem and required manual steps.
 
 The connector requires IAM database authentication. Set up IAM authentication as follows:
 
