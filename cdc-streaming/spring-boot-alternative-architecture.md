@@ -6,25 +6,32 @@ The existing CDC streaming system ([ARCHITECTURE.md](ARCHITECTURE.md)) uses:
 
 ```mermaid
 flowchart LR
-    subgraph Source["Source"]
-        PG(("PostgreSQL\nbusiness_events"))
+    subgraph AWS["AWS Account"]
+        subgraph RDS["AWS RDS"]
+            PG(("PostgreSQL
+            business_events"))
+        end
+        subgraph EKS["AWS EKS Cluster"]
+            DC[Debezium Connector
+            Kafka Connect]
+        end
+        subgraph Consumer["Consumer"]
+            C1[loan-consumer]
+            C2[car-consumer]
+            C3[service-consumer]
+            C4[payment-consumer]
+        end
     end
 
     subgraph ConfluentCloud["Confluent Cloud"]
-        DC[Debezium Connector]
-        KR["raw-business-events\nTopic"]
-        Flink["Flink SQL\nStatements"]
+        KR["raw-business-events
+        Topic"]
+        Flink["Flink SQL
+        Statements"]
         KF1[filtered-loan-events]
         KF2[filtered-car-events]
         KF3[filtered-service-events]
         KF4[filtered-payment-events]
-    end
-
-    subgraph Consumers["Python Consumers"]
-        C1[loan-consumer]
-        C2[car-consumer]
-        C3[service-consumer]
-        C4[payment-consumer]
     end
 
     PG --> DC --> KR --> Flink
@@ -37,10 +44,12 @@ flowchart LR
 
 **Key Components:**
 
-- Debezium PostgreSQL CDC Connector (Confluent Cloud managed)
-- Confluent Cloud Flink (SQL-based stream processing)
-- 4 Python consumer applications
-- JSON format with Schema Registry
+- **Source**: AWS RDS PostgreSQL (in AWS account)
+- **CDC Connector**: Debezium PostgreSQL CDC Connector (self-hosted on AWS, Kafka Connect)
+- **Kafka Topics**: All topics hosted in Confluent Cloud
+- **Stream Processing**: Confluent Cloud Flink (SQL-based stream processing)
+- **Consumer**: Consumer application (running in AWS account)
+- **Format**: JSON format with Schema Registry
 
 ---
 
@@ -48,31 +57,44 @@ flowchart LR
 
 ```mermaid
 flowchart LR
-    subgraph Source["Source"]
-        PG(("PostgreSQL\nbusiness_events"))
+    subgraph AWS["AWS Account"]
+        subgraph RDS["AWS RDS"]
+            PG(("PostgreSQL
+            business_events"))
+        end
+        subgraph EKS["AWS EKS Cluster"]
+            KC["Kafka Connect
+            Debezium Connector"]
+            SP["Spring Boot
+            Stream Processor
+            Kafka Streams"]
+            Consumer["Consumer"]
+        end
     end
 
-    subgraph EKS["AWS EKS Cluster"]
-        SP["Spring Boot\nStream Processor\nKafka Streams"]
-        C1["Spring Boot\nConsumer Services"]
-    end
-
-    subgraph Kafka["Amazon MSK / Confluent"]
-        CDC["Confluent Cloud\nDebezium Connector v2\n(managed)"]
+    subgraph ConfluentCloud["Confluent Cloud"]
         KR[raw-business-events]
-        KF["filtered-*-events"]
+        KF1[filtered-loan-events]
+        KF2[filtered-car-events]
+        KF3[filtered-service-events]
+        KF4[filtered-payment-events]
     end
 
-    PG --> CDC --> KR --> SP --> KF --> C1
+    PG --> KC --> KR --> SP
+    SP --> KF1 & KF2 & KF3 & KF4
+    KF1 --> Consumer
+    KF2 --> Consumer
+    KF3 --> Consumer
+    KF4 --> Consumer
 ```
 
 ### Service Components
 
 | Service | Technology | Purpose |
 |---------|------------|---------|
-| CDC Connector | Confluent Cloud Debezium Connector v2 (managed) | Capture PostgreSQL WAL changes (managed by Confluent, offsets stored in Kafka) |
+| CDC Connector | Kafka Connect on EKS + Debezium PostgreSQL Connector | Capture PostgreSQL WAL changes (self-managed, offsets stored in Kafka topics) |
 | Stream Processor | Spring Boot + Kafka Streams | Filter and route events to topics |
-| Consumer Services | Spring Boot + Spring Kafka | Process filtered events |
+| Consumer | Consumer application | Process filtered events |
 
 ---
 
@@ -80,64 +102,88 @@ flowchart LR
 
 ### 1. Cost Analysis
 
-| Category | Current (Confluent Cloud) | Spring Boot (AWS EKS) |
+| Category | Current (Flink on Confluent Cloud) | Spring Boot (AWS EKS) |
 |----------|---------------------------|------------------------|
 | **Infrastructure** | | |
-| Kafka Broker | ~$1,200-3,000/mo (CKU-based) | ~$400-800/mo (MSK m5.large x3) |
+| Kafka Broker (Confluent Cloud) | ~$1,200-3,000/mo (CKU-based) | ~$1,200-3,000/mo (CKU-based, same) |
 | Flink Compute | ~$800-2,000/mo (4-8 CFU) | Included in EKS nodes |
-| Connectors | ~$200-400/mo (managed) | ~$200-400/mo (Confluent managed connector v2) |
+| Connectors | ~$100-200/mo (Kafka Connect on EKS, shared node capacity) | ~$100-200/mo (Kafka Connect on EKS, shared node capacity, same) |
 | Schema Registry | ~$100/mo | ~$50/mo (Glue) or self-hosted |
-| EKS Cluster | N/A | ~$72/mo (control plane) |
-| EC2 Nodes | N/A | ~$300-600/mo (3x m5.large) |
+| EKS Cluster | ~$72/mo (control plane) | ~$72/mo (control plane, same) |
+| EC2 Nodes | ~$100-200/mo (1-2x m5.large, includes connector) | ~$300-600/mo (3x m5.large, includes connector + stream processor + consumers) |
 | **Engineering** | | |
-| Initial Build | Low (managed services) | High (3-4 weeks) |
-| Ongoing Maintenance | Low | Medium-High |
-| **Total Estimated** | **$2,300-5,500/mo** | **$800-1,500/mo + eng time** |
+| Initial Build | Medium (Flink SQL + connector setup) | High (3-4 weeks) |
+| Ongoing Maintenance | Medium (Kafka Connect + Flink SQL) | Medium-High (Kafka Connect + Java code) |
+| **Total Estimated** | **$2,300-5,500/mo** | **$1,700-4,000/mo + eng time** |
 
-**Cost Verdict:** Spring Boot is ~60-70% cheaper on infrastructure but requires significant engineering investment upfront and ongoing.
+**Cost Verdict:** Spring Boot saves on Flink compute costs (included in EKS nodes), but connector costs are the same for both implementations (both self-hosted on EKS). Kafka broker costs remain the same since topics stay in Confluent Cloud. Total savings are ~25-30% on infrastructure, with significant engineering investment upfront and ongoing. The main savings come from eliminating Flink compute costs. Both implementations require EKS infrastructure for the connector.
 
 ### 2. Maintainability
 
 | Aspect | Current | Spring Boot Alternative |
 |--------|---------|-------------------------|
-| Code Ownership | Flink SQL files, Python consumers | Full Java codebase |
-| Debugging | Confluent Cloud Console | Application logs, distributed tracing |
-| Updates | Managed by Confluent | Manual dependency updates |
-| Team Skills | SQL, Python | Java/Kotlin required |
-| Configuration | JSON connector configs, SQL | Spring YAML, Java code |
+| Code Ownership | Flink SQL files, consumer application | Full Java codebase |
+| Connector Maintenance | Kafka Connect on EKS (self-hosted) | Kafka Connect on EKS (self-hosted, same) |
+| Debugging | Confluent Cloud Console (Flink), Kafka Connect REST API (connector) | Application logs, distributed tracing, Kafka Connect REST API |
+| Updates | Flink managed by Confluent, connector manual updates | Manual dependency updates for all components |
+| Team Skills | SQL, Kafka Connect operations | Java/Kotlin, Kafka Connect operations |
+| Configuration | JSON connector configs, SQL (Flink) | Spring YAML, Java code, JSON connector configs |
 
 **Assessment:**
 
-- **Current:** Lower maintenance burden but less control
-- **Spring Boot:** Full control but requires dedicated Java expertise and proactive maintenance
+- **Current:** Lower maintenance burden for Flink (managed), but connector requires Kafka Connect operational expertise. SQL-based development is simpler than Java.
+- **Spring Boot:** Full control but requires dedicated Java expertise and proactive maintenance. Connector maintenance is same as current implementation.
 
 ### 3. Risk Assessment
 
 | Risk | Current | Spring Boot |
 |------|---------|-------------|
-| **Vendor Lock-in** | High (Confluent Cloud) | Lower (OSS stack) |
-| **Single Point of Failure** | Managed HA by Confluent | Requires proper K8s setup |
-| **Data Loss** | Managed replication | Manual checkpoint mgmt |
-| **CDC Offset Management** | Automatic | Custom implementation |
-| **Scaling Bottlenecks** | Auto-scaling | Manual HPA tuning |
-| **Connector Failures** | Auto-restart | Custom error handling |
+| **Vendor Lock-in** | High (Confluent Cloud for Kafka + Flink) | Lower (OSS stack, Confluent Cloud only for Kafka) |
+| **Single Point of Failure** | Flink managed HA by Confluent, connector requires proper K8s setup | Requires proper K8s setup for all components |
+| **Data Loss** | Flink managed replication, connector manual checkpoint mgmt | Manual checkpoint mgmt for stream processor |
+| **CDC Offset Management** | Kafka Connect manages offsets (stored in Kafka topics) | Kafka Connect manages offsets (stored in Kafka topics, same) |
+| **Scaling Bottlenecks** | Flink auto-scaling, connector manual HPA tuning | Manual HPA tuning for all components |
+| **Connector Failures** | Kubernetes pod restart policies + health checks | Kubernetes pod restart policies + health checks (same) |
+| **Replication Slot Management** | Manual monitoring and cleanup required | Manual monitoring and cleanup required (same) |
+| **Database Connection Management** | Self-managed connection pooling and retries | Self-managed connection pooling and retries (same) |
 
-**Risk Mitigations for Spring Boot:**
+**Risk Mitigations (Both Implementations):**
 
-1. Implement proper Debezium offset storage (Kafka-based)
-2. Configure Kafka Streams state stores with changelog topics
-3. Use PodDisruptionBudgets and multiple replicas
-4. Implement circuit breakers and dead-letter queues
+1. **Connector Deployment (Both):**
+   - Deploy Kafka Connect with multiple replicas for HA
+   - Use Kubernetes liveness/readiness probes for automatic pod restarts
+   - Configure PodDisruptionBudgets to prevent accidental downtime
+   - Monitor connector task status via Kafka Connect REST API
+
+2. **Offset Management (Both):**
+   - Kafka Connect automatically stores offsets in Kafka topics (`__connect-offsets`)
+   - Configure replication factor >= 3 for offset topics
+   - Monitor offset lag to detect processing delays
+
+3. **Replication Slot Management (Both):**
+   - Implement monitoring for replication slot usage
+   - Set up alerts for slot growth or database connection issues
+   - Regular cleanup of unused slots (with caution)
+
+4. **Database Connections (Both):**
+   - Configure connection pooling in connector configuration
+   - Use retry policies for transient failures
+   - Monitor connection pool metrics
+
+5. **Stream Processing:**
+   - **Current (Flink):** Managed state stores and checkpoints by Confluent Cloud
+   - **Spring Boot:** Configure Kafka Streams state stores with changelog topics, implement circuit breakers and dead-letter queues, use exactly-once semantics (EOS) for data integrity
 
 ### 4. CI/CD Complexity
 
 | Aspect | Current | Spring Boot |
 |--------|---------|-------------|
-| **Deployment Model** | SQL statements, connector JSON | Container images, Helm charts |
-| **Testing** | Limited (SQL validation) | Full unit/integration tests |
-| **Rollback** | Statement versioning | K8s rollout undo |
-| **Pipeline Stages** | Deploy SQL, register connector | Build, test, push image, deploy |
+| **Deployment Model** | SQL statements (Flink), connector JSON via Kafka Connect REST API | Container images, Helm charts, connector JSON via Kafka Connect REST API |
+| **Testing** | Limited (SQL validation), connector integration tests | Full unit/integration tests |
+| **Rollback** | Statement versioning (Flink), connector config rollback | K8s rollout undo, connector config rollback |
+| **Pipeline Stages** | Deploy SQL, deploy connector via Kafka Connect REST API | Build, test, push image, deploy, deploy connector via Kafka Connect REST API |
 | **Environment Parity** | Different configs per env | Same images, different configs |
+| **Connector Deployment** | Kafka Connect REST API (same for both) | Kafka Connect REST API (same for both) |
 
 **CI/CD Pipeline for Spring Boot:**
 
@@ -172,37 +218,59 @@ stages:
 
 | Aspect | Current | Spring Boot |
 |--------|---------|-------------|
-| **Authentication** | SASL_SSL (managed) | SASL_SSL (self-managed) |
-| **Authorization** | Confluent RBAC | MSK IAM or Kafka ACLs |
-| **Encryption** | TLS in transit | TLS + optional at-rest |
-| **Secrets Management** | Confluent Cloud | AWS Secrets Manager / K8s secrets |
-| **Audit Logging** | Confluent audit logs | CloudWatch, custom logging |
-| **Network Isolation** | PrivateLink | VPC, Security Groups |
-| **Compliance** | SOC 2, HIPAA (Confluent) | Self-managed compliance |
+| **Authentication** | SASL_SSL (Confluent Cloud, self-managed API keys) | SASL_SSL (Confluent Cloud, self-managed API keys, same) |
+| **Authorization** | Confluent RBAC | Confluent RBAC (same) |
+| **Encryption** | TLS in transit (Confluent Cloud) | TLS in transit (Confluent Cloud, same) |
+| **Secrets Management** | AWS Secrets Manager / K8s secrets (connector), Confluent Cloud (Flink) | AWS Secrets Manager / K8s secrets |
+| **Audit Logging** | Confluent audit logs (Flink), CloudWatch (connector) | CloudWatch, custom logging |
+| **Network Isolation** | VPC, Security Groups (connector), PrivateLink (Flink) | VPC, Security Groups |
+| **Compliance** | SOC 2, HIPAA (Confluent for Flink), self-managed (connector) | Self-managed compliance |
 
 **Security Implementation:**
 
-- Use AWS IAM for MSK authentication
-- Kubernetes secrets + AWS Secrets Manager
-- VPC-native deployment with private subnets
-- Enable mTLS between services (optional)
+- **Connector (Both):** Use Confluent Cloud API keys for Kafka authentication (SASL_SSL), Kubernetes secrets + AWS Secrets Manager for storing API keys and database credentials, VPC-native deployment with private subnets
+- **Stream Processing:** Current uses Confluent Cloud managed security, Spring Boot uses self-managed security
+- Both architectures use Confluent Cloud for Kafka topics, so Kafka security is consistent
+- Both architectures use same connector security model (Kafka Connect on EKS)
 
 ### 7. Monitoring and Observability
 
 | Aspect | Current | Spring Boot |
 |--------|---------|-------------|
-| **Metrics** | Confluent Cloud Console | Prometheus + Grafana |
-| **Logs** | Confluent Cloud | CloudWatch / ELK |
-| **Tracing** | Limited | OpenTelemetry + X-Ray/Jaeger |
-| **Alerting** | Built-in alerts | CloudWatch Alarms / PagerDuty |
-| **Dashboards** | Pre-built | Custom Grafana dashboards |
+| **Metrics** | Confluent Cloud Console (Flink), Kafka Connect REST API + Prometheus (connector) | Prometheus + Grafana (all components) |
+| **Logs** | Confluent Cloud (Flink), CloudWatch / ELK (connector) | CloudWatch / ELK |
+| **Tracing** | Limited (Flink), OpenTelemetry (connector) | OpenTelemetry + X-Ray/Jaeger |
+| **Alerting** | Built-in alerts (Flink), CloudWatch Alarms (connector) | CloudWatch Alarms / PagerDuty |
+| **Dashboards** | Pre-built (Flink), Custom (connector) | Custom Grafana dashboards |
+| **Connector Monitoring** | Kafka Connect REST API, Prometheus JMX exporter (same for both) | Kafka Connect REST API, Prometheus JMX exporter (same for both) |
 
 **Implementation Stack:**
 
-- Micrometer for metrics export
-- OpenTelemetry SDK for distributed tracing
-- Spring Boot Actuator endpoints
-- Prometheus ServiceMonitor CRDs
+- **Application Metrics:**
+  - Micrometer for metrics export
+  - Spring Boot Actuator endpoints
+  - Prometheus ServiceMonitor CRDs
+
+- **Kafka Connect Monitoring:**
+  - Kafka Connect REST API for connector status and health
+  - Prometheus JMX exporter for Kafka Connect metrics
+  - Key metrics: connector task status, offset lag, throughput, error rates
+  - ServiceMonitor CRD for Prometheus scraping
+
+- **Connector-Specific Metrics:**
+  - Debezium connector metrics (via JMX)
+  - Replication slot lag monitoring
+  - Database connection pool metrics
+  - Event processing latency
+
+- **Distributed Tracing:**
+  - OpenTelemetry SDK for distributed tracing
+  - Integration with X-Ray or Jaeger
+
+- **Logging:**
+  - CloudWatch Logs or ELK stack
+  - Structured logging with correlation IDs
+  - Connector task logs via Kafka Connect REST API
 
 ### 8. Performance
 
@@ -224,19 +292,80 @@ stages:
 
 ## Implementation Components
 
-### 1. CDC Connector (Confluent Cloud - Debezium v2)
+### 1. CDC Connector (Kafka Connect on EKS)
 
-```text
-// Managed connector running in Confluent Cloud
-```
+**Deployment Architecture:**
+
+- Kafka Connect deployed as Kubernetes StatefulSet or Deployment on EKS
+- Debezium PostgreSQL connector plugin installed in Kafka Connect container
+- Connector configuration managed via ConfigMap and Secrets
+- Connector lifecycle managed via Kafka Connect REST API
 
 **Features:**
 
-- Confluent-managed Debezium v2 Postgres connector capturing PostgreSQL WAL
-- Publishes to `raw-business-events` topic
-- Offsets and connector state stored in Kafka topics (managed)
-- Built-in HA, automatic restarts, and monitoring via Confluent Cloud
-- Minimal engineering overhead compared to self-hosted CDC
+- Self-managed Debezium PostgreSQL connector capturing PostgreSQL WAL from AWS RDS
+- Connects to Confluent Cloud Kafka brokers (topics hosted in Confluent Cloud)
+- Publishes to `raw-business-events` topic (or `raw-event-headers` for event_headers table) in Confluent Cloud
+- Offsets and connector state stored in Kafka topics in Confluent Cloud (`__connect-offsets`, `__connect-configs`, `__connect-status`)
+- High availability via Kubernetes pod replicas and restart policies
+- Monitoring via Prometheus metrics exporter and Kafka Connect REST API
+- Configuration management via Helm charts and Kubernetes ConfigMaps
+
+**Implementation Details:**
+
+```yaml
+# Example Helm chart structure
+kafka-connect/
+  helm/
+    kafka-connect/
+      Chart.yaml
+      values.yaml
+      templates/
+        deployment.yaml      # Kafka Connect deployment
+        service.yaml         # REST API service
+        configmap.yaml       # Connector configuration
+        secret.yaml          # Database credentials
+        servicemonitor.yaml  # Prometheus metrics
+```
+
+**Deployment Steps:**
+
+1. **Deploy Kafka Connect:**
+
+   ```bash
+   helm install kafka-connect ./helm/kafka-connect \
+     --set kafka.bootstrapServers=<confluent-cloud-endpoint> \
+     --set kafka.apiKey=<confluent-api-key> \
+     --set kafka.apiSecret=<confluent-api-secret>
+   ```
+
+   **Note:** Topics are hosted in Confluent Cloud, so use Confluent Cloud bootstrap servers and API credentials.
+
+2. **Install Debezium Connector Plugin:**
+   - Use Confluent Hub or manual installation
+   - Mount plugin directory as volume in Kafka Connect pods
+
+3. **Create Connector Configuration:**
+
+   ```bash
+   kubectl apply -f configmap-connector-config.yaml
+   kubectl apply -f secret-db-credentials.yaml
+   ```
+
+4. **Register Connector via REST API:**
+
+   ```bash
+   curl -X POST http://kafka-connect-service:8083/connectors \
+     -H "Content-Type: application/json" \
+     -d @connector-config.json
+   ```
+
+**Key Configuration:**
+
+- **Offset Storage:** Kafka topics (automatic, no custom code needed)
+- **Replication Slots:** Managed by Debezium connector (requires monitoring)
+- **Health Checks:** Kubernetes probes + Kafka Connect REST API health endpoint
+- **Scaling:** Horizontal pod autoscaling based on connector task load
 
 ### 2. Spring Boot Stream Processor
 
@@ -254,19 +383,14 @@ spring-cloud-stream-binder-kafka-streams
 - Exactly-once semantics enabled
 - State stores with changelog topics
 
-### 3. Spring Boot Consumer Services
-
-```java
-// Key dependencies
-spring-kafka
-spring-boot-starter-actuator
-```
+### 3. Consumer
 
 **Features:**
 
-- Replaces Python consumers (optional)
-- Consistent tech stack across all services
-- Better integration with monitoring
+- Consumer application processes filtered events from all 4 topics
+- Consumes from filtered-loan-events, filtered-car-events, filtered-service-events, and filtered-payment-events
+- Runs in AWS account (EKS or other AWS infrastructure)
+- Integrates with monitoring and observability stack
 
 ---
 
@@ -302,7 +426,7 @@ The following tests validate the claims made in this architecture document:
 
 ### Performance Baseline
 
-*Note: Update these baselines after running performance tests*
+> **Note:** Update these baselines after running performance tests
 
 | Metric | Flink SQL (Confluent Cloud) | Spring Boot (EKS) | Target |
 |--------|----------------------------|-------------------|--------|
@@ -310,7 +434,7 @@ The following tests validate the claims made in this architecture document:
 | Latency P50 | TBD ms | TBD ms | < 50ms |
 | Latency P95 | TBD ms | TBD ms | < 200ms |
 | Latency P99 | TBD ms | TBD ms | < 500ms |
-| Infrastructure Cost | $2,300-5,500/mo | $800-1,500/mo | 60-70% reduction |
+| Infrastructure Cost | $2,300-5,500/mo | $1,700-4,000/mo | 25-30% reduction |
 
 ### Test Execution
 
@@ -334,28 +458,31 @@ cd cdc-streaming/e2e-tests
 
 | Dimension | Winner | Notes |
 |-----------|--------|-------|
-| **Infrastructure Cost** | Spring Boot | 60-70% cheaper |
-| **Engineering Cost** | Current | Lower initial and ongoing |
-| **Maintainability** | Tie | Depends on team skills |
-| **Risk** | Current | Managed HA, auto-recovery |
-| **CI/CD** | Spring Boot | Better testing, but more complex |
+| **Infrastructure Cost** | Spring Boot | ~25-30% cheaper (eliminates Flink compute costs; connector costs same for both) |
+| **Engineering Cost** | Current | Lower initial (Flink SQL simpler than Java), similar ongoing (both require Kafka Connect ops) |
+| **Maintainability** | Current | Flink SQL simpler than Java code; connector maintenance same for both |
+| **Risk** | Current | Flink managed HA/auto-recovery; connector risks same for both (K8s operational maturity required) |
+| **CI/CD** | Spring Boot | Better testing, but more complex; connector deployment same for both |
 | **Schema Evolution** | Tie | Both support well |
-| **Security** | Current | Managed compliance |
-| **Monitoring** | Current | Pre-built dashboards |
-| **Performance** | Current | Flink auto-scales better |
+| **Security** | Current | Flink managed compliance; connector security same for both |
+| **Monitoring** | Current | Pre-built Flink dashboards; connector monitoring same for both |
+| **Performance** | Current | Flink auto-scales better; connector scaling same for both |
 
 **Overall Recommendation:**
 
 Choose **Spring Boot** if:
 
-- Cost reduction is primary driver
-- Team has strong Java/Kotlin expertise
-- You need full control over the stack
+- Cost reduction is primary driver (eliminates Flink compute costs)
+- Team has strong Java/Kotlin and Kubernetes expertise
+- You need full control over the stream processing stack
 - Simple filtering workloads (current case)
+- You have operational maturity for managing Kafka Connect (required for both implementations)
 
-Stay with **Confluent Cloud** if:
+Stay with **Current (Flink)** if:
 
-- Operational simplicity is priority
+- Operational simplicity is priority (managed Flink reduces operational burden)
 - Team prefers SQL-based development
-- Compliance requirements need managed services
+- Compliance requirements need managed services (Flink)
 - Complex stream processing may be needed later
+- Limited Java/Kotlin expertise
+- Both implementations require Kafka Connect operational expertise, so connector management is not a differentiator

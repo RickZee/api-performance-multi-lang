@@ -314,12 +314,31 @@ elif [ "$DB_TYPE" = "dsql" ]; then
         echo ""
         echo -e "${BLUE}Validating DSQL...${NC}"
         if [ -f "$PROJECT_ROOT/scripts/validate-against-sent-events.py" ]; then
-            python3 "$PROJECT_ROOT/scripts/validate-against-sent-events.py" \
-                --events-file "$EVENTS_FILE" \
-                --dsql \
-                --query-dsql-script "$PROJECT_ROOT/scripts/query-dsql.sh" || {
-                echo -e "${YELLOW}⚠️  DSQL validation had issues${NC}"
-            }
+            # Get DSQL connection parameters from terraform
+            DSQL_HOST=$(cd terraform && terraform output -raw aurora_dsql_host 2>/dev/null || echo "")
+            # IAM username is a variable, not an output - read from terraform.tfvars
+            # Remove comments and extract value
+            IAM_USERNAME=$(cd terraform && grep -E "^iam_database_user\s*=" terraform.tfvars 2>/dev/null | head -1 | sed 's/#.*$//' | cut -d'"' -f2 | tr -d ' ' || echo "")
+            AWS_REGION=$(cd terraform && terraform output -raw aws_region 2>/dev/null || aws configure get region 2>/dev/null || echo "us-east-1")
+            DSQL_PORT=$(cd terraform && terraform output -raw aurora_dsql_port 2>/dev/null || echo "5432")
+            
+            # Use new direct connection method (no bastion/SSM required)
+            if [ -n "$DSQL_HOST" ] && [ -n "$IAM_USERNAME" ] && [ -n "$AWS_REGION" ]; then
+                python3 "$PROJECT_ROOT/scripts/validate-against-sent-events.py" \
+                    --events-file "$EVENTS_FILE" \
+                    --dsql \
+                    --dsql-host "$DSQL_HOST" \
+                    --iam-username "$IAM_USERNAME" \
+                    --aws-region "$AWS_REGION" \
+                    --dsql-port "$DSQL_PORT" || {
+                    echo -e "${YELLOW}⚠️  DSQL validation had issues${NC}"
+                }
+            else
+                echo -e "${YELLOW}⚠️  Skipping DSQL validation (connection parameters not found in terraform)${NC}"
+                echo -e "${YELLOW}   DSQL_HOST: ${DSQL_HOST:-not found}${NC}"
+                echo -e "${YELLOW}   IAM_USERNAME: ${IAM_USERNAME:-not found}${NC}"
+                echo -e "${YELLOW}   AWS_REGION: ${AWS_REGION:-not found}${NC}"
+            fi
         else
             echo -e "${YELLOW}⚠️  Skipping DSQL validation (validate-against-sent-events.py not found)${NC}"
         fi

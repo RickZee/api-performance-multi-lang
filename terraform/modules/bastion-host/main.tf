@@ -216,15 +216,42 @@ resource "aws_instance" "bastion" {
   # Associate Elastic IP if requested
   associate_public_ip_address = true
 
-  # User data to install PostgreSQL client and AWS CLI
+  # User data to install PostgreSQL client, AWS CLI, Python 3, and validation dependencies
   user_data = <<-EOF
     #!/bin/bash
+    set -e
+    
+    # Update system
     dnf update -y
-    dnf install -y postgresql16 git unzip
+    
+    # Install base packages
+    dnf install -y postgresql16 git unzip python3 python3-pip
+    
+    # Install AWS CLI v2
     curl "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "awscliv2.zip"
     unzip awscliv2.zip
     ./aws/install
     rm -rf aws awscliv2.zip
+    
+    # Install Python packages for DSQL validation
+    pip3 install --upgrade pip
+    pip3 install asyncpg boto3 botocore
+    
+    # Create directory for validation scripts
+    mkdir -p /opt/validation-scripts
+    
+    # Download validation script from S3 if available, otherwise create a placeholder
+    # The script will be uploaded via SSM when needed
+    cat > /opt/validation-scripts/validate_dsql_bastion.py <<'PYTHON_EOF'
+# Placeholder - will be replaced by actual script via SSM
+PYTHON_EOF
+    
+    # Set permissions
+    chmod 755 /opt/validation-scripts
+    chmod 644 /opt/validation-scripts/validate_dsql_bastion.py
+    
+    # Log completion
+    echo "Bastion host setup complete at $(date)" >> /var/log/bastion-setup.log
   EOF
 
   tags = merge(
