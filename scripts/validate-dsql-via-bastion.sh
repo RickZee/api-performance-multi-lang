@@ -212,15 +212,29 @@ if [ "$STATUS" = "Success" ]; then
     
     # Parse and print results
     if [ -n "$OUTPUT" ]; then
-        # Try to extract JSON from output
-        JSON_RESULT=$(echo "$OUTPUT" | grep -oP '\{.*\}' | head -1 || echo "$OUTPUT")
+        # Try to extract JSON from output (macOS grep doesn't support -P, use sed instead)
+        # Find the first line that starts with { and extract everything from there
+        JSON_START=$(echo "$OUTPUT" | grep -n "^{" | head -1 | cut -d: -f1 || echo "")
+        if [ -n "$JSON_START" ]; then
+            # Extract from the JSON start line to the end
+            JSON_RESULT=$(echo "$OUTPUT" | sed -n "${JSON_START},\$p")
+        else
+            # Try to find JSON anywhere in the output
+            JSON_RESULT=$(echo "$OUTPUT" | awk '/^\{/,/^\}/' | head -100 || echo "$OUTPUT")
+        fi
         
         if echo "$JSON_RESULT" | jq . > /dev/null 2>&1; then
             # Valid JSON - print it (will be parsed by calling script)
             echo "$JSON_RESULT"
         else
-            # Not JSON, just print output
-            echo "$OUTPUT"
+            # Not JSON, try to find JSON in the output more carefully
+            # Look for lines that look like JSON (start with { and contain "total_sent")
+            JSON_LINES=$(echo "$OUTPUT" | grep -E '^\s*\{' | head -50 || echo "")
+            if [ -n "$JSON_LINES" ]; then
+                echo "$JSON_LINES" | jq -s '.' 2>/dev/null || echo "$OUTPUT"
+            else
+                echo "$OUTPUT"
+            fi
         fi
     fi
 else

@@ -1,0 +1,15 @@
+# Test configuration
+test:
+  kafka:
+    bootstrap-servers: ${CONFLUENT_BOOTSTRAP_SERVERS}
+    api-key: ${CONFLUENT_API_KEY}
+    api-secret: ${CONFLUENT_API_SECRET}
+  topics:
+    source: raw-event-headers
+    filtered-car: filtered-car-created-events
+    filtered-loan: filtered-loan-created-events
+    filtered-payment: filtered-loan-payment-submitted-events
+    filtered-service: filtered-service-events
+  timeouts:
+    event-processing: 10000
+    topic-consumption: 30000

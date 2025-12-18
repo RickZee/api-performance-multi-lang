@@ -88,10 +88,11 @@ async def query_batch(conn: asyncpg.Connection, batch: List[str], batch_num: int
         if not uuid_list:
             return set()
         
-        rows = await conn.fetch(
-            "SELECT id FROM event_headers WHERE id = ANY($1::uuid[])",
-            uuid_list
-        )
+        # The id column is VARCHAR(255) in DSQL, so we compare as text
+        # Use IN clause with text parameters
+        placeholders = ','.join([f'${i+1}' for i in range(len(uuid_list))])
+        query = f"SELECT id FROM event_headers WHERE id IN ({placeholders})"
+        rows = await conn.fetch(query, *uuid_list)
         found = {str(row['id']) for row in rows}
         duration = time.time() - batch_start
         print(f"[DSQL Validation] Batch {batch_num}/{total_batches}: Found {len(found)}/{len(batch)} events (duration: {duration:.2f}s)", file=sys.stderr)
@@ -135,20 +136,17 @@ async def validate_dsql_async(
         batches = [uuid_list[i:i + batch_size] for i in range(0, len(uuid_list), batch_size)]
         total_batches = len(batches)
         
-        semaphore = asyncio.Semaphore(max_concurrent)
-        batch_tasks = [
-            query_batch(conn, batch, i + 1, total_batches)
-            for i, batch in enumerate(batches)
-        ]
-        
-        batch_results = await asyncio.gather(*batch_tasks, return_exceptions=True)
-        
+        # DSQL doesn't support concurrent operations on the same connection
+        # Run batches sequentially instead of in parallel
         found_uuids = set()
-        for i, result in enumerate(batch_results):
-            if isinstance(result, Exception):
-                results['errors'].append(f"Batch {i + 1} error: {str(result)[:200]}")
-            elif isinstance(result, set):
+        for i, batch in enumerate(batches):
+            result = await query_batch(conn, batch, i + 1, total_batches)
+            if isinstance(result, set):
                 found_uuids.update(result)
+            elif isinstance(result, Exception):
+                results['errors'].append(f"Batch {i + 1} error: {str(result)[:200]}")
+        
+        # found_uuids already populated above
         
         for event in events:
             uuid = event.get('uuid')
