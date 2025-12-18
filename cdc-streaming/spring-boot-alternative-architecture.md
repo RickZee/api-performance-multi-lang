@@ -1,6 +1,6 @@
 # Spring Boot CDC Alternative Architecture on AWS EKS
 
-## Current Architecture Analysis
+## Confluent Flink Architecture Analysis
 
 The existing CDC streaming system ([ARCHITECTURE.md](ARCHITECTURE.md)) uses:
 
@@ -119,7 +119,7 @@ flowchart LR
 
 ### 2. Maintainability
 
-| Aspect | Current | Spring Boot Alternative |
+| Aspect | Confluent Flink | Spring Boot Alternative |
 |--------|---------|-------------------------|
 | Code Ownership | Flink SQL files, consumer application | Full Java codebase |
 | Connector Maintenance | Kafka Connect on EKS (self-hosted) | Kafka Connect on EKS (self-hosted, same) |
@@ -130,12 +130,12 @@ flowchart LR
 
 **Assessment:**
 
-- **Current:** Lower maintenance burden for Flink (managed), but connector requires Kafka Connect operational expertise. SQL-based development is simpler than Java.
+- **Confluent Flink:** Lower maintenance burden for Flink (managed), but connector requires Kafka Connect operational expertise. SQL-based development is simpler than Java.
 - **Spring Boot:** Full control but requires dedicated Java expertise and proactive maintenance. Connector maintenance is same as current implementation.
 
 ### 3. Risk Assessment
 
-| Risk | Current | Spring Boot |
+| Risk | Confluent Flink | Spring Boot |
 |------|---------|-------------|
 | **Vendor Lock-in** | High (Confluent Cloud for Kafka + Flink) | Lower (OSS stack, Confluent Cloud only for Kafka) |
 | **Single Point of Failure** | Flink managed HA by Confluent, connector requires proper K8s setup | Requires proper K8s setup for all components |
@@ -170,12 +170,12 @@ flowchart LR
    - Monitor connection pool metrics
 
 5. **Stream Processing:**
-   - **Current (Flink):** Managed state stores and checkpoints by Confluent Cloud
+   - **Confluent Flink:** Managed state stores and checkpoints by Confluent Cloud
    - **Spring Boot:** Configure Kafka Streams state stores with changelog topics, implement circuit breakers and dead-letter queues, use exactly-once semantics (EOS) for data integrity
 
 ### 4. CI/CD Complexity
 
-| Aspect | Current | Spring Boot |
+| Aspect | Confluent Flink | Spring Boot |
 |--------|---------|-------------|
 | **Deployment Model** | SQL statements (Flink), connector JSON via Kafka Connect REST API | Container images, Helm charts, connector JSON via Kafka Connect REST API |
 | **Testing** | Limited (SQL validation), connector integration tests | Full unit/integration tests |
@@ -199,7 +199,7 @@ stages:
 
 ### 5. Schema Evolution
 
-| Aspect | Current | Spring Boot |
+| Aspect | Confluent Flink | Spring Boot |
 |--------|---------|-------------|
 | **Registry** | Confluent Schema Registry | Glue Schema Registry or Confluent |
 | **Compatibility** | BACKWARD, FORWARD, FULL | Same options available |
@@ -215,7 +215,7 @@ stages:
 
 ### 6. Security and Compliance
 
-| Aspect | Current | Spring Boot |
+| Aspect | Confluent Flink | Spring Boot |
 |--------|---------|-------------|
 | **Authentication** | SASL_SSL (Confluent Cloud, self-managed API keys) | SASL_SSL (Confluent Cloud, self-managed API keys, same) |
 | **Authorization** | Confluent RBAC | Confluent RBAC (same) |
@@ -228,13 +228,13 @@ stages:
 **Security Implementation:**
 
 - **Connector (Both):** Use Confluent Cloud API keys for Kafka authentication (SASL_SSL), Kubernetes secrets + AWS Secrets Manager for storing API keys and database credentials, VPC-native deployment with private subnets
-- **Stream Processing:** Current uses Confluent Cloud managed security, Spring Boot uses self-managed security
+- **Stream Processing:** Confluent Flink uses Confluent Cloud managed security, Spring Boot uses self-managed security
 - Both architectures use Confluent Cloud for Kafka topics, so Kafka security is consistent
 - Both architectures use same connector security model (Kafka Connect on EKS)
 
 ### 7. Monitoring and Observability
 
-| Aspect | Current | Spring Boot |
+| Aspect | Confluent Flink | Spring Boot |
 |--------|---------|-------------|
 | **Metrics** | Confluent Cloud Console (Flink), Kafka Connect REST API + Prometheus (connector) | Prometheus + Grafana (all components) |
 | **Logs** | Confluent Cloud (Flink), CloudWatch / ELK (connector) | CloudWatch / ELK |
@@ -273,7 +273,7 @@ stages:
 
 ### 8. Performance
 
-| Metric | Current (Flink) | Spring Boot (Kafka Streams) |
+| Metric | Confluent Flink | Spring Boot (Kafka Streams) |
 |--------|-----------------|------------------------------|
 | **Throughput** | 100K+ events/sec | 50K-100K events/sec |
 | **Latency** | 10-50ms | 5-20ms (lower for simple filtering) |
@@ -458,14 +458,14 @@ cd cdc-streaming/e2e-tests
 | Dimension | Winner | Notes |
 |-----------|--------|-------|
 | **Infrastructure Cost** | Spring Boot | ~25-30% cheaper (eliminates Flink compute costs; connector costs same for both) |
-| **Engineering Cost** | Current | Lower initial (Flink SQL simpler than Java), similar ongoing (both require Kafka Connect ops) |
-| **Maintainability** | Current | Flink SQL simpler than Java code; connector maintenance same for both |
-| **Risk** | Current | Flink managed HA/auto-recovery; connector risks same for both (K8s operational maturity required) |
+| **Engineering Cost** | Confluent Flink | Lower initial (Flink SQL simpler than Java), similar ongoing (both require Kafka Connect ops) |
+| **Maintainability** | Confluent Flink | Flink SQL simpler than Java code; connector maintenance same for both |
+| **Risk** | Confluent Flink | Flink managed HA/auto-recovery; connector risks same for both (K8s operational maturity required) |
 | **CI/CD** | Spring Boot | Better testing, but more complex; connector deployment same for both |
 | **Schema Evolution** | Tie | Both support well |
-| **Security** | Current | Flink managed compliance; connector security same for both |
-| **Monitoring** | Current | Pre-built Flink dashboards; connector monitoring same for both |
-| **Performance** | Current | Flink auto-scales better; connector scaling same for both |
+| **Security** | Confluent Flink | Flink managed compliance; connector security same for both |
+| **Monitoring** | Confluent Flink | Pre-built Flink dashboards; connector monitoring same for both |
+| **Performance** | Confluent Flink | Flink auto-scales better; connector scaling same for both |
 
 **Overall Recommendation:**
 
@@ -477,7 +477,7 @@ Choose **Spring Boot** if:
 - Simple filtering workloads (current case)
 - You have operational maturity for managing Kafka Connect (required for both implementations)
 
-Stay with **Current (Flink)** if:
+Stay with **Confluent Flink** if:
 
 - Operational simplicity is priority (managed Flink reduces operational burden)
 - Team prefers SQL-based development
