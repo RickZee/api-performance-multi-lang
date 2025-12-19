@@ -58,8 +58,87 @@
       "description": "Date of the last loan payment"
     },
     "owner": {
+      "oneOf": [
+        {
+          "type": "string",
+          "description": "Name of the car owner (simple string format)"
+        },
+        {
+          "type": "object",
+          "description": "Owner information object",
+          "properties": {
+            "id": { "type": "string" },
+            "firstName": { "type": "string" },
+            "lastName": { "type": "string" },
+            "email": { "type": "string", "format": "email" },
+            "phone": { "type": "string" },
+            "address": {
+              "type": "object",
+              "properties": {
+                "street": { "type": "string" },
+                "city": { "type": "string" },
+                "state": { "type": "string" },
+                "zipCode": { "type": "string" },
+                "country": { "type": "string" }
+              }
+            },
+            "description": { "type": "string" }
+          }
+        }
+      ],
+      "description": "Name of the car owner (string) or owner information object"
+    },
+    "description": {
       "type": "string",
-      "description": "Name of the car owner"
+      "description": "Description of the car, its condition, features, and history"
+    },
+    "insurance": {
+      "type": "object",
+      "description": "Insurance information",
+      "properties": {
+        "provider": { "type": "string" },
+        "policyNumber": { "type": "string" },
+        "expiryDate": { "type": "string", "format": "date-time" },
+        "coverageType": { "type": "string" },
+        "premiumAmount": { "type": "number" },
+        "deductible": { "type": "number" },
+        "description": { "type": "string" }
+      }
+    },
+    "maintenance": {
+      "type": "object",
+      "description": "Maintenance information",
+      "properties": {
+        "lastServiceDate": { "type": "string", "format": "date-time" },
+        "nextServiceDue": { "type": "string", "format": "date-time" },
+        "mileage": { "type": "integer" },
+        "oilChangeInterval": { "type": "integer" },
+        "tireRotationInterval": { "type": "integer" },
+        "warrantyCoverage": { "type": "string" },
+        "warrantyExpiryDate": { "type": "string", "format": "date-time" },
+        "description": { "type": "string" }
+      }
+    },
+    "features": {
+      "type": "array",
+      "items": { "type": "string" },
+      "description": "Array of car features"
+    },
+    "serviceHistory": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "serviceId": { "type": "string" },
+          "serviceDate": { "type": "string", "format": "date-time" },
+          "serviceType": { "type": "string" },
+          "mileage": { "type": "integer" },
+          "cost": { "type": "number" },
+          "description": { "type": "string" },
+          "technician": { "type": "string" }
+        }
+      },
+      "description": "Array of service history records"
     },
     "serviceRecords": {
       "type": "array",
@@ -77,5 +156,5 @@
     }
   },
   "required": ["entityHeader", "id", "vin", "make", "model", "year", "color", "mileage", "lastServiceDate", "totalBalance", "lastLoanPaymentDate", "owner"],
-  "additionalProperties": false
+  "additionalProperties": true
 }

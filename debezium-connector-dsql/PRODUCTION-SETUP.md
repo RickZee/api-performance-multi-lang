@@ -275,15 +275,15 @@ docker logs dsql-kafka-connect 2>&1 | grep -i error
 
 ### Known Issues
 
-1. **DSQL Authentication Errors** 🔴 CRITICAL
+1. **DSQL Authentication Errors** ✅ **FIXED**
    - Error: `FATAL: password authentication failed for user "dsql_iam_user"`
-   - **Root Cause**: Java connector uses Aurora RDS token generation method instead of DSQL-specific presigned URL generation
-   - **Evidence**: Python implementation uses `SigV4QueryAuth` with service 'dsql', Java uses `RdsClient.utilities().generateAuthenticationToken()` (service 'rds')
-   - **Impact**: Connector cannot establish database connections, pipeline is non-functional
+   - **Root Cause**: Java connector was using Aurora RDS token generation method instead of DSQL-specific presigned URL generation
+   - **Fix Implemented**: Pure Java SigV4 query string signing implemented in `SigV4QueryStringSigner.java`
+   - **Status**: Python dependency removed, pure Java implementation complete
    - **Action**: 
-     - Fix token generation in `IamTokenGenerator.java` to use DSQL presigned URL format
      - Verify IAM role mapping: `./scripts/verify-iam-role-mapping.sh`
-     - See `INVESTIGATION-FINDINGS.md` and `REMEDIATION-PLAN.md` for details
+     - Test connection: `./scripts/test-dsql-connection.sh`
+     - See `FIXES-IMPLEMENTED.md` for details
 
 2. **Kafka Broker Disconnections** 🟡 MEDIUM
    - Warning: `Bootstrap broker ... disconnected`
@@ -385,10 +385,10 @@ Generates a diagnostic report with all findings.
    ```
    This will test full connection with IAM authentication.
 
-4. **Fix Token Generation** (Required):
-   - See `REMEDIATION-PLAN.md` for detailed fix
-   - Update `IamTokenGenerator.java` to use DSQL presigned URL format
-   - Reference: Python implementation in `producer-api-python-rest-lambda-dsql/repository/iam_auth.py`
+4. **Token Generation** (✅ **FIXED**):
+   - Pure Java implementation complete in `SigV4QueryStringSigner.java`
+   - No Python dependency required
+   - See `FIXES-IMPLEMENTED.md` for details
 
 **Common Causes**:
 - IAM role not mapped to DSQL user (most likely)

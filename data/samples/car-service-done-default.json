@@ -1,0 +1,27 @@
+{
+  "eventHeader": {
+    "uuid": "ca2f1046-af50-42e9-8e38-d7bde1fee444",
+    "eventName": "Car Service Done",
+    "eventType": "CarServiceDone",
+    "createdDate": "2025-12-19T20:39:17.946288Z",
+    "savedDate": "2025-12-19T20:39:17.946288Z"
+  },
+  "entities": [
+    {
+      "entityHeader": {
+        "entityId": "SERVICE-20251219-80",
+        "entityType": "ServiceRecord",
+        "createdAt": "2025-12-19T20:39:17.946288Z",
+        "updatedAt": "2025-12-19T20:39:17.946288Z"
+      },
+      "id": "SERVICE-20251219-80",
+      "carId": "CAR-20250101-001",
+      "serviceDate": "2025-12-19T20:39:17.946288Z",
+      "amountPaid": "1001.17",
+      "dealerId": "DEALER-534",
+      "dealerName": "Ford Service Center - Chicago",
+      "mileageAtService": 31101,
+      "description": "Coolant flush and radiator service"
+    }
+  ]
+}

@@ -1,0 +1,31 @@
+{
+  "eventHeader": {
+    "uuid": "00c40d5a-eaaa-4d71-b509-10380aa9bf9a",
+    "eventName": "Car Created",
+    "eventType": "CarCreated",
+    "createdDate": "2025-12-19T20:39:17.936776Z",
+    "savedDate": "2025-12-19T20:39:17.936776Z"
+  },
+  "entities": [
+    {
+      "entityHeader": {
+        "entityId": "CAR-20251219-981",
+        "entityType": "Car",
+        "createdAt": "2025-12-19T20:39:17.936776Z",
+        "updatedAt": "2025-12-19T20:39:17.936776Z"
+      },
+      "id": "CAR-20251219-981",
+      "vin": "MJLN222Z0HF3W7XJM",
+      "make": "Mercedes",
+      "model": "GLE",
+      "year": 2023,
+      "color": "Silver",
+      "mileage": 25050,
+      "lastServiceDate": "2025-12-19T20:39:17.936776Z",
+      "totalBalance": "39444.00",
+      "lastLoanPaymentDate": "2025-12-19T20:39:17.936776Z",
+      "owner": "Laura Hall",
+      "description": ""
+    }
+  ]
+}

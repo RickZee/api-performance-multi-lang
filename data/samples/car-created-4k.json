@@ -1,0 +1,91 @@
+{
+  "eventHeader": {
+    "uuid": "d75a9b47-66d4-435b-956e-3184db68555b",
+    "eventName": "Car Created",
+    "eventType": "CarCreated",
+    "createdDate": "2025-12-19T20:39:17.937238Z",
+    "savedDate": "2025-12-19T20:39:17.937238Z"
+  },
+  "entities": [
+    {
+      "entityHeader": {
+        "entityId": "CAR-20251219-79",
+        "entityType": "Car",
+        "createdAt": "2025-12-19T20:39:17.937238Z",
+        "updatedAt": "2025-12-19T20:39:17.937238Z"
+      },
+      "id": "CAR-20251219-79",
+      "vin": "BENYFPPYPV9T7AH9A",
+      "make": "BMW",
+      "model": "X5",
+      "year": 2025,
+      "color": "Deep Blue",
+      "mileage": 30105,
+      "lastServiceDate": "2025-12-19T20:39:17.937238Z",
+      "totalBalance": "38620.00",
+      "lastLoanPaymentDate": "2025-12-19T20:39:17.937238Z",
+      "owner": {
+        "id": "OWNER-5876",
+        "firstName": "Lisa",
+        "lastName": "Diaz",
+        "email": "lisa.diaz@hotmail.com",
+        "phone": "+1-714-544-2110",
+        "address": {
+          "street": "1845 Madison Street",
+          "city": "Nashville",
+          "state": "NV",
+          "zipCode": "30327",
+          "country": "USA"
+        },
+        "description": "Information about owner. Account holder maintains active relationship with multiple services."
+      },
+      "description": "This BMW X5 is in excellent condition. This vehicle has been well-maintained with regular service records. We maintain the highest standards of service and reliability. The car features advanced safety systems and modern technology. We maintain the highest standards of service and reliability. Vehicle is in excellent condition with low mileage and no accidents. All transactions are processed securely and efficiently. Vehicle is in excellent condition with low mileage and no accidents. Additional details can be provided as needed. Previous owner maintained excellent care with documented service history. This information has been verified and confirmed. Vehicle is in excellent condition with low mileage and no accidents. Quality assurance measures were implemented throughout the process. Vehicle is in excellent condition with low mileage and no accidents. Records are available for review upon request. This vehicle has been well-maintained with regular service records. All procedures were followed according to established protocols. Previous owner maintained excellent care with documented service history. Records are available for review upon request. This vehicle has been well-maintained with regular service records. Complete documentation is maintained in our system. Vehicle is in excellent condition with low mileage and no accidents. All procedures were followed according to established protocols. Previous owner maintained excellent care with documented service history. All documentation has been properly maintained and verified. Previous owner maintained excellent care with documented service history. We maintain the highest standards of service and reliability. Vehicle is in excellent condition with low mileage and no accidents. Additional details can be provided as needed. Comprehensive warranty coverage included with manufacturer certification. Quality assurance measures were implemented throughout the process.",
+      "insurance": {
+        "provider": "Allstate",
+        "policyNumber": "POL-318917",
+        "expiryDate": "2026-12-19T20:39:17.937276Z",
+        "coverageType": "Full Coverage",
+        "premiumAmount": 760,
+        "deductible": 853,
+        "description": "Information about insurance. Coverage extends to all drivers with full protection and peace of mind."
+      },
+      "maintenance": {
+        "lastServiceDate": "2025-12-19T20:39:17.937281Z",
+        "nextServiceDue": "2026-03-19T20:39:17.937282Z",
+        "mileage": 68570,
+        "oilChangeInterval": 14715,
+        "tireRotationInterval": 6337,
+        "warrantyCoverage": "Active",
+        "warrantyExpiryDate": "2028-12-18T20:39:17.937285Z",
+        "description": "Information about maintenance. Preventive maintenance performed to ensure optimal vehicle performance and reliability."
+      },
+      "features": [
+        "Premium Sound System",
+        "Adaptive Cruise Control",
+        "Automatic Emergency Braking",
+        "Backup Camera",
+        "All-Wheel Drive"
+      ],
+      "serviceHistory": [
+        {
+          "serviceId": "SVC-339947",
+          "serviceDate": "2025-09-22T20:39:17.937307Z",
+          "serviceType": "Spark Service",
+          "mileage": 5377,
+          "cost": 748,
+          "description": "Oil change and filter replacement with multi-point inspection",
+          "technician": "George Scott"
+        },
+        {
+          "serviceId": "SVC-649245",
+          "serviceDate": "2024-01-10T20:39:17.937368Z",
+          "serviceType": "Wheel Service",
+          "mileage": 8969,
+          "cost": 853,
+          "description": "Coolant flush and radiator service",
+          "technician": "Mark Martin"
+        }
+      ]
+    }
+  ]
+}

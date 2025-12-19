@@ -650,13 +650,29 @@ module "ec2_auto_stop" {
 # Grant Bastion Host IAM Role Access to DSQL IAM User
 # 
 # DSQL requires IAM authentication even for admin operations, creating a chicken-and-egg problem.
-# The simplest solution is to grant the bastion role directly using a one-time manual step,
-# then Terraform can manage it going forward.
+# We use a Lambda function to grant IAM role access. The Lambda's IAM role must first be mapped
+# to the postgres user in DSQL (one-time manual step), then Terraform can manage subsequent grants.
 #
 # One-time setup (run once manually from a machine with DSQL admin access):
-#   AWS IAM GRANT ${var.iam_database_user} TO 'arn:aws:iam::${data.aws_caller_identity.current.account_id}:role/${var.project_name}-bastion-role';
+#   AWS IAM GRANT postgres TO 'arn:aws:iam::${data.aws_caller_identity.current.account_id}:role/${var.project_name}-dsql-iam-grant-role';
 #
-# This null_resource outputs the command to run and can be triggered on demand.
+# After that, Terraform will automatically grant the bastion role access via Lambda.
+
+# Lambda function to grant IAM role access
+module "dsql_iam_grant" {
+  count  = var.enable_bastion_host && var.enable_aurora_dsql_cluster ? 1 : 0
+  source = "./modules/dsql-iam-grant"
+
+  project_name            = var.project_name
+  dsql_host              = module.aurora_dsql[0].dsql_host
+  dsql_cluster_resource_id = module.aurora_dsql[0].cluster_resource_id
+  iam_user               = var.iam_database_user
+  role_arn               = "arn:aws:iam::${data.aws_caller_identity.current.account_id}:role/${var.project_name}-bastion-role"
+  aws_region             = var.aws_region
+  tags                   = local.common_tags
+}
+
+# Invoke Lambda to grant IAM role access
 resource "null_resource" "grant_bastion_iam_access" {
   count = var.enable_bastion_host && var.enable_aurora_dsql_cluster ? 1 : 0
 
@@ -665,35 +681,49 @@ resource "null_resource" "grant_bastion_iam_access" {
     dsql_cluster_id     = module.aurora_dsql[0].cluster_resource_id
     iam_user            = var.iam_database_user
     bastion_role_arn    = "arn:aws:iam::${data.aws_caller_identity.current.account_id}:role/${var.project_name}-bastion-role"
+    lambda_function_name = module.dsql_iam_grant[0].lambda_function_name
   }
 
-  # Output the command that needs to be run
-  # This can be run manually or via a separate automation
+  # Invoke Lambda function to grant IAM access
   provisioner "local-exec" {
     command = <<-EOT
-      echo "=========================================="
-      echo "DSQL IAM Role Mapping Required"
-      echo "=========================================="
-      echo ""
-      echo "Run this command from a machine with DSQL admin access:"
-      echo ""
-      echo "  AWS IAM GRANT ${var.iam_database_user} TO 'arn:aws:iam::${data.aws_caller_identity.current.account_id}:role/${var.project_name}-bastion-role';"
-      echo ""
-      echo "This is a one-time setup. After this, the connector will be able to connect."
-      echo ""
-      echo "To connect to DSQL, you need:"
-      echo "  1. A machine with IAM role/user mapped to postgres user in DSQL"
-      echo "  2. Or use AWS Console/CLI if available"
-      echo ""
-      echo "DSQL Host: ${module.aurora_dsql[0].dsql_host}"
-      echo "IAM User: ${var.iam_database_user}"
-      echo "Bastion Role: arn:aws:iam::${data.aws_caller_identity.current.account_id}:role/${var.project_name}-bastion-role"
-      echo "=========================================="
+      echo "Granting IAM role access via Lambda..."
+      aws lambda invoke \
+        --function-name ${module.dsql_iam_grant[0].lambda_function_name} \
+        --payload '{
+          "dsql_host": "${module.aurora_dsql[0].dsql_host}",
+          "iam_user": "${var.iam_database_user}",
+          "role_arn": "arn:aws:iam::${data.aws_caller_identity.current.account_id}:role/${var.project_name}-bastion-role",
+          "region": "${var.aws_region}"
+        }' \
+        --region ${var.aws_region} \
+        /tmp/lambda-response.json
+      
+      echo "Lambda response:"
+      cat /tmp/lambda-response.json | jq .
+      
+      # Check if Lambda succeeded
+      STATUS=$(cat /tmp/lambda-response.json | jq -r '.statusCode // 500')
+      if [ "$STATUS" != "200" ]; then
+        echo "Warning: Lambda returned status code $STATUS"
+        echo "This may be expected if the Lambda role is not yet mapped to postgres user."
+        echo ""
+        echo "One-time setup required:"
+        LAMBDA_ROLE_ARN="arn:aws:iam::${data.aws_caller_identity.current.account_id}:role/${var.project_name}-dsql-iam-grant-role"
+        echo "  AWS IAM GRANT postgres TO '$LAMBDA_ROLE_ARN';"
+        echo ""
+        echo "Or grant bastion role directly:"
+        echo "  AWS IAM GRANT ${var.iam_database_user} TO 'arn:aws:iam::${data.aws_caller_identity.current.account_id}:role/${var.project_name}-bastion-role';"
+        exit 0  # Don't fail, just warn
+      else
+        echo "✅ IAM role mapping granted successfully!"
+      fi
     EOT
   }
 
   depends_on = [
     module.bastion_host,
     module.aurora_dsql,
+    module.dsql_iam_grant,
   ]
 }

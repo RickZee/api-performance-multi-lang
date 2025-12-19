@@ -110,18 +110,41 @@ The load testing framework supports testing AWS Lambda functions both locally (u
   - Always sends all 4 event types: Car Created, Loan Created, Loan Payment Submitted, Car Service Done
   - Default: 5 events per type (20 total events)
   - Configurable via `EVENTS_PER_TYPE` environment variable
-  - Supports both regular REST APIs (HOST/PORT) and Lambda APIs (API_URL)
+  - Supports both regular REST APIs (HOST/PORT) and Lambda APIs (API_URL or DB_TYPE)
+  - Uses deterministic UUID generation for uniqueness across parallel VUs
   - Usage examples:
     ```bash
     # Send 5 events of each type (default)
     k6 run --env HOST=producer-api-java-rest --env PORT=8081 load-test/k6/send-batch-events.js
     
-    # Send 1000 events of each type
-    k6 run --env HOST=producer-api-java-rest --env PORT=8081 --env EVENTS_PER_TYPE=1000 load-test/k6/send-batch-events.js
+    # Send 1000 events of each type with parallelism
+    k6 run --env HOST=producer-api-java-rest --env PORT=8081 --env EVENTS_PER_TYPE=1000 --env VUS_PER_EVENT_TYPE=10 load-test/k6/send-batch-events.js
     
-    # Lambda API
+    # Lambda API with PostgreSQL (pg)
+    k6 run --env DB_TYPE=pg --env EVENTS_PER_TYPE=1000 --env VUS_PER_EVENT_TYPE=20 load-test/k6/send-batch-events.js
+    
+    # Lambda API with DSQL (dsql)
+    k6 run --env DB_TYPE=dsql --env EVENTS_PER_TYPE=1000 --env VUS_PER_EVENT_TYPE=20 load-test/k6/send-batch-events.js
+    
+    # Lambda API with explicit URL
     k6 run --env API_URL=https://xxxxx.execute-api.us-east-1.amazonaws.com --env EVENTS_PER_TYPE=1000 load-test/k6/send-batch-events.js
+    
+    # Sequential mode (process events in order: Car → Loan → Payment → Service)
+    k6 run --env HOST=producer-api-java-rest --env PORT=8081 --env SEQUENTIAL_MODE=true load-test/k6/send-batch-events.js
+    
+    # Save events to custom file for validation
+    k6 run --env DB_TYPE=pg --env EVENTS_FILE=/tmp/my-events.json load-test/k6/send-batch-events.js
     ```
+  
+  **Environment Variables:**
+  - `EVENTS_PER_TYPE` (default: 5) - Number of events to send per event type
+  - `VUS_PER_EVENT_TYPE` (default: 1) - Number of virtual users per event type for parallelism
+  - `TOTAL_VUS` - Total virtual users (overrides VUS_PER_EVENT_TYPE if set)
+  - `SEQUENTIAL_MODE` (default: false) - Process events sequentially (Car → Loan → Payment → Service)
+  - `DB_TYPE` - Database type for Lambda APIs: `pg` (PostgreSQL) or `dsql`
+  - `API_URL` - Full API endpoint URL (for Lambda APIs)
+  - `HOST` / `PORT` - API host and port (for regular REST APIs)
+  - `EVENTS_FILE` - File path to save sent events for validation (default: `/tmp/k6-sent-events.json`)
 
 ### Running Lambda Tests
 
@@ -215,13 +238,28 @@ The `k6/shared/` subdirectory contains shared JavaScript utilities for k6 load t
 Reusable event generation functions for creating test events.
 
 **Functions:**
-- `generateUUID()`: Generate UUID v4
+- `generateUUID()`: Generate random UUID v4 (uses `Math.random()` for generation)
 - `generateTimestamp()`: Generate ISO 8601 timestamp
 - `generateCarCreatedEvent(carId)`: Generate Car Created event
 - `generateLoanCreatedEvent(carId, loanId)`: Generate Loan Created event
 - `generateLoanPaymentEvent(loanId, amount)`: Generate Loan Payment Submitted event
 - `generateCarServiceDoneEvent(carId, serviceId)`: Generate Car Service Done event
 - `generateLinkedEventSet()`: Generate a complete linked event set
+
+**UUID Generation Methods:**
+
+The codebase uses two different UUID generation approaches:
+
+1. **Random UUID v4** (used in `event-generators.js` and `helpers.js`):
+   - Uses `Math.random()` to generate random UUIDs
+   - Suitable for general event generation where uniqueness is handled by the database
+   - Each call produces a different UUID
+
+2. **Deterministic UUID** (used in `send-batch-events.js`):
+   - Generates deterministic UUIDs based on VU ID, iteration, event type index, and event index
+   - Ensures uniqueness across parallel VUs and iterations without collisions
+   - Useful for batch testing where deterministic UUIDs make validation and debugging easier
+   - Format: UUID v4 compliant, but generated deterministically from test parameters
 
 **Usage:**
 ```javascript
@@ -236,27 +274,5 @@ export default function() {
     // ... send events
 }
 ```
-
-**Migration from Individual Scripts:**
-
-Update existing k6 scripts to use shared event generators:
-
-**Before:**
-```javascript
-function generateUUID() {
-    // ... duplicate code ...
-}
-
-function generateCarCreatedEvent() {
-    // ... duplicate code ...
-}
-```
-
-**After:**
-```javascript
-import { generateUUID, generateCarCreatedEvent } from './shared/event-generators.js';
-```
-
-This eliminates code duplication and ensures consistent event generation across all k6 tests.
 
 For detailed usage information, see the [Shared Scripts Documentation](../scripts/README.md#shared-scripts).

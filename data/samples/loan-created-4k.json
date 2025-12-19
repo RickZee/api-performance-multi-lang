@@ -1,0 +1,74 @@
+{
+  "eventHeader": {
+    "uuid": "58359cbc-3001-43cd-a09d-126e864567b1",
+    "eventName": "Loan Created",
+    "eventType": "LoanCreated",
+    "createdDate": "2025-12-19T20:39:17.940681Z",
+    "savedDate": "2025-12-19T20:39:17.940681Z"
+  },
+  "entities": [
+    {
+      "entityHeader": {
+        "entityId": "LOAN-20251219-690",
+        "entityType": "Loan",
+        "createdAt": "2025-12-19T20:39:17.940681Z",
+        "updatedAt": "2025-12-19T20:39:17.940681Z"
+      },
+      "id": "LOAN-20251219-690",
+      "carId": "CAR-20250101-001",
+      "financialInstitution": {
+        "name": "First National Bank",
+        "routingNumber": "718834205",
+        "accountNumber": "808499412004",
+        "contact": {
+          "phone": "+1-349-209-8275",
+          "email": "contact@firstnationalbank.com"
+        },
+        "description": ""
+      },
+      "balance": "17305.00",
+      "lastPaidDate": "2025-12-19T20:39:17.940681Z",
+      "loanAmount": "17305.00",
+      "interestRate": 7.06,
+      "termMonths": 60,
+      "startDate": "2025-12-19T20:39:17.940681Z",
+      "status": "active",
+      "monthlyPayment": "308.77",
+      "description": "This loan has been established with favorable terms and conditions. This loan was approved based on excellent credit history and stable income. This information has been verified and confirmed. Customer has maintained consistent payment history throughout the loan term. Quality assurance measures were implemented throughout the process. The loan terms are competitive with flexible payment options available. All documentation has been properly maintained and verified. Loan includes comprehensive insurance coverage and extended warranty options. Quality assurance measures were implemented throughout the process. The financing arrangement provides favorable interest rates and repayment terms. Records are available for review upon request. Customer has maintained consistent payment history throughout the loan term. All documentation has been properly maintained and verified. Customer has maintained consistent payment history throughout the loan term. Records are available for review upon request. Loan includes comprehensive insurance coverage and extended warranty options. Customer satisfaction is our top priority. This loan was approved based on excellent credit history and stable income. Complete documentation is maintained in our system. Loan includes comprehensive insurance coverage and extended warranty options. Additional details can be provided as needed. Loan includes comprehensive insurance coverage and extended warranty options. All transactions are processed securely and efficiently. Loan includes comprehensive insurance coverage and extended warranty options. We maintain the highest standards of service and reliability. The loan terms are competitive with flexible payment options available. All procedures were followed according to established protocols. Loan includes comprehensive insurance coverage and extended warranty options. All procedures were followed according to established protocols. Customer has maintained consistent payment history throughout the loan term. Customer satisfaction is our top priority. This loan was approved based on excellent credit history and stable income. We maintain the highest standards of service and reliability. The loan terms are competitive with flexible payment options available. All transactions are processed securely and efficiently.",
+      "paymentHistory": [
+        {
+          "paymentId": "PAY-489314",
+          "amount": "489.00",
+          "date": "2025-05-06T20:39:17.940703Z",
+          "status": "completed",
+          "transactionId": "e05caabaf2044416",
+          "description": ""
+        },
+        {
+          "paymentId": "PAY-225485",
+          "amount": "1861.00",
+          "date": "2025-10-28T20:39:17.940712Z",
+          "status": "completed",
+          "transactionId": "e897059e8111463e",
+          "description": ""
+        },
+        {
+          "paymentId": "PAY-682704",
+          "amount": "1178.00",
+          "date": "2025-12-01T20:39:17.940720Z",
+          "status": "completed",
+          "transactionId": "cc60453b36084695",
+          "description": ""
+        }
+      ],
+      "terms": {
+        "interestRate": "3.21",
+        "termMonths": 59,
+        "monthlyPayment": "305.00",
+        "startDate": "2025-12-19T20:39:17.940729Z",
+        "endDate": "2030-12-18T20:39:17.940729Z",
+        "description": ""
+      }
+    }
+  ]
+}

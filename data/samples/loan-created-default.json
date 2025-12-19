@@ -1,0 +1,31 @@
+{
+  "eventHeader": {
+    "uuid": "7b4fcc7a-404a-4bb3-ad98-477df26bac3e",
+    "eventName": "Loan Created",
+    "eventType": "LoanCreated",
+    "createdDate": "2025-12-19T20:39:17.940550Z",
+    "savedDate": "2025-12-19T20:39:17.940550Z"
+  },
+  "entities": [
+    {
+      "entityHeader": {
+        "entityId": "LOAN-20251219-688",
+        "entityType": "Loan",
+        "createdAt": "2025-12-19T20:39:17.940550Z",
+        "updatedAt": "2025-12-19T20:39:17.940550Z"
+      },
+      "id": "LOAN-20251219-688",
+      "carId": "CAR-20250101-001",
+      "financialInstitution": "TD Bank",
+      "balance": "91160.00",
+      "lastPaidDate": "2025-12-19T20:39:17.940550Z",
+      "loanAmount": "91160.00",
+      "interestRate": 5.48,
+      "termMonths": 60,
+      "startDate": "2025-12-19T20:39:17.940550Z",
+      "status": "active",
+      "monthlyPayment": "1602.65",
+      "description": ""
+    }
+  ]
+}

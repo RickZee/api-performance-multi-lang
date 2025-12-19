@@ -1,0 +1,66 @@
+{
+  "eventHeader": {
+    "uuid": "f91fd4ce-bfb3-4e3f-90c0-fb73c496bad3",
+    "eventName": "Car Service Done",
+    "eventType": "CarServiceDone",
+    "createdDate": "2025-12-19T20:39:17.946471Z",
+    "savedDate": "2025-12-19T20:39:17.946471Z"
+  },
+  "entities": [
+    {
+      "entityHeader": {
+        "entityId": "SERVICE-20251219-908",
+        "entityType": "ServiceRecord",
+        "createdAt": "2025-12-19T20:39:17.946471Z",
+        "updatedAt": "2025-12-19T20:39:17.946471Z"
+      },
+      "id": "SERVICE-20251219-908",
+      "carId": "CAR-20250101-001",
+      "serviceDate": "2025-12-19T20:39:17.946471Z",
+      "amountPaid": "602.34",
+      "dealerId": "DEALER-367",
+      "dealerName": "Ford Service Center - Chicago",
+      "mileageAtService": 27781,
+      "description": "Air filter replacement and cabin filter service. Service performed by certified technicians using genuine manufacturer parts. Customer satisfaction is our top priority. Quality assurance verified with customer satisfaction guarantee included. All procedures were followed according to established protocols. All service procedures followed manufacturer specifications and guidelines. Records are available for review upon request. Quality assurance verified with customer satisfaction guarantee included. Customer satisfaction is our top priority. Comprehensive inspection completed with detailed service report provided. All documentation has been properly maintained and verified. Service included full diagnostic check and preventive maintenance procedures. All documentation has been properly maintained and verified. Service included full diagnostic check and preventive maintenance procedures. All transactions are processed securely and efficiently. Service performed by certified technicians using genuine manufacturer parts. All transactions are processed securely and efficiently. Quality assurance verified with customer satisfaction guarantee included. This information has been verified and confirmed. Service performed by certified technicians using genuine manufacturer parts. Customer satisfaction is our top priority. Service included full diagnostic check and preventive maintenance procedures. This information has been verified and confirmed. Service performed by certified technicians using genuine manufacturer parts. Customer satisfaction is our top priority. Quality assurance verified with customer satisfaction guarantee included. All transactions are processed securely and efficiently. All service procedures followed manufacturer specifications and guidelines. Additional details can be provided as needed. Comprehensive inspection completed with detailed service report provided. Additional details can be provided as needed. Comprehensive inspection completed with detailed service report provided. All documentation has been properly maintained and verified. Comprehensive inspection completed with detailed service report provided. Records are available for review upon request. Comprehensive inspection completed with detailed service report provided. We maintain the highest standards of service and reliability. Comprehensive inspection completed with detailed service report provided. All transactions are processed securely and efficiently. All service procedures followed manufacturer specifications and guidelines.",
+      "dealer": {
+        "id": "DEALER-288",
+        "name": "BMW Service Center - Miami",
+        "address": {
+          "street": "6499 Hayes Road",
+          "city": "Raleigh",
+          "state": "IL",
+          "zipCode": "49491",
+          "country": "USA"
+        },
+        "phone": "+1-733-645-1532",
+        "email": "mwhite@example.com",
+        "description": "Information about dealer. Full-service dealership offering maintenance, repair, and parts services. Records are available for review upon request. Full-service dealership offering maintenance, repair, and parts services."
+      },
+      "parts": [
+        {
+          "partId": "PART-303140",
+          "name": "Air Filter",
+          "quantity": 2,
+          "cost": "76.00",
+          "manufacturer": "Delphi",
+          "description": ". Replacement part includes warranty coverage and quality assurance certification. All procedures were followed according to established protocols. Part installed by certified technician with proper installation procedures followed."
+        },
+        {
+          "partId": "PART-516358",
+          "name": "Spark Plugs",
+          "quantity": 4,
+          "cost": "133.00",
+          "manufacturer": "Michelin",
+          "description": ". Replacement part includes warranty coverage and quality assurance certification. This information has been verified and confirmed. Replacement part includes warranty coverage and quality assurance certification."
+        }
+      ],
+      "technician": {
+        "id": "TECH-2296",
+        "name": "Karen Smith",
+        "certification": "ASE Certified",
+        "experience": 14,
+        "description": "Information about owner. Customer profile shows high creditworthiness and financial stability. All documentation has been properly maintained and verified. Customer has been a valued client with excellent payment history."
+      }
+    }
+  ]
+}

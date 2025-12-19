@@ -1,0 +1,68 @@
+{
+  "eventHeader": {
+    "uuid": "a0e92caf-ac03-46d6-a836-5dc3f2beb051",
+    "eventName": "Loan Payment Submitted",
+    "eventType": "LoanPaymentSubmitted",
+    "createdDate": "2025-12-19T20:39:17.943464Z",
+    "savedDate": "2025-12-19T20:39:17.943464Z"
+  },
+  "entities": [
+    {
+      "entityHeader": {
+        "entityId": "PAYMENT-20251219-979",
+        "entityType": "LoanPayment",
+        "createdAt": "2025-12-19T20:39:17.943464Z",
+        "updatedAt": "2025-12-19T20:39:17.943464Z"
+      },
+      "id": "PAYMENT-20251219-979",
+      "loanId": "LOAN-20250101-001",
+      "amount": "930.72",
+      "paymentDate": "2025-12-19T20:39:17.943464Z",
+      "description": "This payment has been processed successfully through our secure payment system. Payment method verified and processed through secure payment gateway. Complete documentation is maintained in our system. Payment method verified and processed through secure payment gateway. We maintain the highest standards of service and reliability. Payment method verified and processed through secure payment gateway. All procedures were followed according to established protocols. Payment confirmation received and loan balance updated accordingly. Additional details can be provided as needed. Payment confirmation received and loan balance updated accordingly. Quality assurance measures were implemented throughout the process. Payment was processed successfully through automated bank transfer. We maintain the highest standards of service and reliability. Payment confirmation received and loan balance updated accordingly. Complete documentation is maintained in our system. Funds transferred from linked checking account with instant processing. Customer satisfaction is our top priority. Transaction completed via online payment portal with immediate confirmation. All transactions are processed securely and efficiently. Funds transferred from linked checking account with instant processing. All transactions are processed securely and efficiently. Transaction completed via online payment portal with immediate confirmation. This information has been verified and confirmed. Funds transferred from linked checking account with instant processing. All procedures were followed according to established protocols. Payment method verified and processed through secure payment gateway. Customer satisfaction is our top priority. Payment confirmation received and loan balance updated accordingly. Quality assurance measures were implemented throughout the process. Payment was processed successfully through automated bank transfer. Records are available for review upon request. Payment was processed successfully through automated bank transfer. Complete documentation is maintained in our system. Transaction completed via online payment portal with immediate confirmation. All documentation has been properly maintained and verified. Transaction completed via online payment portal with immediate confirmation. This information has been verified and confirmed. Payment was processed successfully through automated bank transfer.",
+      "financialInstitution": {
+        "name": "First National Bank",
+        "routingNumber": "615202430",
+        "accountNumber": "619801573205",
+        "contact": {
+          "phone": "+1-935-832-1068",
+          "email": "contact@firstnationalbank.com"
+        },
+        "description": ""
+      },
+      "paymentHistory": [
+        {
+          "paymentId": "PAY-267796",
+          "amount": "787.00",
+          "date": "2025-09-22T20:39:17.943481Z",
+          "status": "completed",
+          "transactionId": "e2fa3c0c1bdc405b",
+          "description": ""
+        },
+        {
+          "paymentId": "PAY-481533",
+          "amount": "510.00",
+          "date": "2025-01-06T20:39:17.943489Z",
+          "status": "completed",
+          "transactionId": "06422f5c706a48b3",
+          "description": ""
+        },
+        {
+          "paymentId": "PAY-126991",
+          "amount": "699.00",
+          "date": "2025-02-06T20:39:17.943497Z",
+          "status": "completed",
+          "transactionId": "d27c55f7711a4ecf",
+          "description": ""
+        }
+      ],
+      "terms": {
+        "interestRate": "3.26",
+        "termMonths": 22,
+        "monthlyPayment": "325.00",
+        "startDate": "2025-12-19T20:39:17.943505Z",
+        "endDate": "2030-12-18T20:39:17.943506Z",
+        "description": ""
+      }
+    }
+  ]
+}

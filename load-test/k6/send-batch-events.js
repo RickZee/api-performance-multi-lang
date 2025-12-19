@@ -20,6 +20,7 @@
  *   k6 run --env DB_TYPE=pg --env EVENTS_PER_TYPE=1000 --env VUS_PER_EVENT_TYPE=20 send-batch-events.js
  * 
  *   # Lambda API with DSQL (dsql) - 1000 events per type, 20 VUs per type
+ *   # Note: DSQL tests with >10 VUs automatically use ramp-up to respect 100 connections/second limit
  *   k6 run --env DB_TYPE=dsql --env EVENTS_PER_TYPE=1000 --env VUS_PER_EVENT_TYPE=20 send-batch-events.js
  * 
  *   # Override API URL explicitly
@@ -91,14 +92,91 @@ const ITERATIONS_PER_VU = SEQUENTIAL_MODE
     ? EVENTS_PER_TYPE * NUM_EVENT_TYPES 
     : Math.ceil((EVENTS_PER_TYPE * NUM_EVENT_TYPES) / TOTAL_VUS);
 
+// Get API configuration from environment
+// Support both regular REST API (HOST/PORT) and Lambda API (API_URL/LAMBDA_API_URL)
+// Support DB_TYPE parameter (pg or dsql) to select appropriate Lambda API endpoint
+let apiUrl;
+const dbType = (__ENV.DB_TYPE || '').toLowerCase();
+
+// Ramp-up configuration for DSQL connection rate limits
+// DSQL has a hard limit of 100 new connections per second per cluster
+// Use conservative 80 connections/second target (20% headroom)
+const DSQL_CONNECTIONS_PER_SECOND = 80;
+const DSQL_CONNECTION_LIMIT = 100;
+const RAMP_UP_THRESHOLD = 10; // Only use ramp-up if VUs > 10
+
+// Calculate ramp-up stages for DSQL
+function calculateRampUpStages(totalVus, maxDuration, iterationsPerVu) {
+    // Calculate ramp-up duration: total VUs / connections per second
+    // Add 1 second minimum to ensure gradual ramp-up
+    const rampDuration = Math.max(1, Math.ceil(totalVus / DSQL_CONNECTIONS_PER_SECOND));
+    
+    // Convert maxDuration to seconds (e.g., '10m' -> 600)
+    const maxDurationMatch = maxDuration.match(/(\d+)([smhd])/);
+    let maxDurationSeconds = 600; // Default 10 minutes
+    if (maxDurationMatch) {
+        const value = parseInt(maxDurationMatch[1]);
+        const unit = maxDurationMatch[2];
+        switch(unit) {
+            case 's': maxDurationSeconds = value; break;
+            case 'm': maxDurationSeconds = value * 60; break;
+            case 'h': maxDurationSeconds = value * 3600; break;
+            case 'd': maxDurationSeconds = value * 86400; break;
+        }
+    }
+    
+    // Estimate time needed to complete all iterations
+    // Assume average 200ms per request, with some buffer
+    const avgRequestTime = 0.2; // seconds
+    const estimatedTimePerIteration = avgRequestTime + 0.1; // Add buffer
+    const estimatedTotalTime = Math.ceil(iterationsPerVu * estimatedTimePerIteration);
+    
+    // Hold duration should be long enough to complete all iterations
+    // Use the larger of: estimated time or remaining time after ramp-up
+    const minHoldDuration = Math.max(estimatedTotalTime, 10); // At least 10 seconds
+    const holdDuration = Math.max(minHoldDuration, maxDurationSeconds - rampDuration);
+    
+    return {
+        stages: [
+            { duration: `${rampDuration}s`, target: totalVus },  // Ramp up
+            { duration: `${holdDuration}s`, target: totalVus }   // Hold at target (long enough for iterations)
+        ],
+        rampDuration: rampDuration,
+        totalDuration: rampDuration + holdDuration
+    };
+}
+
+// Determine if ramp-up should be used
+const useRampUp = dbType === 'dsql' && TOTAL_VUS > RAMP_UP_THRESHOLD && !SEQUENTIAL_MODE;
+let rampUpInfo = null;
+
+// Build scenario configuration
+let scenarioConfig;
+if (useRampUp) {
+    // Use ramping-vus executor for DSQL with ramp-up
+    // Note: ramping-vus doesn't support iterations directly, so we calculate
+    // a duration long enough for all iterations to complete
+    rampUpInfo = calculateRampUpStages(TOTAL_VUS, '10m', ITERATIONS_PER_VU);
+    scenarioConfig = {
+        executor: 'ramping-vus',
+        startVUs: 0,
+        stages: rampUpInfo.stages,
+        gracefulRampDown: '30s',
+        maxDuration: '10m',
+    };
+} else {
+    // Use per-vu-iterations executor (default behavior)
+    scenarioConfig = {
+        executor: 'per-vu-iterations',
+        vus: SEQUENTIAL_MODE ? 1 : TOTAL_VUS,
+        iterations: ITERATIONS_PER_VU,
+        maxDuration: '10m',
+    };
+}
+
 export const options = {
     scenarios: {
-        batch_events: {
-            executor: 'per-vu-iterations',
-            vus: SEQUENTIAL_MODE ? 1 : TOTAL_VUS,
-            iterations: ITERATIONS_PER_VU,
-            maxDuration: '10m',
-        },
+        batch_events: scenarioConfig,
     },
     thresholds: {
         // Abort if error rate exceeds 50% (half of requests failing)
@@ -109,12 +187,6 @@ export const options = {
         'http_req_duration{status:409}': ['p(95)<5000'], // 409s should be fast
     },
 };
-
-// Get API configuration from environment
-// Support both regular REST API (HOST/PORT) and Lambda API (API_URL/LAMBDA_API_URL)
-// Support DB_TYPE parameter (pg or dsql) to select appropriate Lambda API endpoint
-let apiUrl;
-const dbType = (__ENV.DB_TYPE || '').toLowerCase();
 
 // If DB_TYPE is specified (pg or dsql), use corresponding Lambda API URL
 if (dbType === 'pg' || dbType === 'dsql') {
@@ -555,13 +627,36 @@ export function setup() {
         serviceIds: serviceIds,
         successfulCars: {}, // Track successful Car creations for sequential mode
         successfulLoans: {}, // Track successful Loan creations for sequential mode
-        sentEvents: [] // Collect sent events for validation (per-VU)
+        sentEvents: [], // Collect sent events for validation (per-VU)
+        iterationCount: 0 // Track iterations for ramping-vus executor (per-VU)
     };
 }
 
 export default function (data) {
     const vuId = __VU; // Virtual User ID (1 to TOTAL_VUS)
-    const iteration = __ITER; // Per-VU iteration (0 to ITERATIONS_PER_VU-1)
+    
+    // Handle iteration tracking for ramping-vus executor
+    // With ramping-vus, __ITER resets, so we track iterations manually
+    let iteration;
+    if (useRampUp) {
+        // For ramping-vus, track iterations manually
+        if (!data.iterationCount) {
+            data.iterationCount = 0;
+        }
+        iteration = data.iterationCount;
+        
+        // Check if we've completed all iterations for this VU
+        if (iteration >= ITERATIONS_PER_VU) {
+            return; // This VU has completed all its iterations
+        }
+        
+        // Increment for next iteration
+        data.iterationCount++;
+    } else {
+        // For per-vu-iterations, use __ITER directly
+        iteration = __ITER;
+    }
+    
     let globalIteration = iteration; // Will be updated for parallel mode
     let payload;
     let eventType;
@@ -924,6 +1019,56 @@ function generateSummaryText(data) {
     const dbTypeDisplay = dbType ? ` (${dbType.toUpperCase()})` : '';
     const modeDisplay = SEQUENTIAL_MODE ? ' (Sequential Mode)' : ' (Parallel Mode)';
     
+    // Build ramp-up information section
+    let rampUpSection = '';
+    if (useRampUp && rampUpInfo) {
+        const targetRate = DSQL_CONNECTIONS_PER_SECOND;
+        const limit = DSQL_CONNECTION_LIMIT;
+        rampUpSection = `
+Ramp-Up Strategy:
+  Enabled: Yes (DSQL connection rate limit protection)
+  Ramp-Up Duration: ${rampUpInfo.rampDuration}s
+  Strategy: Gradual ramp-up from 0 to ${TOTAL_VUS} VUs (${targetRate} VUs/second)
+  Target Connection Rate: ${targetRate} connections/second (${Math.round((1 - targetRate/limit) * 100)}% headroom)
+  DSQL Limit: ${limit} connections/second per cluster
+`;
+    } else if (dbType === 'dsql' && TOTAL_VUS > RAMP_UP_THRESHOLD && SEQUENTIAL_MODE) {
+        // Ramp-up should have been used but wasn't due to sequential mode
+        rampUpSection = `
+Ramp-Up Strategy:
+  Enabled: No (sequential mode - single VU, no ramp-up needed)
+  Note: DSQL has a limit of ${DSQL_CONNECTION_LIMIT} connections/second per cluster
+`;
+    } else if (dbType === 'dsql' && TOTAL_VUS > RAMP_UP_THRESHOLD) {
+        // Ramp-up should have been used but wasn't (unexpected case)
+        rampUpSection = `
+Ramp-Up Strategy:
+  Enabled: No (unexpected - VU count ${TOTAL_VUS} > ${RAMP_UP_THRESHOLD} but ramp-up not enabled)
+  Note: DSQL has a limit of ${DSQL_CONNECTION_LIMIT} connections/second per cluster
+  ⚠️  Consider enabling ramp-up for better connection rate limit compliance
+`;
+    } else if (dbType === 'dsql') {
+        // DSQL but low VU count, no ramp-up needed
+        rampUpSection = `
+Ramp-Up Strategy:
+  Enabled: No (VU count ${TOTAL_VUS} <= ${RAMP_UP_THRESHOLD}, no ramp-up needed)
+  Note: DSQL has a limit of ${DSQL_CONNECTION_LIMIT} connections/second per cluster
+`;
+    }
+    
+    // Check for rate limit errors (SQLSTATE 53400 or "rate exceeded")
+    let rateLimitWarning = '';
+    if (dbType === 'dsql' && totalErrors > 0) {
+        // Check error messages for rate limit indicators
+        // Note: We can't easily access error messages in summary, but we can warn if error rate is high
+        if (errorRate > 10) {
+            rateLimitWarning = `
+⚠️  Warning: High error rate (${errorRate}%) detected. This may indicate DSQL connection rate limit issues.
+   Consider reducing VU count or ensuring ramp-up is enabled for high concurrency tests.
+`;
+        }
+    }
+    
     return {
         'stdout': `
     ========================================
@@ -936,7 +1081,7 @@ function generateSummaryText(data) {
     Event Types: ${NUM_EVENT_TYPES}
     Parallelism: ${VUS_PER_EVENT_TYPE} VUs per event type (${TOTAL_VUS} total VUs)
     Events per VU: ${EVENTS_PER_VU} per event type
-    Test Duration: ${testDurationSec}s
+    Test Duration: ${testDurationSec}s${rampUpSection}${rateLimitWarning}
     ========================================
 
 HTTP Requests:

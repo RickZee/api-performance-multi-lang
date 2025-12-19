@@ -42,9 +42,56 @@
     },
     "description": {
       "type": "string",
-      "description": "Description of the service performed"
+      "description": "Description of the service performed (can be expanded for larger payloads)"
+    },
+    "dealer": {
+      "type": "object",
+      "description": "Dealer information object",
+      "properties": {
+        "id": { "type": "string" },
+        "name": { "type": "string" },
+        "address": {
+          "type": "object",
+          "properties": {
+            "street": { "type": "string" },
+            "city": { "type": "string" },
+            "state": { "type": "string" },
+            "zipCode": { "type": "string" },
+            "country": { "type": "string" }
+          }
+        },
+        "phone": { "type": "string" },
+        "email": { "type": "string", "format": "email" },
+        "description": { "type": "string" }
+      }
+    },
+    "parts": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "partId": { "type": "string" },
+          "name": { "type": "string" },
+          "quantity": { "type": "integer" },
+          "cost": { "type": "string" },
+          "manufacturer": { "type": "string" },
+          "description": { "type": "string" }
+        }
+      },
+      "description": "Array of parts used in the service"
+    },
+    "technician": {
+      "type": "object",
+      "description": "Technician information",
+      "properties": {
+        "id": { "type": "string" },
+        "name": { "type": "string" },
+        "certification": { "type": "string" },
+        "experience": { "type": "integer" },
+        "description": { "type": "string" }
+      }
     }
   },
   "required": ["entityHeader", "id", "carId", "serviceDate", "amountPaid", "dealerId", "dealerName", "mileageAtService", "description"],
-  "additionalProperties": false
+  "additionalProperties": true
 }

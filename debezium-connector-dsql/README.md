@@ -15,6 +15,13 @@ This README provides complete deployment and setup instructions for the DSQL con
 - **[BASTION-TESTING-GUIDE.md](BASTION-TESTING-GUIDE.md)** - Testing procedures
 - **[TESTING-REAL-DSQL.md](TESTING-REAL-DSQL.md)** - Real DSQL testing guide
 
+### Recent Fixes
+
+- **[FIXES-IMPLEMENTED.md](FIXES-IMPLEMENTED.md)** - **Recent critical fixes** (DSQL token generation, error handling)
+- **[QUICK-FIX-SUMMARY.md](QUICK-FIX-SUMMARY.md)** - Quick reference for recent fixes
+- **[INVESTIGATION-FINDINGS.md](INVESTIGATION-FINDINGS.md)** - Root cause analysis
+- **[REMEDIATION-PLAN.md](REMEDIATION-PLAN.md)** - Detailed remediation steps
+
 ## Overview
 
 This connector enables Change Data Capture (CDC) from Amazon Aurora DSQL databases to Kafka topics. It uses timestamp-based polling to detect changes (since DSQL's internal journals are not publicly accessible) and provides:

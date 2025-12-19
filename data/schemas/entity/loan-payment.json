@@ -26,8 +26,56 @@
       "type": "string",
       "format": "date-time",
       "description": "Date and time when the payment was made"
+    },
+    "description": {
+      "type": "string",
+      "description": "Description of payment method, transaction details, and processing information"
+    },
+    "financialInstitution": {
+      "type": "object",
+      "description": "Financial institution information",
+      "properties": {
+        "name": { "type": "string" },
+        "routingNumber": { "type": "string" },
+        "accountNumber": { "type": "string" },
+        "contact": {
+          "type": "object",
+          "properties": {
+            "phone": { "type": "string" },
+            "email": { "type": "string", "format": "email" }
+          }
+        },
+        "description": { "type": "string" }
+      }
+    },
+    "paymentHistory": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "paymentId": { "type": "string" },
+          "amount": { "type": "string" },
+          "date": { "type": "string", "format": "date-time" },
+          "status": { "type": "string" },
+          "transactionId": { "type": "string" },
+          "description": { "type": "string" }
+        }
+      },
+      "description": "Array of payment history records"
+    },
+    "terms": {
+      "type": "object",
+      "description": "Loan terms information",
+      "properties": {
+        "interestRate": { "type": "string" },
+        "termMonths": { "type": "integer" },
+        "monthlyPayment": { "type": "string" },
+        "startDate": { "type": "string", "format": "date-time" },
+        "endDate": { "type": "string", "format": "date-time" },
+        "description": { "type": "string" }
+      }
     }
   },
   "required": ["entityHeader", "id", "loanId", "amount", "paymentDate"],
-  "additionalProperties": false
+  "additionalProperties": true
 }

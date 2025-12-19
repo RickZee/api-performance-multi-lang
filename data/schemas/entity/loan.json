@@ -17,8 +17,30 @@
       "description": "Identifier of the car associated with this loan"
     },
     "financialInstitution": {
-      "type": "string",
-      "description": "Name of the institution providing the loan"
+      "oneOf": [
+        {
+          "type": "string",
+          "description": "Name of the institution providing the loan (simple string format)"
+        },
+        {
+          "type": "object",
+          "description": "Financial institution information object",
+          "properties": {
+            "name": { "type": "string" },
+            "routingNumber": { "type": "string" },
+            "accountNumber": { "type": "string" },
+            "contact": {
+              "type": "object",
+              "properties": {
+                "phone": { "type": "string" },
+                "email": { "type": "string", "format": "email" }
+              }
+            },
+            "description": { "type": "string" }
+          }
+        }
+      ],
+      "description": "Name of the institution providing the loan (string) or financial institution information object"
     },
     "balance": {
       "type": "number",
@@ -76,6 +98,37 @@
       "format": "date-time",
       "description": "Date when the down payment was made"
     },
+    "description": {
+      "type": "string",
+      "description": "Description of loan terms, purpose, and conditions"
+    },
+    "paymentHistory": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "paymentId": { "type": "string" },
+          "amount": { "type": "string" },
+          "date": { "type": "string", "format": "date-time" },
+          "status": { "type": "string" },
+          "transactionId": { "type": "string" },
+          "description": { "type": "string" }
+        }
+      },
+      "description": "Array of payment history records"
+    },
+    "terms": {
+      "type": "object",
+      "description": "Loan terms information",
+      "properties": {
+        "interestRate": { "type": "string" },
+        "termMonths": { "type": "integer" },
+        "monthlyPayment": { "type": "string" },
+        "startDate": { "type": "string", "format": "date-time" },
+        "endDate": { "type": "string", "format": "date-time" },
+        "description": { "type": "string" }
+      }
+    },
     "payments": {
       "type": "array",
       "items": {
@@ -85,5 +138,5 @@
     }
   },
   "required": ["entityHeader", "id", "carId", "financialInstitution", "balance", "lastPaidDate", "loanAmount", "interestRate", "termMonths", "startDate", "status", "monthlyPayment"],
-  "additionalProperties": false
+  "additionalProperties": true
 }
