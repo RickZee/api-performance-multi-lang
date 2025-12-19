@@ -51,11 +51,13 @@ public class DsqlConnector extends SourceConnector {
         LOGGER.info("Creating task configurations for {} tasks", maxTasks);
         
         List<Map<String, String>> taskConfigs = new ArrayList<>();
-        
-        // For now, we'll use a single task per table
-        // In the future, we could partition tables across tasks for parallelism
         String[] tables = new DsqlConnectorConfig(configProps).getTablesArray();
         
+        if (tables.length == 0) {
+            throw new IllegalStateException("No tables configured");
+        }
+        
+        // Assign one table per task, distributing tables across available tasks
         int tasksToCreate = Math.min(maxTasks, tables.length);
         if (tasksToCreate == 0) {
             tasksToCreate = 1; // At least one task
@@ -64,10 +66,18 @@ public class DsqlConnector extends SourceConnector {
         for (int i = 0; i < tasksToCreate; i++) {
             Map<String, String> taskConfig = new HashMap<>(configProps);
             taskConfig.put("task.id", String.valueOf(i));
+            
+            // Assign specific table to this task
+            // If we have more tasks than tables, some tasks will share tables
+            // (round-robin assignment)
+            String assignedTable = tables[i % tables.length].trim();
+            taskConfig.put(DsqlConnectorConfig.TASK_TABLE, assignedTable);
+            
+            LOGGER.debug("Task {} assigned to table: {}", i, assignedTable);
             taskConfigs.add(taskConfig);
         }
         
-        LOGGER.info("Created {} task configuration(s)", taskConfigs.size());
+        LOGGER.info("Created {} task configuration(s) for {} table(s)", taskConfigs.size(), tables.length);
         return taskConfigs;
     }
     

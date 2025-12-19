@@ -20,6 +20,7 @@ public class ErrorHandlingTest {
     
     private KafkaTestUtils kafkaUtils;
     private String sourceTopic = "raw-event-headers";
+    private String processor; // "flink", "spring", or "both"
     
     @BeforeAll
     void setUp() {
@@ -34,18 +35,33 @@ public class ErrorHandlingTest {
         }
         
         kafkaUtils = new KafkaTestUtils(bootstrapServers, apiKey, apiSecret);
+        
+        // Get processor from environment variable, default to "spring"
+        processor = System.getenv("TEST_PROCESSOR");
+        if (processor == null || processor.isEmpty()) {
+            processor = "spring";
+        }
+    }
+    
+    /**
+     * Get topic name with processor suffix.
+     */
+    private String getTopic(String baseName, String processor) {
+        return baseName + "-" + processor;
     }
     
     @Test
     void testInvalidEventHandling() throws Exception {
         // Send a valid event first to ensure system is working
-        EventHeader validEvent = TestEventGenerator.generateCarCreatedEvent("error-valid-001");
+        String uniquePrefix = "error-valid-" + System.currentTimeMillis();
+        String testId = uniquePrefix + "-001";
+        EventHeader validEvent = TestEventGenerator.generateCarCreatedEvent(testId);
         kafkaUtils.publishTestEvent(sourceTopic, validEvent);
-        Thread.sleep(5000);
         
         // Verify valid event is processed
+        // consumeEvents already polls with timeout, no need for Thread.sleep
         List<EventHeader> validEvents = kafkaUtils.consumeEvents(
-            "filtered-car-created-events", 1, Duration.ofSeconds(30)
+            getTopic("filtered-car-created-events", processor), 1, Duration.ofSeconds(30), uniquePrefix
         );
         assertThat(validEvents).hasSize(1);
         
@@ -57,20 +73,22 @@ public class ErrorHandlingTest {
     @Test
     void testEventWithMissingFields() throws Exception {
         // Create an event with minimal required fields
+        String uniquePrefix = "error-minimal-" + System.currentTimeMillis();
+        String testId = uniquePrefix + "-001";
         EventHeader minimalEvent = EventHeader.builder()
-            .id("error-minimal-001")
+            .id(testId)
             .eventType("CarCreated")
             .op("c")
             .table("event_headers")
             .build();
         
         kafkaUtils.publishTestEvent(sourceTopic, minimalEvent);
-        Thread.sleep(5000);
         
         // System should handle this gracefully (either filter or process)
         // The exact behavior depends on implementation
+        // consumeEvents already polls with timeout, no need for Thread.sleep
         List<EventHeader> events = kafkaUtils.consumeEvents(
-            "filtered-car-created-events", 1, Duration.ofSeconds(10)
+            getTopic("filtered-car-created-events", processor), 1, Duration.ofSeconds(10), uniquePrefix
         );
         
         // Should either process it or filter it out, but not crash
@@ -83,15 +101,15 @@ public class ErrorHandlingTest {
         // Publish events
         List<EventHeader> testEvents = TestEventGenerator.generateMixedEventBatch(10);
         kafkaUtils.publishTestEvents(sourceTopic, testEvents);
-        Thread.sleep(10000);
         
         // Consume with first consumer group
+        // consumeAllEvents already polls with timeout, no need for Thread.sleep
         String group1 = "test-group-1";
-        List<EventHeader> events1 = consumeWithGroup(group1, "filtered-car-created-events", 10);
+        List<EventHeader> events1 = consumeWithGroup(group1, getTopic("filtered-car-created-events", processor), 10);
         
         // Consume with second consumer group (should get same events)
         String group2 = "test-group-2";
-        List<EventHeader> events2 = consumeWithGroup(group2, "filtered-car-created-events", 10);
+        List<EventHeader> events2 = consumeWithGroup(group2, getTopic("filtered-car-created-events", processor), 10);
         
         // Both should receive events (different consumer groups)
         assertThat(events1.size()).isGreaterThan(0);

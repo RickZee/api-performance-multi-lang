@@ -46,6 +46,13 @@ dependencies {
     testImplementation 'org.testcontainers:kafka:1.19.3'
     testImplementation 'org.testcontainers:junit-jupiter:1.19.3'
     testImplementation 'org.assertj:assertj-core:3.24.2'
+    
+    // Kafka client for E2E tests
+    testImplementation 'org.apache.kafka:kafka-clients:3.6.0'
+    
+    // Debezium testing utilities (if available, otherwise we'll use testcontainers directly)
+    // Note: Debezium testcontainers extension may not be available for all versions
+    // We'll use standard testcontainers for Kafka Connect setup
 }
 
 tasks.named('test') {
@@ -54,6 +61,53 @@ tasks.named('test') {
         events "passed", "skipped", "failed"
         exceptionFormat "full"
     }
+    
+    // Configure Docker host for Testcontainers on macOS
+    // Priority order:
+    // 1. Use DOCKER_HOST environment variable if already set
+    // 2. Check for default Docker socket at /var/run/docker.sock (Docker Desktop default socket enabled)
+    // 3. Check for macOS Docker Desktop socket at ~/.docker/run/docker.sock
+    // 4. Fall back to Testcontainers auto-detection
+    
+    def dockerHost = System.getenv("DOCKER_HOST")
+    if (dockerHost == null || dockerHost.isEmpty()) {
+        // Check for default Docker socket (Docker Desktop with "Enable default Docker socket" enabled)
+        def defaultSocket = new File("/var/run/docker.sock")
+        if (defaultSocket.exists()) {
+            environment "DOCKER_HOST", "unix:///var/run/docker.sock"
+            systemProperty "docker.host", "unix:///var/run/docker.sock"
+        } else {
+            // Check for macOS Docker Desktop socket
+            def dockerSocket = new File(System.getProperty("user.home") + "/.docker/run/docker.sock")
+            if (dockerSocket.exists()) {
+                def socketPath = dockerSocket.getAbsolutePath()
+                environment "DOCKER_HOST", "unix://" + socketPath
+                systemProperty "docker.host", "unix://" + socketPath
+            }
+        }
+    } else {
+        // DOCKER_HOST is already set, use it
+        systemProperty "docker.host", dockerHost
+    }
+}
+
+// Task for running real DSQL integration tests
+tasks.register('testRealDsql', Test) {
+    useJUnitPlatform()
+    includeTags 'real-dsql'
+    testLogging {
+        events "passed", "skipped", "failed"
+        exceptionFormat "full"
+    }
+    
+    // Only run if required environment variables are set
+    onlyIf { 
+        System.getenv('DSQL_ENDPOINT_PRIMARY') != null && 
+        System.getenv('DSQL_DATABASE_NAME') != null 
+    }
+    
+    description = 'Runs integration tests against real DSQL cluster (requires environment variables)'
+    group = 'verification'
 }
 
 // Create a fat JAR for deployment

@@ -6,10 +6,14 @@ test:
     api-secret: ${CONFLUENT_API_SECRET}
   topics:
     source: raw-event-headers
-    filtered-car: filtered-car-created-events
-    filtered-loan: filtered-loan-created-events
-    filtered-payment: filtered-loan-payment-submitted-events
-    filtered-service: filtered-service-events
+    filtered-car-flink: filtered-car-created-events-flink
+    filtered-car-spring: filtered-car-created-events-spring
+    filtered-loan-flink: filtered-loan-created-events-flink
+    filtered-loan-spring: filtered-loan-created-events-spring
+    filtered-payment-flink: filtered-loan-payment-submitted-events-flink
+    filtered-payment-spring: filtered-loan-payment-submitted-events-spring
+    filtered-service-flink: filtered-service-events-flink
+    filtered-service-spring: filtered-service-events-spring
   timeouts:
     event-processing: 10000
     topic-consumption: 30000

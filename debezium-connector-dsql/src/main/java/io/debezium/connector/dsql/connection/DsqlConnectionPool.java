@@ -173,7 +173,7 @@ public class DsqlConnectionPool {
     }
     
     /**
-     * Check if error is retryable (connection/timeout errors).
+     * Check if error is retryable (connection/timeout/authentication errors).
      */
     private boolean isRetryableError(SQLException e) {
         String errorMessage = e.getMessage().toLowerCase();
@@ -182,7 +182,9 @@ public class DsqlConnectionPool {
                errorMessage.contains("network") ||
                errorMessage.contains("unable to connect") ||
                errorMessage.contains("connection refused") ||
-               errorMessage.contains("connection reset");
+               errorMessage.contains("connection reset") ||
+               errorMessage.contains("authentication") ||
+               errorMessage.contains("password");
     }
     
     /**

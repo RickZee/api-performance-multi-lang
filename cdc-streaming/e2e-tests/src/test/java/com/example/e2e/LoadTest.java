@@ -15,6 +15,7 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.stream.Collectors;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -29,6 +30,7 @@ public class LoadTest {
     
     private KafkaTestUtils kafkaUtils;
     private String sourceTopic = "raw-event-headers";
+    private String processor; // "flink", "spring", or "both"
     
     @BeforeAll
     void setUp() {
@@ -43,6 +45,19 @@ public class LoadTest {
         }
         
         kafkaUtils = new KafkaTestUtils(bootstrapServers, apiKey, apiSecret);
+        
+        // Get processor from environment variable, default to "spring"
+        processor = System.getenv("TEST_PROCESSOR");
+        if (processor == null || processor.isEmpty()) {
+            processor = "spring";
+        }
+    }
+    
+    /**
+     * Get topic name with processor suffix.
+     */
+    private String getTopic(String baseName, String processor) {
+        return baseName + "-" + processor;
     }
     
     /**
@@ -94,7 +109,7 @@ public class LoadTest {
         
         // Verify events were processed
         List<EventHeader> processedEvents = kafkaUtils.consumeAllEvents(
-            "filtered-car-created-events", totalPublished.get(), Duration.ofSeconds(120)
+            getTopic("filtered-car-created-events", processor), totalPublished.get(), Duration.ofSeconds(120)
         );
         
         totalProcessed.set(processedEvents.size());
@@ -159,7 +174,7 @@ public class LoadTest {
         
         // Verify events were processed
         List<EventHeader> processedEvents = kafkaUtils.consumeAllEvents(
-            "filtered-car-created-events", spikeSize, Duration.ofSeconds(300)
+            getTopic("filtered-car-created-events", processor), spikeSize, Duration.ofSeconds(300)
         );
         
         System.out.println("Spike load processed: " + processedEvents.size() + " events");
@@ -218,7 +233,7 @@ public class LoadTest {
         
         // Verify system is still processing
         List<EventHeader> recentEvents = kafkaUtils.consumeAllEvents(
-            "filtered-car-created-events", 100, Duration.ofSeconds(60)
+            getTopic("filtered-car-created-events", processor), 100, Duration.ofSeconds(60)
         );
         
         assertThat(recentEvents.size())
@@ -241,10 +256,21 @@ public class LoadTest {
         System.out.println("Creating backpressure with high load...");
         int overloadSize = 50000;
         
+        // Use unique prefix for backpressure test to avoid conflicts
+        String uniquePrefix = "backpressure-" + System.currentTimeMillis() + "-";
         long overloadStart = System.currentTimeMillis();
         for (int i = 0; i < overloadSize; i++) {
-            EventHeader event = TestEventGenerator.generateCarCreatedEvent("backpressure-" + i);
-            kafkaUtils.publishTestEvent(sourceTopic, event);
+            EventHeader event = TestEventGenerator.generateCarCreatedEvent(uniquePrefix + i);
+            try {
+                kafkaUtils.publishTestEvent(sourceTopic, event);
+            } catch (Exception e) {
+                // If we hit timeout during backpressure, that's expected - continue
+                if (i % 1000 == 0) {
+                    System.out.println("  Published " + i + " events (some may have timed out due to backpressure)");
+                }
+                // Continue publishing - backpressure is expected
+                continue;
+            }
             
             if (i % 1000 == 0) {
                 System.out.println("  Published " + i + " events");
@@ -262,7 +288,25 @@ public class LoadTest {
         // Now test recovery: publish normal load
         System.out.println("Testing recovery with normal load...");
         int normalLoadSize = 100;
+        // Use unique prefix for recovery test events
+        String recoveryPrefix = "recovery-" + System.currentTimeMillis() + "-";
         List<EventHeader> normalEvents = TestEventGenerator.generateMixedEventBatch(normalLoadSize);
+        // Update event IDs to use unique prefix
+        for (int i = 0; i < normalEvents.size(); i++) {
+            EventHeader event = normalEvents.get(i);
+            EventHeader updatedEvent = EventHeader.builder()
+                .id(recoveryPrefix + i)
+                .eventName(event.getEventName())
+                .eventType(event.getEventType())
+                .createdDate(event.getCreatedDate())
+                .savedDate(event.getSavedDate())
+                .headerData(event.getHeaderData())
+                .op(event.getOp())
+                .table(event.getTable())
+                .tsMs(event.getTsMs())
+                .build();
+            normalEvents.set(i, updatedEvent);
+        }
         
         long recoveryStart = System.currentTimeMillis();
         kafkaUtils.publishTestEvents(sourceTopic, normalEvents);
@@ -272,9 +316,14 @@ public class LoadTest {
         Thread.sleep(30000);
         
         // Verify normal load is processed quickly (recovery)
+        // Use unique prefix to filter out historical events
         List<EventHeader> recoveredEvents = kafkaUtils.consumeAllEvents(
-            "filtered-car-created-events", normalLoadSize, Duration.ofSeconds(60)
+            getTopic("filtered-car-created-events", processor), normalLoadSize, Duration.ofSeconds(60)
         );
+        // Filter by recovery prefix
+        recoveredEvents = recoveredEvents.stream()
+            .filter(e -> e.getId() != null && e.getId().startsWith(recoveryPrefix))
+            .collect(java.util.stream.Collectors.toList());
         
         long recoveryTime = System.currentTimeMillis() - recoveryStart;
         
@@ -285,7 +334,7 @@ public class LoadTest {
         // Should process normal load after recovery
         assertThat(recoveredEvents.size())
             .as("Should process normal load after backpressure recovery")
-            .isGreaterThan(normalLoadSize * 0.8);
+            .isGreaterThan((int)(normalLoadSize * 0.8));
     }
     
     /**
@@ -341,13 +390,13 @@ public class LoadTest {
         
         // Verify events were processed
         List<EventHeader> processedEvents = kafkaUtils.consumeAllEvents(
-            "filtered-car-created-events", totalPublished, Duration.ofSeconds(120)
+            getTopic("filtered-car-created-events", processor), totalPublished, Duration.ofSeconds(120)
         );
         
         System.out.println("Concurrent producers processed: " + processedEvents.size() + " events");
         
         assertThat(processedEvents.size())
             .as("Should process events from concurrent producers")
-            .isGreaterThan(totalPublished * 0.8);
+            .isGreaterThan((int)(totalPublished * 0.8));
     }
 }

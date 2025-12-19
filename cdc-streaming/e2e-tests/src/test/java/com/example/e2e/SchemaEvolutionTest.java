@@ -27,6 +27,7 @@ public class SchemaEvolutionTest {
             .registerModule(new JavaTimeModule());
     
     private String sourceTopic = "raw-event-headers";
+    private String processor; // "flink", "spring", or "both"
     
     @BeforeAll
     void setUp() {
@@ -41,6 +42,19 @@ public class SchemaEvolutionTest {
         }
         
         kafkaUtils = new KafkaTestUtils(bootstrapServers, apiKey, apiSecret);
+        
+        // Get processor from environment variable, default to "spring"
+        processor = System.getenv("TEST_PROCESSOR");
+        if (processor == null || processor.isEmpty()) {
+            processor = "spring";
+        }
+    }
+    
+    /**
+     * Get topic name with processor suffix.
+     */
+    private String getTopic(String baseName, String processor) {
+        return baseName + "-" + processor;
     }
     
     /**
@@ -50,7 +64,9 @@ public class SchemaEvolutionTest {
     @Test
     void testBackwardCompatibleSchemaChange() throws Exception {
         // Create event with additional optional field (simulating schema evolution)
-        String eventId = "schema-evolution-" + UUID.randomUUID().toString();
+        // Use timestamp to make event ID unique
+        String uniquePrefix = "schema-evolution-" + System.currentTimeMillis() + "-";
+        String eventId = uniquePrefix + UUID.randomUUID().toString();
         String timestamp = Instant.now().toString();
         
         // Create event with extra field in header_data
@@ -74,11 +90,12 @@ public class SchemaEvolutionTest {
         
         // Publish event with new field
         kafkaUtils.publishTestEvent(sourceTopic, eventWithNewField);
-        Thread.sleep(10000);
         
         // Verify event is processed correctly despite new field
+        // consumeEvents already polls with timeout, no need for Thread.sleep
+        // Use unique prefix to filter out historical events
         List<EventHeader> processedEvents = kafkaUtils.consumeEvents(
-            "filtered-car-created-events", 1, Duration.ofSeconds(30)
+            getTopic("filtered-car-created-events", processor), 1, Duration.ofSeconds(30), uniquePrefix
         );
         
         assertThat(processedEvents).as("Should process event with new optional field")
@@ -98,7 +115,9 @@ public class SchemaEvolutionTest {
     @Test
     void testForwardCompatibleSchemaChange() throws Exception {
         // Create event with minimal required fields (simulating older schema)
-        String eventId = "forward-compat-" + UUID.randomUUID().toString();
+        // Use timestamp to make event ID unique
+        String uniquePrefix = "forward-compat-" + System.currentTimeMillis() + "-";
+        String eventId = uniquePrefix + UUID.randomUUID().toString();
         String timestamp = Instant.now().toString();
         
         // Minimal header_data without optional fields
@@ -122,11 +141,11 @@ public class SchemaEvolutionTest {
         
         // Publish minimal event
         kafkaUtils.publishTestEvent(sourceTopic, minimalEvent);
-        Thread.sleep(10000);
         
         // Verify event is processed correctly
+        // consumeEvents already polls with timeout, no need for Thread.sleep
         List<EventHeader> processedEvents = kafkaUtils.consumeEvents(
-            "filtered-loan-created-events", 1, Duration.ofSeconds(30)
+            getTopic("filtered-loan-created-events", processor), 1, Duration.ofSeconds(30)
         );
         
         assertThat(processedEvents).as("Should process minimal event (forward compatible)")
@@ -142,7 +161,9 @@ public class SchemaEvolutionTest {
      */
     @Test
     void testUnknownFieldIgnored() throws Exception {
-        String eventId = "unknown-field-" + UUID.randomUUID().toString();
+        // Use timestamp to make event ID unique
+        String uniquePrefix = "unknown-field-" + System.currentTimeMillis() + "-";
+        String eventId = uniquePrefix + UUID.randomUUID().toString();
         String timestamp = Instant.now().toString();
         
         // Create event with multiple unknown fields
@@ -167,11 +188,12 @@ public class SchemaEvolutionTest {
         
         // Publish event with unknown fields
         kafkaUtils.publishTestEvent(sourceTopic, eventWithUnknownFields);
-        Thread.sleep(10000);
         
         // Verify event is processed correctly
+        // consumeEvents already polls with timeout, no need for Thread.sleep
+        // Use unique prefix to filter out historical events
         List<EventHeader> processedEvents = kafkaUtils.consumeEvents(
-            "filtered-loan-payment-submitted-events", 1, Duration.ofSeconds(30)
+            getTopic("filtered-loan-payment-submitted-events", processor), 1, Duration.ofSeconds(30), uniquePrefix
         );
         
         assertThat(processedEvents).as("Should process event with unknown fields")
@@ -188,7 +210,9 @@ public class SchemaEvolutionTest {
      */
     @Test
     void testNullValuesInOptionalFields() throws Exception {
-        String eventId = "null-fields-" + UUID.randomUUID().toString();
+        // Use timestamp to make event ID unique
+        String uniquePrefix = "null-fields-" + System.currentTimeMillis() + "-";
+        String eventId = uniquePrefix + UUID.randomUUID().toString();
         String timestamp = Instant.now().toString();
         
         // Create event with null values in header_data
@@ -212,11 +236,11 @@ public class SchemaEvolutionTest {
         
         // Publish event with null values
         kafkaUtils.publishTestEvent(sourceTopic, eventWithNulls);
-        Thread.sleep(10000);
         
         // Verify event is processed correctly
+        // consumeEvents already polls with timeout, no need for Thread.sleep
         List<EventHeader> processedEvents = kafkaUtils.consumeEvents(
-            "filtered-service-events", 1, Duration.ofSeconds(30)
+            getTopic("filtered-service-events", processor), 1, Duration.ofSeconds(30)
         );
         
         assertThat(processedEvents).as("Should process event with null optional fields")
@@ -232,7 +256,9 @@ public class SchemaEvolutionTest {
      */
     @Test
     void testFieldTypeTolerance() throws Exception {
-        String eventId = "type-tolerance-" + UUID.randomUUID().toString();
+        // Use timestamp to make event ID unique
+        String uniquePrefix = "type-tolerance-" + System.currentTimeMillis() + "-";
+        String eventId = uniquePrefix + UUID.randomUUID().toString();
         String timestamp = Instant.now().toString();
         
         // Create event with different field types (string vs number)
@@ -256,11 +282,12 @@ public class SchemaEvolutionTest {
         
         // Publish event
         kafkaUtils.publishTestEvent(sourceTopic, eventWithTypeVariation);
-        Thread.sleep(10000);
         
         // Verify event is processed (should not crash on type variations)
+        // consumeEvents already polls with timeout, no need for Thread.sleep
+        // Use unique prefix to filter out historical events
         List<EventHeader> processedEvents = kafkaUtils.consumeEvents(
-            "filtered-car-created-events", 1, Duration.ofSeconds(30)
+            getTopic("filtered-car-created-events", processor), 1, Duration.ofSeconds(30), uniquePrefix
         );
         
         assertThat(processedEvents).as("Should handle type variations gracefully")

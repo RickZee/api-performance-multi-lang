@@ -21,6 +21,7 @@ public class EdgeCaseTest {
     
     private KafkaTestUtils kafkaUtils;
     private String sourceTopic = "raw-event-headers";
+    private String processor; // "flink", "spring", or "both"
     
     @BeforeAll
     void setUp() {
@@ -35,6 +36,19 @@ public class EdgeCaseTest {
         }
         
         kafkaUtils = new KafkaTestUtils(bootstrapServers, apiKey, apiSecret);
+        
+        // Get processor from environment variable, default to "spring"
+        processor = System.getenv("TEST_PROCESSOR");
+        if (processor == null || processor.isEmpty()) {
+            processor = "spring";
+        }
+    }
+    
+    /**
+     * Get topic name with processor suffix.
+     */
+    private String getTopic(String baseName, String processor) {
+        return baseName + "-" + processor;
     }
     
     /**
@@ -42,7 +56,9 @@ public class EdgeCaseTest {
      */
     @Test
     void testEmptyHeaderData() throws Exception {
-        String eventId = "empty-header-" + UUID.randomUUID().toString();
+        // Use timestamp to make event ID unique
+        String uniquePrefix = "empty-header-" + System.currentTimeMillis() + "-";
+        String eventId = uniquePrefix + UUID.randomUUID().toString();
         String timestamp = Instant.now().toString();
         
         EventHeader eventWithEmptyHeader = EventHeader.builder()
@@ -58,11 +74,12 @@ public class EdgeCaseTest {
             .build();
         
         kafkaUtils.publishTestEvent(sourceTopic, eventWithEmptyHeader);
-        Thread.sleep(10000);
         
         // System should handle empty header_data gracefully
+        // consumeEvents already polls with timeout, no need for Thread.sleep
+        // Use unique prefix to filter out historical events
         List<EventHeader> processedEvents = kafkaUtils.consumeEvents(
-            "filtered-car-created-events", 1, Duration.ofSeconds(30)
+            getTopic("filtered-car-created-events", processor), 1, Duration.ofSeconds(30), uniquePrefix
         );
         
         // Should either process it or filter it out, but not crash
@@ -105,11 +122,11 @@ public class EdgeCaseTest {
             .build();
         
         kafkaUtils.publishTestEvent(sourceTopic, eventWithLargeHeader);
-        Thread.sleep(20000); // Longer wait for large payload
         
         // System should handle large payloads (may be slower but shouldn't crash)
+        // consumeEvents already polls with timeout (60s for large payload), no need for Thread.sleep
         List<EventHeader> processedEvents = kafkaUtils.consumeEvents(
-            "filtered-car-created-events", 1, Duration.ofSeconds(60)
+            getTopic("filtered-car-created-events", processor), 1, Duration.ofSeconds(60), "large-header-"
         );
         
         // Should either process it or handle it gracefully
@@ -121,7 +138,9 @@ public class EdgeCaseTest {
      */
     @Test
     void testSpecialCharactersInEventName() throws Exception {
-        String eventId = "special-chars-" + UUID.randomUUID().toString();
+        // Use timestamp to make event ID unique
+        String uniquePrefix = "special-chars-" + System.currentTimeMillis() + "-";
+        String eventId = uniquePrefix + UUID.randomUUID().toString();
         String timestamp = Instant.now().toString();
         
         // Event with special characters and Unicode
@@ -144,11 +163,12 @@ public class EdgeCaseTest {
             .build();
         
         kafkaUtils.publishTestEvent(sourceTopic, eventWithSpecialChars);
-        Thread.sleep(10000);
         
         // System should handle special characters
+        // consumeEvents already polls with timeout, no need for Thread.sleep
+        // Use unique prefix to filter out historical events
         List<EventHeader> processedEvents = kafkaUtils.consumeEvents(
-            "filtered-car-created-events", 1, Duration.ofSeconds(30)
+            getTopic("filtered-car-created-events", processor), 1, Duration.ofSeconds(30), uniquePrefix
         );
         
         if (!processedEvents.isEmpty()) {
@@ -162,7 +182,9 @@ public class EdgeCaseTest {
      */
     @Test
     void testNullEventType() throws Exception {
-        String eventId = "null-type-" + UUID.randomUUID().toString();
+        // Use timestamp to make event ID unique
+        String uniquePrefix = "null-type-" + System.currentTimeMillis() + "-";
+        String eventId = uniquePrefix + UUID.randomUUID().toString();
         String timestamp = Instant.now().toString();
         
         EventHeader eventWithNullType = EventHeader.builder()
@@ -178,11 +200,12 @@ public class EdgeCaseTest {
             .build();
         
         kafkaUtils.publishTestEvent(sourceTopic, eventWithNullType);
-        Thread.sleep(10000);
         
         // Events with null event_type should be filtered out
+        // consumeEvents already polls with timeout, no need for Thread.sleep
+        // Use unique prefix to filter out historical events
         List<EventHeader> processedEvents = kafkaUtils.consumeEvents(
-            "filtered-car-created-events", 1, Duration.ofSeconds(10)
+            getTopic("filtered-car-created-events", processor), 1, Duration.ofSeconds(10), uniquePrefix
         );
         
         // Should be filtered out (not crash)
@@ -194,7 +217,9 @@ public class EdgeCaseTest {
      */
     @Test
     void testWhitespaceEventType() throws Exception {
-        String eventId = "whitespace-type-" + UUID.randomUUID().toString();
+        // Use timestamp to make event ID unique
+        String uniquePrefix = "whitespace-type-" + System.currentTimeMillis() + "-";
+        String eventId = uniquePrefix + UUID.randomUUID().toString();
         String timestamp = Instant.now().toString();
         
         EventHeader eventWithWhitespace = EventHeader.builder()
@@ -210,11 +235,12 @@ public class EdgeCaseTest {
             .build();
         
         kafkaUtils.publishTestEvent(sourceTopic, eventWithWhitespace);
-        Thread.sleep(10000);
         
         // Events with whitespace should be filtered out (exact match required)
+        // consumeEvents already polls with timeout, no need for Thread.sleep
+        // Use unique prefix to filter out historical events
         List<EventHeader> processedEvents = kafkaUtils.consumeEvents(
-            "filtered-car-created-events", 1, Duration.ofSeconds(10)
+            getTopic("filtered-car-created-events", processor), 1, Duration.ofSeconds(10), uniquePrefix
         );
         
         // Should be filtered out
@@ -226,8 +252,9 @@ public class EdgeCaseTest {
      */
     @Test
     void testVeryLongEventId() throws Exception {
-        // Generate very long event ID (1000+ characters)
-        StringBuilder longId = new StringBuilder("long-id-");
+        // Generate very long event ID (1000+ characters) with unique timestamp prefix
+        String uniquePrefix = "long-id-" + System.currentTimeMillis() + "-";
+        StringBuilder longId = new StringBuilder(uniquePrefix);
         for (int i = 0; i < 1000; i++) {
             longId.append("x");
         }
@@ -248,11 +275,12 @@ public class EdgeCaseTest {
             .build();
         
         kafkaUtils.publishTestEvent(sourceTopic, eventWithLongId);
-        Thread.sleep(10000);
         
-        // System should handle long IDs
+        // System should handle long IDs (filter by test ID to avoid historical events)
+        // consumeEvents already polls with timeout, no need for Thread.sleep
+        // Use unique prefix to filter out historical events
         List<EventHeader> processedEvents = kafkaUtils.consumeEvents(
-            "filtered-loan-created-events", 1, Duration.ofSeconds(30)
+            getTopic("filtered-loan-created-events", processor), 1, Duration.ofSeconds(30), uniquePrefix
         );
         
         // Should either process it or handle it gracefully
@@ -264,7 +292,9 @@ public class EdgeCaseTest {
      */
     @Test
     void testSqlInjectionLikeCharacters() throws Exception {
-        String eventId = "sql-injection-test-" + UUID.randomUUID().toString();
+        // Use timestamp to make event ID unique
+        String uniquePrefix = "sql-injection-test-" + System.currentTimeMillis() + "-";
+        String eventId = uniquePrefix + UUID.randomUUID().toString();
         String timestamp = Instant.now().toString();
         
         // Event with SQL injection-like characters
@@ -288,11 +318,12 @@ public class EdgeCaseTest {
             .build();
         
         kafkaUtils.publishTestEvent(sourceTopic, eventWithMaliciousChars);
-        Thread.sleep(10000);
         
         // System should handle special characters safely (no SQL injection risk in Kafka)
+        // consumeEvents already polls with timeout, no need for Thread.sleep
+        // Use unique prefix to filter out historical events
         List<EventHeader> processedEvents = kafkaUtils.consumeEvents(
-            "filtered-car-created-events", 1, Duration.ofSeconds(30)
+            getTopic("filtered-car-created-events", processor), 1, Duration.ofSeconds(30), uniquePrefix
         );
         
         // Should handle it as data, not execute it
@@ -304,7 +335,9 @@ public class EdgeCaseTest {
      */
     @Test
     void testNewlineCharacters() throws Exception {
-        String eventId = "newline-test-" + UUID.randomUUID().toString();
+        // Use timestamp to make event ID unique
+        String uniquePrefix = "newline-test-" + System.currentTimeMillis() + "-";
+        String eventId = uniquePrefix + UUID.randomUUID().toString();
         String timestamp = Instant.now().toString();
         
         // Event with newline characters
@@ -328,11 +361,12 @@ public class EdgeCaseTest {
             .build();
         
         kafkaUtils.publishTestEvent(sourceTopic, eventWithNewlines);
-        Thread.sleep(10000);
         
         // System should handle newline characters
+        // consumeEvents already polls with timeout, no need for Thread.sleep
+        // Use unique prefix to filter out historical events
         List<EventHeader> processedEvents = kafkaUtils.consumeEvents(
-            "filtered-car-created-events", 1, Duration.ofSeconds(30)
+            getTopic("filtered-car-created-events", processor), 1, Duration.ofSeconds(30), uniquePrefix
         );
         
         assertThat(processedEvents.size()).isLessThanOrEqualTo(1);

@@ -20,6 +20,7 @@ public class ResilienceTest {
     
     private KafkaTestUtils kafkaUtils;
     private String sourceTopic = "raw-event-headers";
+    private String processor; // "flink", "spring", or "both"
     
     @BeforeAll
     void setUp() {
@@ -34,6 +35,19 @@ public class ResilienceTest {
         }
         
         kafkaUtils = new KafkaTestUtils(bootstrapServers, apiKey, apiSecret);
+        
+        // Get processor from environment variable, default to "spring"
+        processor = System.getenv("TEST_PROCESSOR");
+        if (processor == null || processor.isEmpty()) {
+            processor = "spring";
+        }
+    }
+    
+    /**
+     * Get topic name with processor suffix.
+     */
+    private String getTopic(String baseName, String processor) {
+        return baseName + "-" + processor;
     }
     
     /**
@@ -47,9 +61,6 @@ public class ResilienceTest {
         List<EventHeader> eventsBeforeRestart = TestEventGenerator.generateMixedEventBatch(10);
         kafkaUtils.publishTestEvents(sourceTopic, eventsBeforeRestart);
         
-        // Wait a bit for processing
-        Thread.sleep(5000);
-        
         // Simulate restart by waiting and then publishing more events
         // In a real test, you would actually restart the service here
         System.out.println("Simulating service restart...");
@@ -59,12 +70,10 @@ public class ResilienceTest {
         List<EventHeader> eventsAfterRestart = TestEventGenerator.generateMixedEventBatch(10);
         kafkaUtils.publishTestEvents(sourceTopic, eventsAfterRestart);
         
-        // Wait for processing
-        Thread.sleep(15000);
-        
         // Verify events from before restart are still processed
+        // consumeAllEvents already polls with timeout, no need for Thread.sleep
         List<EventHeader> carEvents = kafkaUtils.consumeAllEvents(
-            "filtered-car-created-events", 20, Duration.ofSeconds(60)
+            getTopic("filtered-car-created-events", processor), 20, Duration.ofSeconds(60)
         );
         
         // Should have processed events from both before and after restart
@@ -82,9 +91,6 @@ public class ResilienceTest {
         List<EventHeader> testEvents = TestEventGenerator.generateMixedEventBatch(20);
         kafkaUtils.publishTestEvents(sourceTopic, testEvents);
         
-        // Wait for processing
-        Thread.sleep(10000);
-        
         // Simulate restart
         System.out.println("Simulating Kafka Streams restart...");
         Thread.sleep(5000);
@@ -93,12 +99,10 @@ public class ResilienceTest {
         List<EventHeader> moreEvents = TestEventGenerator.generateMixedEventBatch(10);
         kafkaUtils.publishTestEvents(sourceTopic, moreEvents);
         
-        // Wait for processing
-        Thread.sleep(15000);
-        
         // Verify events are still being processed correctly
+        // consumeAllEvents already polls with timeout, no need for Thread.sleep
         List<EventHeader> loanEvents = kafkaUtils.consumeAllEvents(
-            "filtered-loan-created-events", 30, Duration.ofSeconds(60)
+            getTopic("filtered-loan-created-events", processor), 30, Duration.ofSeconds(60)
         );
         
         assertThat(loanEvents.size()).as("Should continue processing after state recovery")
@@ -115,9 +119,6 @@ public class ResilienceTest {
         List<EventHeader> testEvents = TestEventGenerator.generateMixedEventBatch(15);
         kafkaUtils.publishTestEvents(sourceTopic, testEvents);
         
-        // Wait for initial processing
-        Thread.sleep(5000);
-        
         // Simulate network partition (wait period)
         System.out.println("Simulating network partition...");
         Thread.sleep(10000);
@@ -126,12 +127,10 @@ public class ResilienceTest {
         List<EventHeader> eventsDuringPartition = TestEventGenerator.generateMixedEventBatch(10);
         kafkaUtils.publishTestEvents(sourceTopic, eventsDuringPartition);
         
-        // Wait for recovery and processing
-        Thread.sleep(20000);
-        
         // Verify events are eventually processed
+        // consumeAllEvents already polls with timeout, no need for Thread.sleep
         List<EventHeader> paymentEvents = kafkaUtils.consumeAllEvents(
-            "filtered-loan-payment-submitted-events", 25, Duration.ofSeconds(60)
+            getTopic("filtered-loan-payment-submitted-events", processor), 25, Duration.ofSeconds(60)
         );
         
         assertThat(paymentEvents.size()).as("Should process events after network recovery")
@@ -146,7 +145,6 @@ public class ResilienceTest {
         // Publish initial events
         List<EventHeader> initialEvents = TestEventGenerator.generateMixedEventBatch(5);
         kafkaUtils.publishTestEvents(sourceTopic, initialEvents);
-        Thread.sleep(5000);
         
         // Mark restart time
         long restartStartTime = System.currentTimeMillis();
@@ -156,13 +154,18 @@ public class ResilienceTest {
         Thread.sleep(5000);
         
         // Publish event immediately after restart
-        EventHeader recoveryEvent = TestEventGenerator.generateCarCreatedEvent("rto-test-001");
+        // Use unique event ID to avoid historical events
+        String uniquePrefix = "rto-test-" + System.currentTimeMillis() + "-";
+        String testId = uniquePrefix + "001";
+        EventHeader recoveryEvent = TestEventGenerator.generateCarCreatedEvent(testId);
         kafkaUtils.publishTestEvent(sourceTopic, recoveryEvent);
         
         // Measure time until event is processed
         long recoveryStartTime = System.currentTimeMillis();
+        // consumeEvents already polls with timeout, no need for Thread.sleep
+        // Use unique prefix to filter out historical events
         List<EventHeader> recoveredEvents = kafkaUtils.consumeEvents(
-            "filtered-car-created-events", 1, Duration.ofSeconds(60)
+            getTopic("filtered-car-created-events", processor), 1, Duration.ofSeconds(60), uniquePrefix
         );
         long recoveryEndTime = System.currentTimeMillis();
         
@@ -187,9 +190,6 @@ public class ResilienceTest {
         List<EventHeader> events = TestEventGenerator.generateMixedEventBatch(20);
         kafkaUtils.publishTestEvents(sourceTopic, events);
         
-        // Wait for processing
-        Thread.sleep(10000);
-        
         // Simulate restart
         System.out.println("Simulating restart for offset recovery test...");
         Thread.sleep(5000);
@@ -198,12 +198,10 @@ public class ResilienceTest {
         List<EventHeader> newEvents = TestEventGenerator.generateMixedEventBatch(10);
         kafkaUtils.publishTestEvents(sourceTopic, newEvents);
         
-        // Wait for processing
-        Thread.sleep(15000);
-        
         // Verify no duplicate processing (events should be processed once)
+        // consumeAllEvents already polls with timeout, no need for Thread.sleep
         List<EventHeader> serviceEvents = kafkaUtils.consumeAllEvents(
-            "filtered-service-events", 30, Duration.ofSeconds(60)
+            getTopic("filtered-service-events", processor), 30, Duration.ofSeconds(60)
         );
         
         // Count unique event IDs

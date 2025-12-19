@@ -43,6 +43,9 @@ public class DsqlConnectorConfig extends AbstractConfig {
     // Topic configuration
     public static final String TOPIC_PREFIX = "topic.prefix";
     
+    // Task-specific configuration (not in CONFIG_DEF, set by connector)
+    public static final String TASK_TABLE = "task.table";
+    
     // Default values
     private static final int DEFAULT_PORT = 5432;
     private static final int DEFAULT_POLL_INTERVAL_MS = 1000;
@@ -155,9 +158,11 @@ public class DsqlConnectorConfig extends AbstractConfig {
     private final int poolMinIdle;
     private final long poolConnectionTimeoutMs;
     private final String topicPrefix;
+    private final Map<String, String> originalProps;
     
     public DsqlConnectorConfig(Map<String, String> props) {
         super(CONFIG_DEF, props);
+        this.originalProps = props;
         
         this.primaryEndpoint = getString(DSQL_ENDPOINT_PRIMARY);
         this.secondaryEndpoint = getString(DSQL_ENDPOINT_SECONDARY);
@@ -194,5 +199,13 @@ public class DsqlConnectorConfig extends AbstractConfig {
      */
     public String[] getTablesArray() {
         return tables.split(",");
+    }
+    
+    /**
+     * Get the table assigned to this task (if set).
+     * Returns null if not set (for backward compatibility).
+     */
+    public String getTaskTable() {
+        return originalProps != null ? originalProps.get(TASK_TABLE) : null;
     }
 }

@@ -6,6 +6,15 @@ A production-ready Kafka Connect source connector for Amazon Aurora DSQL that ca
 
 This README provides complete deployment and setup instructions for the DSQL connector, including infrastructure setup, Kafka Connect installation, connector deployment, and IAM authentication configuration.
 
+### Production Setup
+
+- **[PRODUCTION-SETUP.md](PRODUCTION-SETUP.md)** - **Current production deployment documentation** (architecture, configuration, monitoring, troubleshooting)
+- **[QUICK-START.md](QUICK-START.md)** - Quick deployment guide
+- **[KAFKA-CONNECT-DEPLOYMENT.md](KAFKA-CONNECT-DEPLOYMENT.md)** - Detailed Kafka Connect deployment guide
+- **[DEPLOYMENT-COMPLETE.md](DEPLOYMENT-COMPLETE.md)** - Deployment completion summary
+- **[BASTION-TESTING-GUIDE.md](BASTION-TESTING-GUIDE.md)** - Testing procedures
+- **[TESTING-REAL-DSQL.md](TESTING-REAL-DSQL.md)** - Real DSQL testing guide
+
 ## Overview
 
 This connector enables Change Data Capture (CDC) from Amazon Aurora DSQL databases to Kafka topics. It uses timestamp-based polling to detect changes (since DSQL's internal journals are not publicly accessible) and provides:

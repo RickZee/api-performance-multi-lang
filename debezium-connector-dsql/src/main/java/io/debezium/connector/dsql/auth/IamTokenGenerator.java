@@ -5,8 +5,9 @@ import org.slf4j.LoggerFactory;
 import software.amazon.awssdk.auth.credentials.DefaultCredentialsProvider;
 import software.amazon.awssdk.regions.Region;
 import software.amazon.awssdk.services.rds.RdsClient;
-import software.amazon.awssdk.services.rds.model.GenerateAuthenticationTokenRequest;
 
+import java.io.BufferedReader;
+import java.io.InputStreamReader;
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
 import java.util.concurrent.locks.ReentrantLock;
@@ -110,16 +111,77 @@ public class IamTokenGenerator {
     }
     
     /**
-     * Generate a new IAM authentication token using AWS RDS SDK.
+     * Generate a new IAM authentication token for DSQL using presigned URL.
+     * 
+     * DSQL requires a presigned URL with SigV4QueryAuth (service: 'dsql'),
+     * not the standard RDS token generation. This is different from Aurora RDS.
+     * 
+     * Token format: {endpoint}:{port}/?Action=DbConnect&{signature}
+     * 
+     * NOTE: AWS SDK v2 for Java doesn't have a direct equivalent to Python's SigV4QueryAuth.
+     * This implementation uses a Python script as a workaround since we have a working
+     * Python implementation. A proper Java implementation would require manual SigV4
+     * query string signing.
+     * 
+     * TODO: Implement proper Java SigV4 query string signing without Python dependency.
+     * Reference: producer-api-python-rest-lambda-dsql/repository/iam_auth.py
      */
     private String generateNewToken() {
-        GenerateAuthenticationTokenRequest request = GenerateAuthenticationTokenRequest.builder()
-                .hostname(endpoint)
-                .port(port)
-                .username(iamUsername)
-                .build();
-        
-        return rdsClient.utilities().generateAuthenticationToken(request);
+        try {
+            // Use Python script to generate DSQL presigned URL token
+            // The Python implementation uses SigV4QueryAuth which works correctly for DSQL
+            // We'll call a Python helper script that implements the same logic
+            
+            // Try to find the Python script in the project
+            String pythonScript = System.getenv("DSQL_TOKEN_GENERATOR_SCRIPT");
+            if (pythonScript == null || pythonScript.isEmpty()) {
+                // Default to a script in the scripts directory
+                pythonScript = "../scripts/dsql_connection.py";
+            }
+            
+            ProcessBuilder processBuilder = new ProcessBuilder(
+                    "python3", pythonScript,
+                    "--endpoint", endpoint,
+                    "--port", String.valueOf(port),
+                    "--username", iamUsername,
+                    "--region", region.id(),
+                    "--generate-token-only"
+            );
+            
+            processBuilder.redirectErrorStream(true);
+            Process process = processBuilder.start();
+            
+            // Read the token from stdout
+            StringBuilder tokenBuilder = new StringBuilder();
+            try (BufferedReader reader = new BufferedReader(
+                    new InputStreamReader(process.getInputStream()))) {
+                String line;
+                while ((line = reader.readLine()) != null) {
+                    tokenBuilder.append(line);
+                }
+            }
+            
+            int exitCode = process.waitFor();
+            if (exitCode != 0) {
+                throw new RuntimeException("Python token generator script failed with exit code: " + exitCode);
+            }
+            
+            String token = tokenBuilder.toString().trim();
+            
+            if (token.isEmpty()) {
+                throw new RuntimeException("Python script returned empty token");
+            }
+            
+            LOGGER.debug("Generated DSQL presigned URL token via Python script (length: {})", token.length());
+            return token;
+            
+        } catch (Exception e) {
+            LOGGER.error("Failed to generate DSQL presigned URL token via Python script: {}", e.getMessage(), e);
+            LOGGER.error("Note: This requires Python 3 and boto3 to be installed");
+            LOGGER.error("Set DSQL_TOKEN_GENERATOR_SCRIPT environment variable to point to the Python script");
+            throw new RuntimeException("Failed to generate DSQL IAM authentication token. " +
+                    "Ensure Python 3 and boto3 are installed, or implement proper Java signing.", e);
+        }
     }
     
     /**

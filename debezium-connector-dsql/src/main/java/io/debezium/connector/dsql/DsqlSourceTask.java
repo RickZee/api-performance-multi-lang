@@ -34,6 +34,11 @@ public class DsqlSourceTask extends SourceTask {
     private DsqlOffsetContext offsetContext;
     private String tableName;
     
+    // Metrics
+    private long recordsPolled = 0;
+    private long errorsCount = 0;
+    private long lastPollTime = 0;
+    
     @Override
     public String version() {
         return "1.0.0";
@@ -46,12 +51,19 @@ public class DsqlSourceTask extends SourceTask {
         try {
             this.config = new DsqlConnectorConfig(props);
             
-            // Get table name (for now, use first table)
-            String[] tables = config.getTablesArray();
-            if (tables.length == 0) {
-                throw new ConnectException("No tables configured");
+            // Get table name assigned to this task
+            String assignedTable = config.getTaskTable();
+            if (assignedTable == null || assignedTable.isEmpty()) {
+                // Fallback to first table for backward compatibility
+                String[] tables = config.getTablesArray();
+                if (tables.length == 0) {
+                    throw new ConnectException("No tables configured");
+                }
+                this.tableName = tables[0].trim();
+                LOGGER.warn("No table assigned to task, using first table: {}", this.tableName);
+            } else {
+                this.tableName = assignedTable.trim();
             }
-            this.tableName = tables[0].trim();
             
             // Initialize IAM token generator
             this.tokenGenerator = new IamTokenGenerator(
@@ -109,7 +121,14 @@ public class DsqlSourceTask extends SourceTask {
                     offsetContext
             );
             
+            // Initialize schema before first poll
+            changeEventSource.initializeSchema();
+            
+            // Validate table exists and has required columns
+            validateTable();
+            
             LOGGER.info("DSQL source task started successfully for table: {}", tableName);
+            LOGGER.info("Metrics: recordsPolled={}, errorsCount={}", recordsPolled, errorsCount);
             
         } catch (Exception e) {
             LOGGER.error("Failed to start DSQL source task", e);
@@ -119,36 +138,100 @@ public class DsqlSourceTask extends SourceTask {
     
     @Override
     public List<SourceRecord> poll() throws InterruptedException {
-        try {
-            List<SourceRecord> records = changeEventSource.poll();
-            
-            if (records.isEmpty()) {
-                // No records, sleep for poll interval
+        int maxRetries = 3;
+        int retryCount = 0;
+        long retryDelayMs = config.getPollIntervalMs();
+        
+        while (retryCount < maxRetries) {
+            try {
+                List<SourceRecord> records = changeEventSource.poll();
+                
+                // Update metrics
+                recordsPolled += records.size();
+                lastPollTime = System.currentTimeMillis();
+                
+                if (records.isEmpty()) {
+                    // No records, sleep for poll interval
+                    Thread.sleep(config.getPollIntervalMs());
+                }
+                
+                // Reset retry count on success
+                retryCount = 0;
+                return records;
+                
+            } catch (SQLException e) {
+                errorsCount++;
+                retryCount++;
+                
+                if (isTransientError(e) && retryCount < maxRetries) {
+                    LOGGER.warn("Transient SQL error during poll (attempt {}/{}): {}", 
+                               retryCount, maxRetries, e.getMessage());
+                    
+                    // Attempt connection pool invalidation and failover
+                    connectionPool.invalidate();
+                    
+                    // Try failover if using primary
+                    if (endpoint.isUsingPrimary() && config.getSecondaryEndpoint() != null) {
+                        endpoint.failover();
+                    }
+                    
+                    // Exponential backoff
+                    long delay = retryDelayMs * (long) Math.pow(2, retryCount - 1);
+                    Thread.sleep(Math.min(delay, config.getPollIntervalMs() * 10)); // Cap at 10x poll interval
+                } else {
+                    LOGGER.error("SQL error during poll (non-retryable or max retries reached): {}", 
+                               e.getMessage(), e);
+                    
+                    // Attempt connection pool invalidation and failover even on non-retryable errors
+                    connectionPool.invalidate();
+                    if (endpoint.isUsingPrimary() && config.getSecondaryEndpoint() != null) {
+                        endpoint.failover();
+                    }
+                    
+                    Thread.sleep(config.getPollIntervalMs());
+                    return new ArrayList<>();
+                }
+                
+            } catch (Exception e) {
+                errorsCount++;
+                LOGGER.error("Unexpected error during poll: {}", e.getMessage(), e);
                 Thread.sleep(config.getPollIntervalMs());
+                return new ArrayList<>();
             }
-            
-            return records;
-            
-        } catch (SQLException e) {
-            LOGGER.error("SQL error during poll: {}", e.getMessage(), e);
-            
-            // Attempt connection pool invalidation and retry
-            connectionPool.invalidate();
-            
-            // Try failover if using primary
-            if (endpoint.isUsingPrimary() && config.getSecondaryEndpoint() != null) {
-                endpoint.failover();
-            }
-            
-            // Sleep before retry
-            Thread.sleep(config.getPollIntervalMs());
-            return new ArrayList<>();
-            
-        } catch (Exception e) {
-            LOGGER.error("Unexpected error during poll: {}", e.getMessage(), e);
-            Thread.sleep(config.getPollIntervalMs());
-            return new ArrayList<>();
         }
+        
+        return new ArrayList<>();
+    }
+    
+    /**
+     * Check if SQL error is transient and retryable.
+     */
+    private boolean isTransientError(SQLException e) {
+        String errorMessage = e.getMessage().toLowerCase();
+        String sqlState = e.getSQLState();
+        
+        // Check for transient error SQL states
+        if (sqlState != null) {
+            // PostgreSQL transient error states
+            if (sqlState.startsWith("08") || // Connection exceptions
+                sqlState.startsWith("40") || // Transaction rollback
+                sqlState.equals("40001") ||  // Serialization failure
+                sqlState.equals("40P01")) {  // Deadlock detected
+                return true;
+            }
+        }
+        
+        // Check error message for transient conditions
+        return errorMessage.contains("connection") ||
+               errorMessage.contains("timeout") ||
+               errorMessage.contains("network") ||
+               errorMessage.contains("unable to connect") ||
+               errorMessage.contains("connection refused") ||
+               errorMessage.contains("connection reset") ||
+               errorMessage.contains("temporary") ||
+               errorMessage.contains("retry") ||
+               errorMessage.contains("authentication") ||
+               errorMessage.contains("password");
     }
     
     @Override
@@ -173,5 +256,41 @@ public class DsqlSourceTask extends SourceTask {
         } catch (Exception e) {
             LOGGER.error("Error stopping DSQL source task", e);
         }
+    }
+    
+    /**
+     * Validate that the table exists and has required columns.
+     */
+    private void validateTable() throws SQLException {
+        try (java.sql.Connection conn = connectionPool.getConnection()) {
+            java.sql.DatabaseMetaData metadata = conn.getMetaData();
+            
+            // Check if table exists
+            try (java.sql.ResultSet tables = metadata.getTables(null, "public", tableName, null)) {
+                if (!tables.next()) {
+                    throw new ConnectException("Table " + tableName + " does not exist in schema 'public'");
+                }
+            }
+            
+            // Schema validation already checks for saved_date and primary key
+            // This is done in initializeSchema()
+            
+            LOGGER.debug("Table validation passed for: {}", tableName);
+        }
+    }
+    
+    /**
+     * Get metrics for monitoring.
+     */
+    public long getRecordsPolled() {
+        return recordsPolled;
+    }
+    
+    public long getErrorsCount() {
+        return errorsCount;
+    }
+    
+    public long getLastPollTime() {
+        return lastPollTime;
     }
 }
