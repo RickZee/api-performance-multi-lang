@@ -28,6 +28,21 @@ output "python_rest_dsql_function_arn" {
   value       = var.enable_python_lambda_dsql ? module.python_rest_lambda_dsql[0].function_arn : null
 }
 
+output "dsql_load_test_lambda_function_name" {
+  description = "DSQL load test Lambda function name"
+  value       = var.enable_dsql_load_test_lambda ? module.dsql_load_test_lambda[0].function_name : null
+}
+
+output "dsql_load_test_lambda_function_arn" {
+  description = "DSQL load test Lambda function ARN"
+  value       = var.enable_dsql_load_test_lambda ? module.dsql_load_test_lambda[0].function_arn : null
+}
+
+output "dsql_load_test_lambda_role_arn" {
+  description = "DSQL load test Lambda execution role ARN"
+  value       = var.enable_dsql_load_test_lambda ? module.dsql_load_test_lambda[0].role_arn : null
+}
+
 output "s3_bucket_name" {
   description = "S3 bucket name for Lambda deployments"
   value       = aws_s3_bucket.lambda_deployments.id

@@ -240,6 +240,30 @@ variable "enable_python_lambda_dsql" {
   default     = false
 }
 
+variable "enable_dsql_load_test_lambda" {
+  description = "Enable DSQL load test Lambda function (standalone load testing, separate from producer API)"
+  type        = bool
+  default     = false
+}
+
+variable "dsql_load_test_lambda_memory_size" {
+  description = "Memory size for DSQL load test Lambda in MB (default: 1024 for load testing)"
+  type        = number
+  default     = 1024
+}
+
+variable "dsql_load_test_lambda_timeout" {
+  description = "Timeout for DSQL load test Lambda in seconds (default: 900 = 15 minutes for long-running tests)"
+  type        = number
+  default     = 900
+}
+
+variable "dsql_load_test_lambda_reserved_concurrency" {
+  description = "Reserved concurrent executions for DSQL load test Lambda (null = no limit, recommended: 1000 for load tests)"
+  type        = number
+  default     = null
+}
+
 variable "enable_rds_proxy" {
   description = "Enable RDS Proxy for connection pooling (recommended for high Lambda parallelism)"
   type        = bool

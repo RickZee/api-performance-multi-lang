@@ -80,6 +80,23 @@ log_level    = "info"
 # lambda_memory_size = 512
 # lambda_timeout     = 30
 
+# DSQL Load Test Lambda (optional - for load testing only)
+# =========================================================
+# Standalone Lambda function for DSQL load testing (separate from producer API)
+# This Lambda is designed for high-throughput load testing with parallel invocations
+#
+# enable_dsql_load_test_lambda = false  # Set to true to enable
+# dsql_load_test_lambda_memory_size = 1024  # Memory in MB (default: 1024 for load tests)
+# dsql_load_test_lambda_timeout = 900  # Timeout in seconds (default: 900 = 15 minutes)
+# dsql_load_test_lambda_reserved_concurrency = null  # null = no limit, or set to 1000 for load tests
+#
+# Note: This Lambda requires:
+# 1. Aurora DSQL cluster (enable_aurora_dsql_cluster = true) OR
+# 2. Manual DSQL configuration (aurora_dsql_endpoint, iam_database_user, etc.)
+# 3. Lambda deployment package uploaded to S3 at: dsql-load-test/lambda-deployment.zip
+#
+# After deployment, update load-test/dsql-load-test/config.json with the function name
+
 # Aurora Auto-Stop Email Notifications
 # =====================================
 # Optional: Receive email notifications when Aurora cluster is automatically stopped

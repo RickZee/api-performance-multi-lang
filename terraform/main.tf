@@ -567,6 +567,46 @@ module "python_rest_lambda_dsql" {
   tags = local.common_tags
 }
 
+# DSQL Load Test Lambda module (optional - for load testing only)
+module "dsql_load_test_lambda" {
+  count  = var.enable_dsql_load_test_lambda ? 1 : 0
+  source = "./modules/dsql-load-test-lambda"
+
+  function_name                  = "${var.project_name}-dsql-load-test-lambda"
+  s3_bucket                      = aws_s3_bucket.lambda_deployments.id
+  s3_key                         = "dsql-load-test/lambda-deployment.zip"
+  runtime                        = "python3.11"
+  architectures                  = ["arm64"]
+  memory_size                    = var.dsql_load_test_lambda_memory_size
+  timeout                        = var.dsql_load_test_lambda_timeout
+  log_level                      = var.log_level
+  cloudwatch_logs_retention_days = local.cloudwatch_logs_retention
+  reserved_concurrent_executions = var.dsql_load_test_lambda_reserved_concurrency
+
+  # Aurora DSQL configuration
+  # Use created DSQL cluster if enabled, otherwise use manually provided endpoint
+  database_name                  = var.enable_aurora_dsql_cluster ? var.aurora_dsql_database_name : var.database_name
+  aurora_dsql_endpoint           = var.enable_aurora_dsql_cluster ? try(module.aurora_dsql[0].vpc_endpoint_dns, "") : var.aurora_dsql_endpoint
+  aurora_dsql_port               = var.aurora_dsql_port
+  iam_database_user              = var.iam_database_user
+  aurora_dsql_cluster_resource_id = var.enable_aurora_dsql_cluster ? try(module.aurora_dsql[0].cluster_resource_id, "") : var.aurora_dsql_cluster_resource_id
+  dsql_host                      = var.enable_aurora_dsql_cluster ? try(module.aurora_dsql[0].dsql_host, "") : ""
+  dsql_kms_key_arn               = var.enable_aurora_dsql_cluster ? try(module.aurora_dsql[0].kms_key_arn, "") : ""
+  aws_region                     = var.aws_region
+
+  # DSQL uses VPC endpoints - Lambda must be in VPC to access the endpoint
+  # Also support manual VPC configuration if DSQL cluster is not created via Terraform
+  vpc_config = var.enable_aurora_dsql_cluster && length(aws_security_group.lambda) > 0 ? {
+    security_group_ids = [aws_security_group.lambda[0].id]
+    subnet_ids         = module.vpc[0].private_subnet_ids
+  } : (var.vpc_id != "" && length(var.subnet_ids) > 0 && length(aws_security_group.lambda) > 0) ? {
+    security_group_ids = [aws_security_group.lambda[0].id]
+    subnet_ids         = var.subnet_ids
+  } : null
+
+  tags = local.common_tags
+}
+
 # Optional database module
 module "database" {
   count  = var.enable_database ? 1 : 0

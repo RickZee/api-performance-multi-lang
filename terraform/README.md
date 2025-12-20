@@ -7,6 +7,7 @@ This directory contains Terraform configuration to deploy the Python REST Lambda
 The Terraform setup includes:
 - **Lambda Functions**: Python REST Lambda function
 - **API Gateway**: HTTP API with CORS configuration
+- **DSQL Load Test Lambda**: Optional standalone Lambda for DSQL load testing (see [DSQL Load Test README](../load-test/dsql-load-test/README.md))
 - **S3 Bucket**: Versioned S3 bucket for Lambda deployment packages
 - **VPC Support**: Optional VPC configuration with security groups
 - **Aurora PostgreSQL**: Aurora cluster with logical replication enabled
@@ -324,6 +325,37 @@ Or simply run:
 ./scripts/deploy.sh --build-upload
 ```
 
+### DSQL Load Test Lambda
+
+The DSQL load test Lambda is a standalone module for load testing (separate from the producer API).
+
+**To enable:**
+1. Set `enable_dsql_load_test_lambda = true` in `terraform.tfvars`
+2. Build and upload the Lambda package:
+   ```bash
+   cd load-test/dsql-load-test
+   ./scripts/build-and-upload-lambda.sh
+   ```
+3. Apply Terraform:
+   ```bash
+   cd terraform
+   terraform apply
+   ```
+
+**To update:**
+1. Rebuild and upload:
+   ```bash
+   cd load-test/dsql-load-test
+   ./scripts/build-and-upload-lambda.sh
+   ```
+2. Apply Terraform (it will detect the S3 change):
+   ```bash
+   cd terraform
+   terraform apply
+   ```
+
+See [DSQL Load Test Terraform Deployment Guide](../load-test/dsql-load-test/terraform-deployment.md) for detailed instructions.
+
 ## Cleanup
 
 To destroy all resources:
@@ -344,6 +376,10 @@ terraform/
 ├── versions.tf             # Provider versions
 ├── modules/
 │   ├── lambda/             # Lambda function module (includes API Gateway)
+│   │   ├── main.tf
+│   │   ├── variables.tf
+│   │   └── outputs.tf
+│   ├── dsql-load-test-lambda/  # DSQL load test Lambda module (standalone, no API Gateway)
 │   │   ├── main.tf
 │   │   ├── variables.tf
 │   │   └── outputs.tf
