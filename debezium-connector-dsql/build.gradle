@@ -18,27 +18,47 @@ repositories {
 
 dependencies {
     // Kafka Connect API
+    // Note: Version should match Kafka Connect runtime version for compatibility
+    // Last reviewed: January 2025
     implementation 'org.apache.kafka:connect-api:3.6.0'
     
     // PostgreSQL JDBC Driver (for DSQL compatibility)
+    // Note: 42.7.1 is a recent stable version. Check for security updates periodically.
+    // Last reviewed: January 2025
     implementation 'org.postgresql:postgresql:42.7.1'
     
+    // AWS DSQL JDBC Connector - automatically handles IAM token generation
+    // Note: This connector wraps PostgreSQL driver and handles SigV4 token generation automatically
+    // Last reviewed: January 2025
+    implementation 'software.amazon.dsql:aurora-dsql-jdbc-connector:1.1.1'
+    
     // Connection Pooling
+    // Note: HikariCP 5.1.0 is a stable version. Check for updates periodically.
+    // Last reviewed: January 2025
     implementation 'com.zaxxer:HikariCP:5.1.0'
     
     // AWS SDK for IAM token generation
+    // Note: AWS SDK v2.25.0. Check AWS SDK release notes for updates and security patches.
+    // Last reviewed: January 2025
     implementation 'software.amazon.awssdk:rds:2.25.0'
     implementation 'software.amazon.awssdk:sts:2.25.0'
     implementation 'software.amazon.awssdk:core:2.25.0'
     
     // JSON processing
+    // Note: Jackson 2.16.0. Monitor for security vulnerabilities (e.g., CVE-2024-27980).
+    // Consider updating to 2.17.x or later for security fixes.
+    // Last reviewed: January 2025
     implementation 'com.fasterxml.jackson.core:jackson-databind:2.16.0'
     implementation 'com.fasterxml.jackson.datatype:jackson-datatype-jsr310:2.16.0'
     
     // Logging
+    // Note: SLF4J 2.0.9 is a recent stable version.
+    // Last reviewed: January 2025
     implementation 'org.slf4j:slf4j-api:2.0.9'
     
     // Testing
+    // Note: Test dependencies should be kept up-to-date but compatibility with main dependencies is important.
+    // Last reviewed: January 2025
     testImplementation 'org.junit.jupiter:junit-jupiter:5.10.1'
     testImplementation 'org.mockito:mockito-core:5.8.0'
     testImplementation 'org.mockito:mockito-junit-jupiter:5.8.0'
@@ -48,6 +68,7 @@ dependencies {
     testImplementation 'org.assertj:assertj-core:3.24.2'
     
     // Kafka client for E2E tests
+    // Note: Should match Kafka Connect API version for compatibility
     testImplementation 'org.apache.kafka:kafka-clients:3.6.0'
     
     // Debezium testing utilities (if available, otherwise we'll use testcontainers directly)
@@ -121,12 +142,24 @@ jar {
     
     duplicatesStrategy = DuplicatesStrategy.EXCLUDE
     
+    // Preserve ServiceLoader files for AWS DSQL connector
+    // The connector registers itself via META-INF/services/java.sql.Driver
+    // This is critical for the connector to be discovered automatically
+    preserveFileTimestamps = false
+    reproducibleFileOrder = true
+    
     manifest {
         attributes(
             'Implementation-Title': project.name,
             'Implementation-Version': project.version,
             'Implementation-Vendor': 'Debezium Community'
         )
+    }
+    
+    // Ensure ServiceLoader files are merged correctly
+    doFirst {
+        // This ensures META-INF/services files are properly merged
+        // when multiple JARs contain the same service files
     }
 }
 

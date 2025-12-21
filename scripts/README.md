@@ -177,17 +177,48 @@ print_success "Operation completed"
 print_error "Something went wrong"
 ```
 
-## Other Scripts
+## Primary Scripts
+
+### Pipeline Validation
+
+**Main Validation Script:**
+- `validate-entire-pipeline.sh` - Complete pipeline validation with comprehensive checks (IAM grant, connector status, logs, Kafka topics, message consumption)
+
+**Specialized Validation Scripts:**
+- `validate-cdc-end-to-end.sh` - End-to-end CDC test with data insertion (inserts test data into DSQL and verifies it appears in Kafka)
+- `validate-dsql-via-bastion.sh` - DSQL validation via bastion host using SSM
+- `validate-against-sent-events.py` - Python script to validate databases against sent events
+
+### Pipeline Fix/Troubleshooting
+
+**Main Fix Script:**
+- `fix-pipeline-complete.sh` - Complete pipeline fix with Lambda package creation, IAM grant execution, connector restart, and comprehensive troubleshooting
+
+### Other Utility Scripts
 
 This directory also contains various utility scripts:
 
-- **Database Setup**: `setup-aurora-connection.sh`, `setup-postgres-access.sh`
-- **Schema Initialization**: `init-aurora-schema.sh` (legacy - schema now managed by Terraform)
-- **Connector Management**: `setup-connector.sh`, `deploy-aurora-connector.sh`, `troubleshoot-cdc-connector.sh`
-- **Test Data Generation**: `generate-test-data.sh`, `generate-test-data-from-examples.sh`
-- **Kafka/Topic Management**: `create-topics.sh`, `cleanup-confluent-cloud.sh`
-- **Testing**: `send-sample-events-with-k6.sh`, `run-k6-docker-compose.sh`
-- **Validation**: `validate-entity-structure.py`, `verify-messages.py`
+- **Database Setup**: `setup-connector.sh`, `deploy-aurora-connector.sh`, `enable-postgres-replication.sh`
+- **Database Management**: `clear-both-databases.sh`, `clear-dsql-load-test-data.sh`, `recreate-dsql-tables.sh`, `query-dsql.sh`
+- **Testing**: `run-k6-and-validate.sh`, `run-k6-both-databases.sh`
+- **Utilities**: `grant-bastion-dsql-access.sh`, `upload-to-bastion.sh`, `pre-warm-lambdas.sh`, `check-auto-stop-status.sh`
+- **Python Utilities**: `validate_dsql_bastion.py`, `dsql_connection.py`, `extract-events-from-k6-output.py`
+
+## Archived Scripts
+
+Some scripts have been moved to the `archive/` directory to reduce duplication and improve maintainability. These scripts are preserved for reference but should not be used for new work.
+
+### Archive Structure
+
+- `archive/validation-duplicates/` - Duplicate validation scripts (6 files)
+- `archive/fix-duplicates/` - Duplicate fix/troubleshooting scripts (2 files)
+- `archive/temporary/` - Temporary debugging scripts (2 files)
+
+Each archive subdirectory contains a README.md explaining why scripts were archived and which scripts to use instead.
+
+**Total archived:** 11 scripts
+
+See the archive subdirectories for details on archived scripts and their replacements.
 
 ## Migration Guide
 

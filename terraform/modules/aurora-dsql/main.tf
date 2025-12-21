@@ -39,6 +39,7 @@ resource "aws_kms_key" "dsql" {
 }
 
 data "aws_caller_identity" "current" {}
+data "aws_region" "current" {}
 
 # Security Group for DSQL VPC Endpoint
 resource "aws_security_group" "dsql_endpoint" {
@@ -101,4 +102,22 @@ resource "aws_vpc_endpoint" "dsql" {
       Name = "${var.project_name}-dsql-vpc-endpoint"
     }
   )
+}
+
+# Enable RDS Data API (HTTP endpoint) for DSQL cluster
+# Note: DSQL may not support RDS Data API. This attempts to enable it via AWS CLI.
+# If DSQL doesn't support Data API, this will fail gracefully and can be disabled.
+resource "null_resource" "enable_dsql_data_api" {
+  count = var.enable_data_api ? 1 : 0
+
+  provisioner "local-exec" {
+    command = <<-EOT
+      aws rds enable-http-endpoint \
+        --resource-arn ${aws_dsql_cluster.this.arn} \
+        --region ${data.aws_region.current.name} \
+        2>&1 || echo "Warning: Failed to enable Data API. DSQL may not support RDS Data API."
+    EOT
+  }
+
+  depends_on = [aws_dsql_cluster.this]
 }

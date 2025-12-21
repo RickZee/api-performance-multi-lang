@@ -42,10 +42,20 @@ CC_KAFKA_API_SECRET="${CC_KAFKA_API_SECRET:-}"
 CONNECT_ENV_FILE="$TERRAFORM_DIR/debezium-connector-dsql/connect.env"
 if [ -f "$CONNECT_ENV_FILE" ]; then
     echo "Found connect.env file, reading Confluent config..."
-    source "$CONNECT_ENV_FILE"
+    source "$CONNECT_ENV_FILE" 2>/dev/null || true
     CC_BOOTSTRAP_SERVERS="${CC_BOOTSTRAP_SERVERS:-}"
     CC_KAFKA_API_KEY="${CC_KAFKA_API_KEY:-}"
     CC_KAFKA_API_SECRET="${CC_KAFKA_API_SECRET:-}"
+fi
+
+# Try to read from cdc-streaming/.env as fallback
+CDC_ENV_FILE="$PROJECT_DIR/../cdc-streaming/.env"
+if [ -f "$CDC_ENV_FILE" ] && ([ -z "$CC_BOOTSTRAP_SERVERS" ] || [ "$CC_KAFKA_API_KEY" = "REPLACE_ME" ] || [ -z "$CC_KAFKA_API_KEY" ]); then
+    echo "Reading from cdc-streaming/.env as fallback..."
+    source "$CDC_ENV_FILE" 2>/dev/null || true
+    CC_BOOTSTRAP_SERVERS="${KAFKA_BOOTSTRAP_SERVERS:-$CC_BOOTSTRAP_SERVERS}"
+    CC_KAFKA_API_KEY="${KAFKA_API_KEY:-$CC_KAFKA_API_KEY}"
+    CC_KAFKA_API_SECRET="${KAFKA_API_SECRET:-$CC_KAFKA_API_SECRET}"
 fi
 
 # Check for required environment variables
@@ -96,26 +106,41 @@ echo "Kafka Bootstrap Servers: $KAFKA_BOOTSTRAP_SERVERS"
 echo ""
 
 # Prepare deployment commands
+# Export variables first so they're available in the docker run command
 DEPLOY_COMMANDS=(
     "echo '=== Stopping existing Kafka Connect container (if any) ==='"
     "docker stop kafka-connect-dsql 2>/dev/null || true"
     "docker rm kafka-connect-dsql 2>/dev/null || true"
     "echo ''"
     "echo '=== Pulling Debezium Connect image ==='"
-    "docker pull quay.io/quay.io/debezium/connect:2.6"
+    "docker pull quay.io/debezium/connect:2.6"
     "echo ''"
     "echo '=== Creating connector directory ==='"
     "mkdir -p ~/debezium-connector-dsql/connector"
     "cp ~/debezium-connector-dsql/lib/debezium-connector-dsql.jar ~/debezium-connector-dsql/connector/ 2>/dev/null || echo 'JAR already in place'"
     "echo ''"
     "echo '=== Starting Kafka Connect container ==='"
-    "if [ '$IS_CONFLUENT_CLOUD' = 'true' ]; then"
-    "  echo 'Configuring for Confluent Cloud with SASL/SSL...'"
-    "  docker run -d --name kafka-connect-dsql --restart unless-stopped -p 8083:8083 -v ~/debezium-connector-dsql/connector:/kafka/connect/debezium-connector-dsql -e CONNECT_BOOTSTRAP_SERVERS='$KAFKA_BOOTSTRAP_SERVERS' -e CONNECT_REST_PORT=8083 -e CONNECT_REST_ADVERTISED_HOST_NAME=localhost -e CONNECT_GROUP_ID=dsql-connect-cluster -e CONNECT_CONFIG_STORAGE_TOPIC=dsql-connect-config -e CONNECT_OFFSET_STORAGE_TOPIC=dsql-connect-offsets -e CONNECT_STATUS_STORAGE_TOPIC=dsql-connect-status -e CONNECT_KEY_CONVERTER=org.apache.kafka.connect.json.JsonConverter -e CONNECT_VALUE_CONVERTER=org.apache.kafka.connect.json.JsonConverter -e CONNECT_KEY_CONVERTER_SCHEMAS_ENABLE=false -e CONNECT_VALUE_CONVERTER_SCHEMAS_ENABLE=false -e CONNECT_PLUGIN_PATH=/kafka/connect -e CONNECT_SASL_MECHANISM=PLAIN -e CONNECT_SECURITY_PROTOCOL=SASL_SSL -e CONNECT_SASL_JAAS_CONFIG=\"org.apache.kafka.common.security.plain.PlainLoginModule required username='$CC_KAFKA_API_KEY' password='$CC_KAFKA_API_SECRET';\" -e CONNECT_PRODUCER_SASL_MECHANISM=PLAIN -e CONNECT_PRODUCER_SECURITY_PROTOCOL=SASL_SSL -e CONNECT_PRODUCER_SASL_JAAS_CONFIG=\"org.apache.kafka.common.security.plain.PlainLoginModule required username='$CC_KAFKA_API_KEY' password='$CC_KAFKA_API_SECRET';\" -e CONNECT_CONSUMER_SASL_MECHANISM=PLAIN -e CONNECT_CONSUMER_SECURITY_PROTOCOL=SASL_SSL -e CONNECT_CONSUMER_SASL_JAAS_CONFIG=\"org.apache.kafka.common.security.plain.PlainLoginModule required username='$CC_KAFKA_API_KEY' password='$CC_KAFKA_API_SECRET';\" quay.io/debezium/connect:2.6"
-    "else"
-    "  echo 'Configuring for standard Kafka...'"
-    "  docker run -d --name kafka-connect-dsql --restart unless-stopped -p 8083:8083 -v ~/debezium-connector-dsql/connector:/kafka/connect/debezium-connector-dsql -e CONNECT_BOOTSTRAP_SERVERS='$KAFKA_BOOTSTRAP_SERVERS' -e CONNECT_REST_PORT=8083 -e CONNECT_REST_ADVERTISED_HOST_NAME=localhost -e CONNECT_GROUP_ID=dsql-connect-cluster -e CONNECT_CONFIG_STORAGE_TOPIC=dsql-connect-config -e CONNECT_OFFSET_STORAGE_TOPIC=dsql-connect-offsets -e CONNECT_STATUS_STORAGE_TOPIC=dsql-connect-status -e CONNECT_KEY_CONVERTER=org.apache.kafka.connect.json.JsonConverter -e CONNECT_VALUE_CONVERTER=org.apache.kafka.connect.json.JsonConverter -e CONNECT_KEY_CONVERTER_SCHEMAS_ENABLE=false -e CONNECT_VALUE_CONVERTER_SCHEMAS_ENABLE=false -e CONNECT_PLUGIN_PATH=/kafka/connect quay.io/debezium/connect:2.6"
-    "fi"
+)
+
+# Add environment variable exports
+if [ "$IS_CONFLUENT_CLOUD" = "true" ]; then
+    DEPLOY_COMMANDS+=(
+        "export KAFKA_BOOTSTRAP_SERVERS='$KAFKA_BOOTSTRAP_SERVERS'"
+        "export CC_KAFKA_API_KEY='$CC_KAFKA_API_KEY'"
+        "export CC_KAFKA_API_SECRET='$CC_KAFKA_API_SECRET'"
+        "echo 'Configuring for Confluent Cloud with SASL/SSL...'"
+        "docker run -d --name kafka-connect-dsql --restart unless-stopped -p 8083:8083 -v ~/debezium-connector-dsql/connector:/kafka/connect/debezium-connector-dsql -e CONNECT_BOOTSTRAP_SERVERS=\"\$KAFKA_BOOTSTRAP_SERVERS\" -e CONNECT_REST_PORT=8083 -e CONNECT_REST_ADVERTISED_HOST_NAME=localhost -e CONNECT_GROUP_ID=dsql-connect-cluster -e CONNECT_CONFIG_STORAGE_TOPIC=dsql-connect-config -e CONNECT_OFFSET_STORAGE_TOPIC=dsql-connect-offsets -e CONNECT_STATUS_STORAGE_TOPIC=dsql-connect-status -e CONNECT_KEY_CONVERTER=org.apache.kafka.connect.json.JsonConverter -e CONNECT_VALUE_CONVERTER=org.apache.kafka.connect.json.JsonConverter -e CONNECT_KEY_CONVERTER_SCHEMAS_ENABLE=false -e CONNECT_VALUE_CONVERTER_SCHEMAS_ENABLE=false -e CONNECT_PLUGIN_PATH=/kafka/connect -e CONNECT_SASL_MECHANISM=PLAIN -e CONNECT_SECURITY_PROTOCOL=SASL_SSL -e CONNECT_SASL_JAAS_CONFIG=\"org.apache.kafka.common.security.plain.PlainLoginModule required username='\$CC_KAFKA_API_KEY' password='\$CC_KAFKA_API_SECRET';\" -e CONNECT_PRODUCER_SASL_MECHANISM=PLAIN -e CONNECT_PRODUCER_SECURITY_PROTOCOL=SASL_SSL -e CONNECT_PRODUCER_SASL_JAAS_CONFIG=\"org.apache.kafka.common.security.plain.PlainLoginModule required username='\$CC_KAFKA_API_KEY' password='\$CC_KAFKA_API_SECRET';\" -e CONNECT_CONSUMER_SASL_MECHANISM=PLAIN -e CONNECT_CONSUMER_SECURITY_PROTOCOL=SASL_SSL -e CONNECT_CONSUMER_SASL_JAAS_CONFIG=\"org.apache.kafka.common.security.plain.PlainLoginModule required username='\$CC_KAFKA_API_KEY' password='\$CC_KAFKA_API_SECRET';\" quay.io/debezium/connect:2.6"
+    )
+else
+    DEPLOY_COMMANDS+=(
+        "export KAFKA_BOOTSTRAP_SERVERS='$KAFKA_BOOTSTRAP_SERVERS'"
+        "echo 'Configuring for standard Kafka...'"
+        "docker run -d --name kafka-connect-dsql --restart unless-stopped -p 8083:8083 -v ~/debezium-connector-dsql/connector:/kafka/connect/debezium-connector-dsql -e CONNECT_BOOTSTRAP_SERVERS=\"\$KAFKA_BOOTSTRAP_SERVERS\" -e CONNECT_REST_PORT=8083 -e CONNECT_REST_ADVERTISED_HOST_NAME=localhost -e CONNECT_GROUP_ID=dsql-connect-cluster -e CONNECT_CONFIG_STORAGE_TOPIC=dsql-connect-config -e CONNECT_OFFSET_STORAGE_TOPIC=dsql-connect-offsets -e CONNECT_STATUS_STORAGE_TOPIC=dsql-connect-status -e CONNECT_KEY_CONVERTER=org.apache.kafka.connect.json.JsonConverter -e CONNECT_VALUE_CONVERTER=org.apache.kafka.connect.json.JsonConverter -e CONNECT_KEY_CONVERTER_SCHEMAS_ENABLE=false -e CONNECT_VALUE_CONVERTER_SCHEMAS_ENABLE=false -e CONNECT_PLUGIN_PATH=/kafka/connect quay.io/debezium/connect:2.6"
+    )
+fi
+
+# Add remaining commands
+DEPLOY_COMMANDS+=(
     "echo ''"
     "echo '=== Waiting for Kafka Connect to start ==='"
     "sleep 10"

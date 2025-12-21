@@ -98,6 +98,7 @@ public class DsqlSourceTask extends SourceTask {
                     config.getDatabaseName(),
                     config.getPort(),
                     config.getIamUsername(),
+                    config.getRegion(),
                     config.getPoolMaxSize(),
                     config.getPoolMinIdle(),
                     config.getPoolConnectionTimeoutMs()
@@ -138,6 +139,20 @@ public class DsqlSourceTask extends SourceTask {
     
     @Override
     public List<SourceRecord> poll() throws InterruptedException {
+        // Validate required components are initialized
+        if (config == null) {
+            LOGGER.error("Configuration is null, cannot poll");
+            throw new ConnectException("DSQL source task not properly initialized: configuration is null");
+        }
+        if (changeEventSource == null) {
+            LOGGER.error("Change event source is null, cannot poll");
+            throw new ConnectException("DSQL source task not properly initialized: change event source is null");
+        }
+        if (connectionPool == null) {
+            LOGGER.error("Connection pool is null, cannot poll");
+            throw new ConnectException("DSQL source task not properly initialized: connection pool is null");
+        }
+        
         int maxRetries = 3;
         int retryCount = 0;
         long retryDelayMs = config.getPollIntervalMs();
@@ -163,15 +178,21 @@ public class DsqlSourceTask extends SourceTask {
                 errorsCount++;
                 retryCount++;
                 
+                String errorContext = String.format("table=%s, sqlState=%s, attempt=%d/%d", 
+                    tableName, e.getSQLState(), retryCount, maxRetries);
+                
                 if (isTransientError(e) && retryCount < maxRetries) {
-                    LOGGER.warn("Transient SQL error during poll (attempt {}/{}): {}", 
-                               retryCount, maxRetries, e.getMessage());
+                    LOGGER.warn("Transient SQL error during poll ({}): {} - {}", 
+                               errorContext, e.getClass().getSimpleName(), e.getMessage());
                     
                     // Attempt connection pool invalidation and failover
-                    connectionPool.invalidate();
+                    if (connectionPool != null) {
+                        connectionPool.invalidate();
+                    }
                     
                     // Try failover if using primary
-                    if (endpoint.isUsingPrimary() && config.getSecondaryEndpoint() != null) {
+                    if (endpoint != null && endpoint.isUsingPrimary() && 
+                        config != null && config.getSecondaryEndpoint() != null) {
                         endpoint.failover();
                     }
                     
@@ -179,12 +200,15 @@ public class DsqlSourceTask extends SourceTask {
                     long delay = retryDelayMs * (long) Math.pow(2, retryCount - 1);
                     Thread.sleep(Math.min(delay, config.getPollIntervalMs() * 10)); // Cap at 10x poll interval
                 } else {
-                    LOGGER.error("SQL error during poll (non-retryable or max retries reached): {}", 
-                               e.getMessage(), e);
+                    LOGGER.error("SQL error during poll (non-retryable or max retries reached) ({}): {} - {}", 
+                               errorContext, e.getClass().getSimpleName(), e.getMessage(), e);
                     
                     // Attempt connection pool invalidation and failover even on non-retryable errors
-                    connectionPool.invalidate();
-                    if (endpoint.isUsingPrimary() && config.getSecondaryEndpoint() != null) {
+                    if (connectionPool != null) {
+                        connectionPool.invalidate();
+                    }
+                    if (endpoint != null && endpoint.isUsingPrimary() && 
+                        config != null && config.getSecondaryEndpoint() != null) {
                         endpoint.failover();
                     }
                     
@@ -194,8 +218,13 @@ public class DsqlSourceTask extends SourceTask {
                 
             } catch (Exception e) {
                 errorsCount++;
-                LOGGER.error("Unexpected error during poll: {}", e.getMessage(), e);
-                Thread.sleep(config.getPollIntervalMs());
+                String errorContext = String.format("table=%s, errorType=%s", 
+                    tableName, e.getClass().getSimpleName());
+                LOGGER.error("Unexpected error during poll ({}): {} - {}", 
+                           errorContext, e.getClass().getSimpleName(), e.getMessage(), e);
+                if (config != null) {
+                    Thread.sleep(config.getPollIntervalMs());
+                }
                 return new ArrayList<>();
             }
         }
@@ -262,13 +291,32 @@ public class DsqlSourceTask extends SourceTask {
      * Validate that the table exists and has required columns.
      */
     private void validateTable() throws SQLException {
+        if (connectionPool == null) {
+            throw new ConnectException("Cannot validate table: connection pool is null");
+        }
+        if (tableName == null || tableName.isEmpty()) {
+            throw new ConnectException("Cannot validate table: table name is null or empty");
+        }
+        
         try (java.sql.Connection conn = connectionPool.getConnection()) {
+            if (conn == null) {
+                throw new ConnectException("Cannot validate table: failed to get database connection");
+            }
+            
             java.sql.DatabaseMetaData metadata = conn.getMetaData();
+            if (metadata == null) {
+                throw new ConnectException("Cannot validate table: failed to get database metadata");
+            }
             
             // Check if table exists
             try (java.sql.ResultSet tables = metadata.getTables(null, "public", tableName, null)) {
+                if (tables == null) {
+                    throw new ConnectException("Cannot validate table: failed to query table metadata");
+                }
                 if (!tables.next()) {
-                    throw new ConnectException("Table " + tableName + " does not exist in schema 'public'");
+                    throw new ConnectException(String.format(
+                        "Table '%s' does not exist in schema 'public'. Please verify the table name and schema.", 
+                        tableName));
                 }
             }
             
@@ -276,6 +324,10 @@ public class DsqlSourceTask extends SourceTask {
             // This is done in initializeSchema()
             
             LOGGER.debug("Table validation passed for: {}", tableName);
+        } catch (SQLException e) {
+            LOGGER.error("Failed to validate table '{}': {} - {}", tableName, e.getClass().getSimpleName(), e.getMessage(), e);
+            throw new ConnectException(String.format(
+                "Failed to validate table '%s': %s", tableName, e.getMessage()), e);
         }
     }
     

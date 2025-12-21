@@ -32,9 +32,9 @@ variable "memory_size" {
 }
 
 variable "timeout" {
-  description = "Lambda timeout in seconds (15 minutes for long-running load tests)"
+  description = "Lambda timeout in seconds (default: 300 = 5 minutes)"
   type        = number
-  default     = 900
+  default     = 300
 }
 
 variable "log_level" {

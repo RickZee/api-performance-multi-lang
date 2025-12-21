@@ -36,3 +36,9 @@ variable "bastion_role_arn" {
   type        = string
   default     = ""
 }
+
+variable "admin_email" {
+  description = "Admin email address for EC2 auto-stop notifications (optional, leave empty to disable notifications)"
+  type        = string
+  default     = ""
+}

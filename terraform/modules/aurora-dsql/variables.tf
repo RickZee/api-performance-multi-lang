@@ -30,3 +30,9 @@ variable "tags" {
   type        = map(string)
   default     = {}
 }
+
+variable "enable_data_api" {
+  description = "Enable RDS Data API (HTTP endpoint) for DSQL cluster"
+  type        = bool
+  default     = false
+}

@@ -148,6 +148,21 @@ output "aurora_dsql_host" {
   value       = var.enable_aurora_dsql_cluster ? module.aurora_dsql[0].dsql_host : null
 }
 
+output "aurora_dsql_cluster_arn" {
+  description = "Aurora DSQL cluster ARN"
+  value       = var.enable_aurora_dsql_cluster ? module.aurora_dsql[0].cluster_arn : null
+}
+
+output "aurora_dsql_data_api_enabled" {
+  description = "Whether RDS Data API is enabled for DSQL cluster"
+  value       = var.enable_aurora_dsql_cluster ? module.aurora_dsql[0].data_api_enabled : null
+}
+
+output "aurora_dsql_data_api_resource_arn" {
+  description = "ARN of DSQL cluster for use with RDS Data API (if enabled). Note: DSQL may not support RDS Data API."
+  value       = var.enable_aurora_dsql_cluster ? module.aurora_dsql[0].data_api_resource_arn : null
+}
+
 # Terraform State Backend Outputs
 output "terraform_state_bucket_name" {
   description = "S3 bucket name for Terraform state"

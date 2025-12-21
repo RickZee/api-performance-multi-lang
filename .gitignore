@@ -110,3 +110,4 @@ load-test/dsql-load-test/lambda/jmespath/
 load-test/dsql-load-test/lambda/s3transfer/
 load-test/dsql-load-test/lambda/urllib3/
 load-test/dsql-load-test/lambda/six.py
+load-test/dsql-load-test/results/

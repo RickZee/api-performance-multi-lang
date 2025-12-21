@@ -7,6 +7,8 @@ import com.zaxxer.hikari.HikariConfig;
 import com.zaxxer.hikari.HikariDataSource;
 
 import java.sql.Connection;
+import java.sql.Driver;
+import java.sql.DriverManager;
 import java.sql.SQLException;
 import java.util.concurrent.locks.ReentrantLock;
 
@@ -24,12 +26,14 @@ public class DsqlConnectionPool {
     private final String databaseName;
     private final int port;
     private final String iamUsername;
+    private final String region;
     private final int maxPoolSize;
     private final int minIdle;
     private final long connectionTimeoutMs;
     
     private volatile HikariDataSource dataSource;
     private final ReentrantLock poolLock = new ReentrantLock();
+    private static final int MAX_RETRY_ATTEMPTS = 3;
     
     /**
      * Get a connection from the pool.
@@ -38,23 +42,49 @@ public class DsqlConnectionPool {
      * @throws SQLException if connection fails
      */
     public Connection getConnection() throws SQLException {
-        HikariDataSource current = dataSource;
-        if (current != null && !current.isClosed()) {
+        return getConnectionWithRetry(MAX_RETRY_ATTEMPTS);
+    }
+    
+    /**
+     * Get a connection with retry logic to avoid stack overflow from recursive calls.
+     * 
+     * @param maxAttempts Maximum number of retry attempts
+     * @return SQL Connection
+     * @throws SQLException if connection fails after all retries
+     */
+    private Connection getConnectionWithRetry(int maxAttempts) throws SQLException {
+        for (int attempt = 0; attempt < maxAttempts; attempt++) {
             try {
-                return current.getConnection();
+                HikariDataSource current = dataSource;
+                if (current != null && !current.isClosed()) {
+                    try {
+                        return current.getConnection();
+                    } catch (SQLException e) {
+                        if (isRetryableError(e) && attempt < maxAttempts - 1) {
+                            LOGGER.warn("Connection error (attempt {}/{}), attempting failover: {}", 
+                                       attempt + 1, maxAttempts, e.getMessage());
+                            handleConnectionError();
+                            continue; // Retry with new connection
+                        }
+                        throw e;
+                    }
+                }
+                
+                // Need to create pool
+                return createPoolAndGetConnection();
+                
             } catch (SQLException e) {
-                if (isRetryableError(e)) {
-                    LOGGER.warn("Connection error, attempting failover: {}", e.getMessage());
+                if (isRetryableError(e) && attempt < maxAttempts - 1) {
+                    LOGGER.warn("Connection error (attempt {}/{}), attempting failover: {}", 
+                               attempt + 1, maxAttempts, e.getMessage());
                     handleConnectionError();
-                    // Retry with new connection
-                    return getConnection();
+                    continue;
                 }
                 throw e;
             }
         }
         
-        // Need to create pool
-        return createPoolAndGetConnection();
+        throw new SQLException("Failed to get connection after " + maxAttempts + " attempts");
     }
     
     /**
@@ -77,26 +107,71 @@ public class DsqlConnectionPool {
             String originalHostnameVerifier = System.getProperty("com.sun.net.ssl.checkRevocation");
             System.setProperty("jdk.tls.client.protocols", "TLSv1.2");
             
+            LOGGER.info("About to enter driver registration try block");
             try {
+                LOGGER.info("Inside driver registration try block - starting driver load");
+                // Explicitly load the DSQL connector driver class using the plugin's classloader
+                // Kafka Connect's plugin isolation prevents ServiceLoader from finding drivers
+                // in the plugin's classpath, so we need to load it explicitly
+                LOGGER.info("Attempting to load AWS DSQL JDBC connector driver class using plugin classloader...");
+                try {
+                    // Use the current thread's context classloader (which should be the plugin classloader)
+                    ClassLoader pluginClassLoader = Thread.currentThread().getContextClassLoader();
+                    if (pluginClassLoader == null) {
+                        pluginClassLoader = this.getClass().getClassLoader();
+                    }
+                    LOGGER.info("Using classloader: {}", pluginClassLoader.getClass().getName());
+                    
+                    Class<?> driverClass = Class.forName("software.amazon.dsql.jdbc.DSQLConnector", true, pluginClassLoader);
+                    LOGGER.info("DSQL connector driver class loaded successfully: {}", driverClass.getName());
+                    
+                    java.sql.Driver driver = (java.sql.Driver) driverClass.getDeclaredConstructor().newInstance();
+                    LOGGER.info("DSQL connector driver instance created successfully");
+                    
+                    java.sql.DriverManager.registerDriver(new DriverShim(driver));
+                    LOGGER.info("Successfully registered AWS DSQL JDBC connector driver with DriverManager");
+                } catch (ClassNotFoundException e) {
+                    LOGGER.error("DSQL connector driver class not found: software.amazon.dsql.jdbc.DSQLConnector. " +
+                               "Make sure aurora-dsql-jdbc-connector dependency is included in the JAR. Error: {}", e.getMessage(), e);
+                    throw new SQLException("DSQL connector driver class not found", e);
+                } catch (Exception e) {
+                    LOGGER.error("Failed to explicitly register DSQL driver: {}", e.getMessage(), e);
+                    throw new SQLException("Failed to register DSQL connector driver", e);
+                }
+                
                 HikariConfig config = new HikariConfig();
+                
+                // Use AWS DSQL-specific JDBC URL format
+                // The connector automatically handles IAM token generation
                 config.setJdbcUrl(connectionString);
+                
+                // Explicitly set driver class to ensure HikariCP uses the DSQL connector
+                // This is necessary because Kafka Connect plugin isolation prevents ServiceLoader
+                // from finding drivers in the plugin classpath
+                config.setDriverClassName("software.amazon.dsql.jdbc.DSQLConnector");
+                
+                // Set username explicitly (connector uses this for IAM authentication)
+                config.setUsername(iamUsername);
+                
                 config.setMaximumPoolSize(maxPoolSize);
                 config.setMinimumIdle(minIdle);
                 config.setConnectionTimeout(connectionTimeoutMs);
                 config.setIdleTimeout(600000); // 10 minutes
-                config.setMaxLifetime(1800000); // 30 minutes
+                config.setMaxLifetime(1800000); // 30 minutes (less than token expiration)
                 config.setLeakDetectionThreshold(60000); // 1 minute
                 config.setPoolName("DSQL-ConnectionPool");
+                
+                // AWS DSQL connector configuration
+                // Connector automatically uses DefaultCredentialsProvider from EC2 instance profile
+                config.addDataSourceProperty("region", region);
                 
                 // PostgreSQL-specific settings
                 config.addDataSourceProperty("cachePrepStmts", "true");
                 config.addDataSourceProperty("prepStmtCacheSize", "250");
                 config.addDataSourceProperty("prepStmtCacheSqlLimit", "2048");
                 
-                // DSQL SSL settings - require SSL but allow any hostname for VPC endpoints
+                // DSQL SSL settings (required for DSQL)
                 config.addDataSourceProperty("ssl", "true");
-                config.addDataSourceProperty("sslmode", "require");
-                // Disable hostname verification for VPC endpoint SNI compatibility
                 config.addDataSourceProperty("sslfactory", "org.postgresql.ssl.DefaultJavaSSLFactory");
                 
                 dataSource = new HikariDataSource(config);
@@ -115,32 +190,35 @@ public class DsqlConnectionPool {
     }
     
     public DsqlConnectionPool(MultiRegionEndpoint endpoint, IamTokenGenerator tokenGenerator,
-                              String databaseName, int port, String iamUsername, int maxPoolSize, int minIdle,
-                              long connectionTimeoutMs) {
+                              String databaseName, int port, String iamUsername, String region,
+                              int maxPoolSize, int minIdle, long connectionTimeoutMs) {
         this.endpoint = endpoint;
         this.tokenGenerator = tokenGenerator;
         this.databaseName = databaseName;
         this.port = port;
         this.iamUsername = iamUsername;
+        this.region = region;
         this.maxPoolSize = maxPoolSize;
         this.minIdle = minIdle;
         this.connectionTimeoutMs = connectionTimeoutMs;
     }
     
     /**
-     * Build JDBC connection string with IAM token.
+     * Build JDBC connection string using AWS DSQL-specific format.
      * 
-     * For DSQL VPC endpoints, we connect to the VPC endpoint hostname
-     * but the SNI (Server Name Indication) in SSL handshake must match
-     * what DSQL expects. SSL parameters are configured via HikariCP properties.
+     * Uses jdbc:aws-dsql:postgresql:// format with IAM username.
+     * The AWS DSQL JDBC connector automatically handles IAM token generation.
+     * 
+     * Matches the approach used in load-test/dsql-load-test-java/DSQLConnection.java
+     * Note: No password/token needed - the connector handles IAM auth automatically
      */
     private String buildConnectionString() {
-        String token = tokenGenerator.getToken();
         String currentEndpoint = endpoint.getCurrentEndpoint();
-        // Basic connection string - SSL is configured via HikariCP data source properties
-        // The connection will use SSL but hostname verification is handled separately
-        return String.format("jdbc:postgresql://%s:%d/%s?user=%s&password=%s&sslmode=require",
-                           currentEndpoint, port, databaseName, iamUsername, token);
+        // AWS DSQL JDBC URL format - connector automatically handles IAM auth
+        // token-duration-secs=900 matches 15-minute token validity
+        // Matches exactly: load-test/dsql-load-test-java/src/main/java/com/loadtest/dsql/DSQLConnection.java:69
+        return String.format("jdbc:aws-dsql:postgresql://%s:%d/%s?user=%s&sslmode=require&token-duration-secs=900",
+                           currentEndpoint, port, databaseName, iamUsername);
     }
     
     /**
@@ -224,6 +302,53 @@ public class DsqlConnectionPool {
             }
         } finally {
             poolLock.unlock();
+        }
+    }
+    
+    /**
+     * Wrapper class to register a JDBC driver that doesn't implement DriverManager registration.
+     * This is needed for Kafka Connect plugin isolation where ServiceLoader doesn't work.
+     */
+    private static class DriverShim implements Driver {
+        private final Driver driver;
+        
+        DriverShim(Driver driver) {
+            this.driver = driver;
+        }
+        
+        @Override
+        public Connection connect(String url, java.util.Properties info) throws SQLException {
+            return driver.connect(url, info);
+        }
+        
+        @Override
+        public boolean acceptsURL(String url) throws SQLException {
+            return driver.acceptsURL(url);
+        }
+        
+        @Override
+        public java.sql.DriverPropertyInfo[] getPropertyInfo(String url, java.util.Properties info) throws SQLException {
+            return driver.getPropertyInfo(url, info);
+        }
+        
+        @Override
+        public int getMajorVersion() {
+            return driver.getMajorVersion();
+        }
+        
+        @Override
+        public int getMinorVersion() {
+            return driver.getMinorVersion();
+        }
+        
+        @Override
+        public boolean jdbcCompliant() {
+            return driver.jdbcCompliant();
+        }
+        
+        @Override
+        public java.util.logging.Logger getParentLogger() throws java.sql.SQLFeatureNotSupportedException {
+            return driver.getParentLogger();
         }
     }
 }

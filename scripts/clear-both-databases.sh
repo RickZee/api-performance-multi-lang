@@ -2,7 +2,8 @@
 # Clear all rows from both Aurora PostgreSQL and DSQL databases
 # Usage: ./scripts/clear-both-databases.sh
 
-set -e
+# Don't exit on error - we want to continue with DSQL even if Aurora fails
+set +e
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
@@ -24,11 +25,17 @@ AURORA_ENDPOINT=""
 AURORA_PASSWORD=""
 AURORA_USER="postgres"
 AURORA_DATABASE="car_entities"
+AURORA_CLUSTER_ID=""
+AWS_REGION=""
 
 if [ -f "$PROJECT_ROOT/terraform/terraform.tfvars" ]; then
-    AURORA_ENDPOINT=$(cd "$PROJECT_ROOT/terraform" && terraform output -raw aurora_endpoint 2>/dev/null || echo "")
+    cd "$PROJECT_ROOT/terraform" || exit 1
+    AURORA_ENDPOINT=$(terraform output -raw aurora_endpoint 2>/dev/null || echo "")
+    AURORA_CLUSTER_ID=$(terraform output -raw aurora_cluster_id 2>/dev/null || echo "")
+    AWS_REGION=$(terraform output -raw aws_region 2>/dev/null || echo "us-east-1")
     RAW_PASSWORD=$(grep database_password "$PROJECT_ROOT/terraform/terraform.tfvars" | cut -d'"' -f2 || echo "")
     AURORA_PASSWORD=$(echo "$RAW_PASSWORD" | tr -d '\n\r' | head -c 32)
+    cd "$PROJECT_ROOT" || exit 1
 fi
 
 # Clear Aurora PostgreSQL
@@ -36,35 +43,59 @@ if [ -n "$AURORA_ENDPOINT" ] && [ -n "$AURORA_PASSWORD" ]; then
     echo -e "${BLUE}Clearing Aurora PostgreSQL...${NC}"
     echo "Endpoint: $AURORA_ENDPOINT"
     
-    # SQL to truncate all tables in correct order
-    CLEAR_SQL="
-    TRUNCATE TABLE 
-        loan_payment_entities,
-        service_record_entities,
-        loan_entities,
-        car_entities,
-        event_headers,
-        business_events
-    CASCADE;
-    
-    -- Reset sequences if any
-    ALTER SEQUENCE IF EXISTS service_record_entities_id_seq RESTART WITH 1;
-    "
-    
-    if command -v psql &> /dev/null; then
-        PGPASSWORD="$AURORA_PASSWORD" psql \
-            -h "$AURORA_ENDPOINT" \
-            -U "$AURORA_USER" \
-            -d "$AURORA_DATABASE" \
-            -c "$CLEAR_SQL" && {
-            echo -e "${GREEN}✅ Aurora PostgreSQL cleared successfully${NC}"
-        } || {
-            echo -e "${RED}❌ Failed to clear Aurora PostgreSQL${NC}"
-            exit 1
-        }
+    # Check if Aurora cluster is running before attempting to clear
+    AURORA_CLEAR_ENABLED=true
+    if [ -n "$AURORA_CLUSTER_ID" ]; then
+        echo -e "${BLUE}Checking Aurora PostgreSQL cluster status...${NC}"
+        AURORA_STATUS=$(aws rds describe-db-clusters \
+            --db-cluster-identifier "$AURORA_CLUSTER_ID" \
+            --region "$AWS_REGION" \
+            --query 'DBClusters[0].Status' \
+            --output text 2>/dev/null || echo "unknown")
+        
+        if [ "$AURORA_STATUS" = "unknown" ]; then
+            echo -e "${YELLOW}⚠️  Could not determine Aurora cluster status, attempting to proceed...${NC}"
+        elif [ "$AURORA_STATUS" != "available" ]; then
+            echo -e "${YELLOW}⚠️  Aurora PostgreSQL cluster is not available (status: $AURORA_STATUS)${NC}"
+            echo -e "${YELLOW}⚠️  Skipping Aurora PostgreSQL clear - cluster must be in 'available' state${NC}"
+            echo -e "${BLUE}   To start the cluster, use: aws rds start-db-cluster --db-cluster-identifier $AURORA_CLUSTER_ID --region $AWS_REGION${NC}"
+            AURORA_CLEAR_ENABLED=false
+        else
+            echo -e "${GREEN}✅ Aurora PostgreSQL cluster is available (status: $AURORA_STATUS)${NC}"
+        fi
     else
-        # Use Python if psql is not available
-        python3 << EOF
+        echo -e "${YELLOW}⚠️  Aurora cluster ID not found, skipping status check${NC}"
+    fi
+    
+    if [ "$AURORA_CLEAR_ENABLED" = "true" ]; then
+        # SQL to truncate all tables in correct order
+    CLEAR_SQL="
+        TRUNCATE TABLE 
+            loan_payment_entities,
+            service_record_entities,
+            loan_entities,
+            car_entities,
+            event_headers,
+            business_events
+        CASCADE;
+        
+        -- Reset sequences if any
+        ALTER SEQUENCE IF EXISTS service_record_entities_id_seq RESTART WITH 1;
+        "
+        
+        if command -v psql &> /dev/null; then
+            PGPASSWORD="$AURORA_PASSWORD" psql \
+                -h "$AURORA_ENDPOINT" \
+                -U "$AURORA_USER" \
+                -d "$AURORA_DATABASE" \
+                -c "$CLEAR_SQL" && {
+                echo -e "${GREEN}✅ Aurora PostgreSQL cleared successfully${NC}"
+            } || {
+                echo -e "${YELLOW}⚠️  Failed to clear Aurora PostgreSQL (continuing with DSQL)${NC}"
+            }
+        else
+            # Use Python if psql is not available
+            python3 << EOF
 import psycopg2
 import sys
 
@@ -102,6 +133,9 @@ except Exception as e:
     print(f"❌ Failed to clear Aurora PostgreSQL: {e}", file=sys.stderr)
     sys.exit(1)
 EOF
+        fi
+    else
+        echo -e "${YELLOW}⚠️  Aurora PostgreSQL clear skipped due to cluster status${NC}"
     fi
 else
     echo -e "${YELLOW}⚠️  Skipping Aurora PostgreSQL (endpoint/password not found)${NC}"
@@ -122,27 +156,68 @@ if [ -f "$PROJECT_ROOT/scripts/query-dsql.sh" ]; then
     else
         echo "DSQL Host: $DSQL_HOST"
         
-        # DSQL doesn't support TRUNCATE, so we use DELETE
-        # Delete in order to respect foreign key constraints
-        # Execute each DELETE in a separate command to avoid transaction row limit
-        cd "$PROJECT_ROOT"
+        # Get DSQL cluster resource ID and AWS region for status check
+        DSQL_CLUSTER_RESOURCE_ID=$(terraform output -raw aurora_dsql_cluster_resource_id 2>/dev/null || echo "")
+        if [ -z "$AWS_REGION" ]; then
+            AWS_REGION=$(terraform output -raw aws_region 2>/dev/null || echo "us-east-1")
+        fi
         
-        # Get bastion host instance ID
-        BASTION_INSTANCE_ID=$(cd terraform && terraform output -raw bastion_host_instance_id 2>/dev/null || echo "")
-        AWS_REGION=$(cd terraform && terraform output -raw aws_region 2>/dev/null || echo "us-east-1")
-        
-        if [ -z "$BASTION_INSTANCE_ID" ]; then
-            echo -e "${YELLOW}⚠️  Bastion host not found, cannot clear DSQL${NC}"
-        else
-            # Tables to clear in order (respecting foreign key constraints)
-            TABLES=("loan_payment_entities" "service_record_entities" "loan_entities" "car_entities" "event_headers" "business_events")
+        # Check if DSQL cluster is running before attempting to clear
+        DSQL_CLEAR_ENABLED=true
+        if [ -n "$DSQL_CLUSTER_RESOURCE_ID" ]; then
+            echo -e "${BLUE}Checking DSQL cluster status...${NC}"
+            DSQL_STATUS=$(aws dsql describe-cluster \
+                --cluster-resource-id "$DSQL_CLUSTER_RESOURCE_ID" \
+                --region "$AWS_REGION" \
+                --query 'Status' \
+                --output text 2>/dev/null || echo "unknown")
             
-            for TABLE in "${TABLES[@]}"; do
-                echo "  Clearing $TABLE..."
+            if [ "$DSQL_STATUS" = "unknown" ]; then
+                echo -e "${YELLOW}⚠️  Could not determine DSQL cluster status, attempting to proceed...${NC}"
+            elif [ "$DSQL_STATUS" != "available" ]; then
+                echo -e "${YELLOW}⚠️  DSQL cluster is not available (status: $DSQL_STATUS)${NC}"
+                echo -e "${YELLOW}⚠️  Skipping DSQL clear - cluster must be in 'available' state${NC}"
+                echo -e "${BLUE}   To start the cluster, use: aws dsql update-cluster --cluster-resource-id $DSQL_CLUSTER_RESOURCE_ID --scaling-configuration MinCapacity=1 --region $AWS_REGION${NC}"
+                DSQL_CLEAR_ENABLED=false
+            else
+                echo -e "${GREEN}✅ DSQL cluster is available (status: $DSQL_STATUS)${NC}"
+            fi
+        else
+            echo -e "${YELLOW}⚠️  DSQL cluster resource ID not found, skipping status check${NC}"
+        fi
+        
+        if [ "$DSQL_CLEAR_ENABLED" = "true" ]; then
+            # Drop and recreate all tables instead of deleting rows
+            cd "$PROJECT_ROOT"
+            
+            echo -e "${BLUE}Dropping and recreating DSQL tables...${NC}"
+            
+            # Use the recreate-dsql-tables.sh script
+            if [ -f "$PROJECT_ROOT/scripts/recreate-dsql-tables.sh" ]; then
+                "$PROJECT_ROOT/scripts/recreate-dsql-tables.sh"
+                if [ $? -eq 0 ]; then
+                    echo -e "${GREEN}✅ DSQL tables dropped and recreated successfully${NC}"
+                else
+                    echo -e "${RED}❌ Failed to drop and recreate DSQL tables${NC}"
+                fi
+            else
+                echo -e "${YELLOW}⚠️  recreate-dsql-tables.sh not found, falling back to DELETE method${NC}"
                 
-                # Build command for this table
-                # Use fully qualified table name with schema: car_entities_schema.table_name
-                COMMANDS_JSON=$(jq -n \
+                # Get bastion host instance ID
+                BASTION_INSTANCE_ID=$(cd terraform && terraform output -raw bastion_host_instance_id 2>/dev/null || echo "")
+                
+                if [ -z "$BASTION_INSTANCE_ID" ]; then
+                    echo -e "${YELLOW}⚠️  Bastion host not found, cannot clear DSQL${NC}"
+                else
+                    # Tables to clear in order (respecting foreign key constraints)
+                    TABLES=("loan_payment_entities" "service_record_entities" "loan_entities" "car_entities" "event_headers" "business_events")
+                    
+                    for TABLE in "${TABLES[@]}"; do
+                        echo "  Clearing $TABLE..."
+                    
+                    # Build command for this table
+                    # Use fully qualified table name with schema: car_entities_schema.table_name
+                    COMMANDS_JSON=$(jq -n \
                     --arg dsql_host "$DSQL_HOST" \
                     --arg aws_region "$AWS_REGION" \
                     --arg table "$TABLE" \
@@ -153,63 +228,72 @@ if [ -f "$PROJECT_ROOT/scripts/query-dsql.sh" ]; then
                         "export PGPASSWORD=$TOKEN",
                         "psql -h $DSQL_HOST -U admin -d postgres -p 5432 -c \"SET search_path TO car_entities_schema; DELETE FROM " + $table + ";\""
                     ]')
-                
-                # Send command to bastion host
-                COMMAND_ID=$(aws ssm send-command \
+                    
+                    # Send command to bastion host
+                    COMMAND_ID=$(aws ssm send-command \
                     --instance-ids "$BASTION_INSTANCE_ID" \
                     --region "$AWS_REGION" \
                     --document-name "AWS-RunShellScript" \
                     --parameters "{\"commands\":$COMMANDS_JSON}" \
                     --output json 2>&1 | jq -r '.Command.CommandId' 2>&1)
-                
-                if [ -z "$COMMAND_ID" ] || [ "$COMMAND_ID" = "null" ]; then
-                    echo -e "${RED}❌ Failed to send command for $TABLE${NC}"
-                    continue
-                fi
-                
-                # Wait for command to complete
-                sleep 10
-                
-                # Get command status
-                STATUS=$(aws ssm get-command-invocation \
+                    
+                    if [ -z "$COMMAND_ID" ] || [ "$COMMAND_ID" = "null" ]; then
+                        echo -e "${RED}❌ Failed to send command for $TABLE${NC}"
+                        continue
+                    fi
+                    
+                    # Wait for command to complete
+                    sleep 10
+                    
+                    # Get command status
+                    STATUS=$(aws ssm get-command-invocation \
                     --command-id "$COMMAND_ID" \
                     --instance-id "$BASTION_INSTANCE_ID" \
                     --region "$AWS_REGION" \
                     --query "Status" \
                     --output text 2>&1)
-                
-                if [ "$STATUS" = "Success" ]; then
-                    OUTPUT=$(aws ssm get-command-invocation \
+                    
+                    if [ "$STATUS" = "Success" ]; then
+                        OUTPUT=$(aws ssm get-command-invocation \
                         --command-id "$COMMAND_ID" \
                         --instance-id "$BASTION_INSTANCE_ID" \
                         --region "$AWS_REGION" \
                         --query "StandardOutputContent" \
                         --output text 2>&1)
-                    # Extract DELETE count if available (using sed instead of grep -P for macOS compatibility)
-                    DELETE_COUNT=$(echo "$OUTPUT" | sed -n 's/.*DELETE \([0-9]*\).*/\1/p' | head -1 || echo "unknown")
-                    echo "    ✅ Cleared $TABLE ($DELETE_COUNT rows)"
-                else
-                    ERROR=$(aws ssm get-command-invocation \
+                        # Extract DELETE count if available (using sed instead of grep -P for macOS compatibility)
+                        DELETE_COUNT=$(echo "$OUTPUT" | sed -n 's/.*DELETE \([0-9]*\).*/\1/p' | head -1 || echo "unknown")
+                        echo "    ✅ Cleared $TABLE ($DELETE_COUNT rows)"
+                    else
+                        ERROR=$(aws ssm get-command-invocation \
                         --command-id "$COMMAND_ID" \
                         --instance-id "$BASTION_INSTANCE_ID" \
                         --region "$AWS_REGION" 2>&1 | jq -r '.StandardErrorContent // .Status' 2>&1)
-                    # Check if it's the transaction row limit error
-                    if echo "$ERROR" | grep -q "transaction row limit exceeded"; then
-                        echo -e "    ${YELLOW}⚠️  $TABLE has too many rows, deleting in batches...${NC}"
-                        # DSQL doesn't support DO blocks, so we use a bash loop
-                        # Delete in batches of 500 rows (well under 3000 limit)
-                        BATCH_SIZE=500
-                        MAX_ITERATIONS=1000  # Safety limit
-                        TOTAL_DELETED=0
-                        ITERATION=0
-                        
-                        while [ $ITERATION -lt $MAX_ITERATIONS ]; do
-                            ITERATION=$((ITERATION + 1))
+                        # Check if it's the transaction row limit error
+                        if echo "$ERROR" | grep -q "transaction row limit exceeded"; then
+                            echo -e "    ${YELLOW}⚠️  $TABLE has too many rows, deleting in batches...${NC}"
+                            # DSQL doesn't support DO blocks, so we use a bash loop
+                            # Delete in batches of 500 rows (well under 3000 limit)
+                            BATCH_SIZE=500
+                            MAX_ITERATIONS=1000  # Safety limit
+                            TOTAL_DELETED=0
+                            ITERATION=0
                             
-                            # Build batch delete command with schema
-                            BATCH_DELETE_SQL="SET search_path TO car_entities_schema; DELETE FROM $TABLE WHERE id IN (SELECT id FROM $TABLE LIMIT $BATCH_SIZE);"
-                            
-                            BATCH_COMMANDS_JSON=$(jq -n \
+                            while [ $ITERATION -lt $MAX_ITERATIONS ]; do
+                                ITERATION=$((ITERATION + 1))
+                                
+                                # Determine the primary key column name based on table
+                                if [[ "$TABLE" == *"_entities" ]]; then
+                                    # Entity tables use entity_id as primary key
+                                    PK_COLUMN="entity_id"
+                                else
+                                    # Event tables use id as primary key
+                                    PK_COLUMN="id"
+                                fi
+                                
+                                # Build batch delete command with schema
+                                BATCH_DELETE_SQL="SET search_path TO car_entities_schema; DELETE FROM $TABLE WHERE $PK_COLUMN IN (SELECT $PK_COLUMN FROM $TABLE LIMIT $BATCH_SIZE);"
+                                
+                                BATCH_COMMANDS_JSON=$(jq -n \
                                 --arg dsql_host "$DSQL_HOST" \
                                 --arg aws_region "$AWS_REGION" \
                                 --arg sql "$BATCH_DELETE_SQL" \
@@ -250,18 +334,57 @@ if [ -f "$PROJECT_ROOT/scripts/query-dsql.sh" ]; then
                                     --query "StandardOutputContent" \
                                     --output text 2>&1)
                                 
-                                # Extract DELETE count
-                                DELETED_COUNT=$(echo "$BATCH_OUTPUT" | sed -n 's/.*DELETE \([0-9]*\).*/\1/p' | head -1 || echo "0")
+                                # Extract DELETE count - try multiple patterns
+                                DELETED_COUNT=$(echo "$BATCH_OUTPUT" | grep -oE "DELETE [0-9]+" | grep -oE "[0-9]+" | head -1 || echo "0")
                                 
+                                # If we can't extract count, try to verify by checking if output contains DELETE
+                                if [ "$DELETED_COUNT" = "0" ] && echo "$BATCH_OUTPUT" | grep -q "DELETE"; then
+                                    # Try alternative extraction
+                                    DELETED_COUNT=$(echo "$BATCH_OUTPUT" | sed -n 's/.*DELETE[[:space:]]*\([0-9]*\).*/\1/p' | head -1 || echo "0")
+                                fi
+                                
+                                # If still 0, check if there are actually rows left
                                 if [ "$DELETED_COUNT" = "0" ] || [ -z "$DELETED_COUNT" ]; then
-                                    # No more rows to delete
+                                    # Verify by checking row count
+                                    VERIFY_SQL="SET search_path TO car_entities_schema; SELECT COUNT(*) FROM $TABLE;"
+                                    VERIFY_COMMANDS_JSON=$(jq -n \
+                                        --arg dsql_host "$DSQL_HOST" \
+                                        --arg aws_region "$AWS_REGION" \
+                                        --arg sql "$VERIFY_SQL" \
+                                        '[
+                                            "export DSQL_HOST=" + $dsql_host,
+                                            "export AWS_REGION=" + $aws_region,
+                                            "TOKEN=$(aws dsql generate-db-connect-admin-auth-token --region $AWS_REGION --hostname $DSQL_HOST)",
+                                            "export PGPASSWORD=$TOKEN",
+                                            "psql -h $DSQL_HOST -U admin -d postgres -p 5432 -t -c \u0027" + $sql + "\u0027"
+                                        ]')
+                                    VERIFY_COMMAND_ID=$(aws ssm send-command \
+                                        --instance-ids "$BASTION_INSTANCE_ID" \
+                                        --region "$AWS_REGION" \
+                                        --document-name "AWS-RunShellScript" \
+                                        --parameters "{\"commands\":$VERIFY_COMMANDS_JSON}" \
+                                        --output json 2>&1 | jq -r '.Command.CommandId' 2>&1)
+                                    sleep 3
+                                    if [ -n "$VERIFY_COMMAND_ID" ] && [ "$VERIFY_COMMAND_ID" != "null" ]; then
+                                        VERIFY_OUTPUT=$(aws ssm get-command-invocation \
+                                            --command-id "$VERIFY_COMMAND_ID" \
+                                            --instance-id "$BASTION_INSTANCE_ID" \
+                                            --region "$AWS_REGION" \
+                                            --query "StandardOutputContent" \
+                                            --output text 2>&1 | tr -d '[:space:]' || echo "0")
+                                        if [ "$VERIFY_OUTPUT" = "0" ] || [ -z "$VERIFY_OUTPUT" ]; then
+                                            # Table is empty, we're done
+                                            break
+                                        fi
+                                    fi
+                                    # If we can't verify and got 0 deleted, assume we're done
                                     break
                                 fi
                                 
                                 TOTAL_DELETED=$((TOTAL_DELETED + DELETED_COUNT))
                                 
-                                # Progress update every 10 iterations
-                                if [ $((ITERATION % 10)) -eq 0 ]; then
+                                # Progress update every 10 iterations or every 5000 rows
+                                if [ $((ITERATION % 10)) -eq 0 ] || [ $TOTAL_DELETED -ge $((ITERATION * 500)) ]; then
                                     echo -e "      ${BLUE}Progress: $TOTAL_DELETED rows deleted (iteration $ITERATION)...${NC}"
                                 fi
                             else
@@ -277,18 +400,22 @@ if [ -f "$PROJECT_ROOT/scripts/query-dsql.sh" ]; then
                             fi
                         done
                         
-                        if [ $TOTAL_DELETED -gt 0 ]; then
-                            echo -e "    ${GREEN}✅ Cleared $TABLE ($TOTAL_DELETED rows in $ITERATION iterations)${NC}"
+                            if [ $TOTAL_DELETED -gt 0 ]; then
+                                echo -e "    ${GREEN}✅ Cleared $TABLE ($TOTAL_DELETED rows in $ITERATION iterations)${NC}"
+                            else
+                                echo -e "    ${YELLOW}⚠️  Could not determine deletion count for $TABLE${NC}"
+                            fi
                         else
-                            echo -e "    ${YELLOW}⚠️  Could not determine deletion count for $TABLE${NC}"
+                            echo -e "    ${RED}❌ Failed to clear $TABLE: $ERROR${NC}"
                         fi
-                    else
-                        echo -e "    ${RED}❌ Failed to clear $TABLE: $ERROR${NC}"
                     fi
+                    done
+                    
+                    echo -e "${GREEN}✅ DSQL clear operations completed${NC}"
                 fi
-            done
-            
-            echo -e "${GREEN}✅ DSQL clear operations completed${NC}"
+            fi
+        else
+            echo -e "${YELLOW}⚠️  DSQL clear skipped due to cluster status${NC}"
         fi
     fi
 else

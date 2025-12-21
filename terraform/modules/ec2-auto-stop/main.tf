@@ -107,12 +107,53 @@ resource "aws_iam_role_policy" "ec2_auto_stop_ssm_cloudtrail" {
   })
 }
 
+# IAM policy for SNS notifications
+resource "aws_iam_role_policy" "ec2_auto_stop_sns" {
+  count = var.admin_email != "" ? 1 : 0
+  name  = "${var.function_name}-sns-policy"
+  role  = aws_iam_role.ec2_auto_stop.id
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect = "Allow"
+        Action = [
+          "sns:Publish"
+        ]
+        Resource = aws_sns_topic.ec2_auto_stop_notifications[0].arn
+      }
+    ]
+  })
+}
+
 # CloudWatch Log Group
 resource "aws_cloudwatch_log_group" "ec2_auto_stop" {
   name              = "/aws/lambda/${var.function_name}"
   retention_in_days = var.cloudwatch_logs_retention_days
 
   tags = var.tags
+}
+
+# SNS Topic for EC2 auto-stop notifications
+resource "aws_sns_topic" "ec2_auto_stop_notifications" {
+  count = var.admin_email != "" ? 1 : 0
+  name  = "${var.function_name}-notifications"
+
+  tags = merge(
+    var.tags,
+    {
+      Name = "${var.function_name}-notifications"
+    }
+  )
+}
+
+# SNS Email Subscription (requires confirmation)
+resource "aws_sns_topic_subscription" "ec2_auto_stop_email" {
+  count     = var.admin_email != "" ? 1 : 0
+  topic_arn = aws_sns_topic.ec2_auto_stop_notifications[0].arn
+  protocol  = "email"
+  endpoint  = var.admin_email
 }
 
 # Lambda function code (inline)
@@ -135,12 +176,14 @@ def handler(event, context):
     region = os.environ['AWS_REGION']
     inactivity_hours = int(os.environ.get('INACTIVITY_HOURS', '3'))
     bastion_role_arn = os.environ.get('BASTION_ROLE_ARN', '')
+    sns_topic_arn = os.environ.get('SNS_TOPIC_ARN', '')
     
     ec2 = boto3.client('ec2', region_name=region)
     cloudwatch = boto3.client('cloudwatch', region_name=region)
     logs = boto3.client('logs', region_name=region)
     ssm = boto3.client('ssm', region_name=region)
     cloudtrail = boto3.client('cloudtrail', region_name=region)
+    sns = boto3.client('sns', region_name=region) if sns_topic_arn else None
     
     # Check current instance status
     try:
@@ -296,7 +339,9 @@ def handler(event, context):
         
         # Check if there was any significant activity
         # Increased CPU threshold to 5% to avoid false positives from baseline system activity
-        # Network threshold remains at 1MB to catch actual data transfers
+        # Network threshold increased to 20MB (over 3 hours) to avoid false positives from
+        # baseline system activity (CloudWatch agent, SSM agent, health checks, etc.)
+        # Typical baseline: ~2-3MB/hour = ~6-9MB over 3 hours
         cpu_values = [point['Average'] for point in cpu_response.get('Datapoints', [])]
         network_in_values = [point['Sum'] for point in network_in_response.get('Datapoints', [])]
         network_out_values = [point['Sum'] for point in network_out_response.get('Datapoints', [])]
@@ -305,9 +350,11 @@ def handler(event, context):
         total_network_in = sum(network_in_values) if network_in_values else 0
         total_network_out = sum(network_out_values) if network_out_values else 0
         
-        # 1MB = 1048576 bytes
-        # CPU threshold increased to 5% to distinguish real usage from baseline activity
-        if max_cpu > 5.0 or total_network_in > 1048576 or total_network_out > 1048576:
+        # 20MB = 20971520 bytes (over 3 hours)
+        # This allows for baseline system activity (~6-9MB) while catching real usage
+        # CPU threshold: 5% to distinguish real usage from baseline activity
+        network_threshold_bytes = 20971520  # 20MB
+        if max_cpu > 5.0 or total_network_in > network_threshold_bytes or total_network_out > network_threshold_bytes:
             metrics_activity = True
             print(f"Instance {instance_id} activity detected: CPU={max_cpu:.2f}%, NetworkIn={total_network_in:.0f} bytes, NetworkOut={total_network_out:.0f} bytes")
     except Exception as e:
@@ -338,6 +385,35 @@ def handler(event, context):
     try:
         print(f"No activity detected for {inactivity_hours} hours, stopping instance {instance_id}")
         ec2.stop_instances(InstanceIds=[instance_id])
+        
+        # Send email notification if SNS topic is configured
+        if sns and sns_topic_arn:
+            try:
+                timestamp = datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S UTC')
+                subject = f"Bastion Host Stopped - {instance_id}"
+                message = f"""The bastion host EC2 instance '{instance_id}' has been automatically stopped due to inactivity.
+
+Details:
+- Instance ID: {instance_id}
+- Stopped at: {timestamp}
+- Reason: No activity detected for {inactivity_hours} hours
+- Activity check results:
+  * SSM sessions: {ssm_activity}
+  * DSQL API calls: {dsql_activity}
+  * CloudWatch metrics: {metrics_activity}
+- Region: {region}
+
+The instance can be started manually via AWS Console or CLI when needed."""
+                
+                sns.publish(
+                    TopicArn=sns_topic_arn,
+                    Subject=subject,
+                    Message=message
+                )
+                print(f"Notification sent to SNS topic: {sns_topic_arn}")
+            except Exception as e:
+                # Log error but don't fail the Lambda execution
+                print(f"Warning: Failed to send notification: {str(e)}")
         
         return {
             'statusCode': 200,
@@ -380,12 +456,17 @@ resource "aws_lambda_function" "ec2_auto_stop" {
   source_code_hash = data.archive_file.ec2_auto_stop_zip.output_base64sha256
 
   environment {
-    variables = {
-      EC2_INSTANCE_ID = var.ec2_instance_id
-      # AWS_REGION is automatically provided by Lambda runtime
-      INACTIVITY_HOURS = var.inactivity_hours
-      BASTION_ROLE_ARN = var.bastion_role_arn
-    }
+    variables = merge(
+      {
+        EC2_INSTANCE_ID = var.ec2_instance_id
+        # AWS_REGION is automatically provided by Lambda runtime
+        INACTIVITY_HOURS = var.inactivity_hours
+        BASTION_ROLE_ARN = var.bastion_role_arn
+      },
+      var.admin_email != "" ? {
+        SNS_TOPIC_ARN = aws_sns_topic.ec2_auto_stop_notifications[0].arn
+      } : {}
+    )
   }
 
   depends_on = [

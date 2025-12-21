@@ -64,6 +64,16 @@ output "dsql_host" {
   value = "${aws_dsql_cluster.this.identifier}.${element(split(".", aws_dsql_cluster.this.vpc_endpoint_service_name), 3)}.${aws_dsql_cluster.this.region}.on.aws"
 }
 
+output "data_api_enabled" {
+  description = "Whether RDS Data API is enabled for DSQL cluster"
+  value       = var.enable_data_api
+}
+
+output "data_api_resource_arn" {
+  description = "ARN of DSQL cluster for use with RDS Data API (if enabled). Note: DSQL may not support RDS Data API."
+  value       = var.enable_data_api ? aws_dsql_cluster.this.arn : null
+}
+
 output "connection_instructions" {
   description = "Instructions for connecting to Aurora DSQL"
   value       = <<-EOT
@@ -86,5 +96,10 @@ Aurora DSQL Connection Instructions:
 
 5. For IAM database authentication, ensure the Lambda has rds-db:connect permission.
    Resource ID: ${aws_dsql_cluster.this.identifier}
+
+6. RDS Data API (if enabled):
+   Use cluster ARN with aws rds-data execute-statement
+   Resource ARN: ${aws_dsql_cluster.this.arn}
+   Note: DSQL may not support RDS Data API. Verify compatibility before use.
 EOT
 }

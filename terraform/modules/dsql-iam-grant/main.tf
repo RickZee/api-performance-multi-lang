@@ -49,7 +49,8 @@ resource "aws_iam_role_policy" "dsql_admin" {
       {
         Effect = "Allow"
         Action = [
-          "rds:DescribeDBClusters"
+          "rds:DescribeDBClusters",
+          "rds:GenerateDBAuthToken"
         ]
         Resource = "*"
       }
@@ -57,17 +58,12 @@ resource "aws_iam_role_policy" "dsql_admin" {
   })
 }
 
-# Lambda function code (Python script to grant IAM access)
-data "archive_file" "lambda_zip" {
-  type        = "zip"
-  output_path = "/tmp/dsql-iam-grant-lambda.zip"
-
-  source {
-    content = <<-PYTHON
+# Lambda function code file
+resource "local_file" "lambda_function" {
+  content = <<-PYTHON
 import json
 import boto3
 import psycopg2
-from psycopg2 import sql
 
 def lambda_handler(event, context):
     """
@@ -143,19 +139,81 @@ def lambda_handler(event, context):
             'body': json.dumps({'error': str(e)})
         }
 PYTHON
-    filename = "lambda_function.py"
+  filename = "${path.module}/lambda_function.py"
+}
+
+# Create Lambda package with dependencies
+resource "null_resource" "lambda_package" {
+  triggers = {
+    source_hash = local_file.lambda_function.content_base64sha256
   }
+
+  provisioner "local-exec" {
+    command = <<-EOT
+      set -e
+      PACKAGE_DIR="/tmp/dsql-iam-grant-lambda-package-$${RANDOM}"
+      rm -rf "$PACKAGE_DIR"
+      mkdir -p "$PACKAGE_DIR"
+      
+      # Copy Lambda function
+      cp "${path.module}/lambda_function.py" "$PACKAGE_DIR/"
+      
+      # Install psycopg2-binary in package directory (boto3 is already in Lambda runtime)
+      echo "Installing psycopg2-binary..."
+      pip3 install --target "$PACKAGE_DIR" psycopg2-binary boto3 --quiet --disable-pip-version-check 2>&1 | grep -v "WARNING" || true
+      
+      # Create zip file
+      cd "$PACKAGE_DIR"
+      zip -r /tmp/dsql-iam-grant-lambda.zip . > /dev/null 2>&1
+      
+      # Cleanup
+      rm -rf "$PACKAGE_DIR"
+      
+      echo "✅ Lambda package created: /tmp/dsql-iam-grant-lambda.zip"
+      ls -lh /tmp/dsql-iam-grant-lambda.zip
+    EOT
+  }
+}
+
+# Data source to compute hash after file is created
+# Using Python for reliable base64 encoding of SHA256
+data "external" "lambda_package_hash" {
+  program = ["python3", "-c", <<-EOT
+import hashlib
+import base64
+import json
+import os
+
+file_path = "/tmp/dsql-iam-grant-lambda.zip"
+if os.path.exists(file_path):
+    with open(file_path, "rb") as f:
+        file_hash = hashlib.sha256(f.read()).digest()
+        hash_b64 = base64.b64encode(file_hash).decode('utf-8')
+        print(json.dumps({"hash": hash_b64}))
+else:
+    print(json.dumps({"hash": ""}))
+  EOT
+  ]
+  depends_on = [null_resource.lambda_package]
 }
 
 # Lambda function
 resource "aws_lambda_function" "dsql_iam_grant" {
-  filename         = data.archive_file.lambda_zip.output_path
+  filename         = "/tmp/dsql-iam-grant-lambda.zip"
   function_name    = "${var.project_name}-dsql-iam-grant"
   role            = aws_iam_role.dsql_iam_grant.arn
   handler         = "lambda_function.lambda_handler"
   runtime         = "python3.11"
   timeout         = 30
-  source_code_hash = data.archive_file.lambda_zip.output_base64sha256
+  source_code_hash = data.external.lambda_package_hash.result.hash
+  depends_on      = [null_resource.lambda_package, data.external.lambda_package_hash]
+
+  # Force update if package changes
+  lifecycle {
+    replace_triggered_by = [
+      null_resource.lambda_package
+    ]
+  }
 
   environment {
     variables = {

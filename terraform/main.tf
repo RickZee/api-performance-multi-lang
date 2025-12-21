@@ -267,6 +267,7 @@ module "aurora_dsql" {
   vpc_cidr_block      = module.vpc[0].vpc_cidr
   subnet_ids          = module.vpc[0].private_subnet_ids # DSQL uses VPC endpoints, always use private subnets
   deletion_protection = false                            # Set to true for production
+  enable_data_api     = var.enable_dsql_data_api
 
   tags = local.common_tags
 }
@@ -683,6 +684,7 @@ module "ec2_auto_stop" {
   inactivity_hours               = 3
   aws_region                     = var.aws_region
   cloudwatch_logs_retention_days = local.cloudwatch_logs_retention
+  admin_email                    = var.aurora_auto_stop_admin_email  # Reuse same email config
 
   tags = local.common_tags
 }
@@ -727,36 +729,53 @@ resource "null_resource" "grant_bastion_iam_access" {
   # Invoke Lambda function to grant IAM access
   provisioner "local-exec" {
     command = <<-EOT
+      set -e
       echo "Granting IAM role access via Lambda..."
+      
+      # Create payload file
+      cat > /tmp/lambda-payload-tf.json <<EOF
+      {
+        "dsql_host": "${module.aurora_dsql[0].dsql_host}",
+        "iam_user": "${var.iam_database_user}",
+        "role_arn": "arn:aws:iam::${data.aws_caller_identity.current.account_id}:role/${var.project_name}-bastion-role",
+        "region": "${var.aws_region}"
+      }
+      EOF
+      
+      # Invoke Lambda
       aws lambda invoke \
         --function-name ${module.dsql_iam_grant[0].lambda_function_name} \
-        --payload '{
-          "dsql_host": "${module.aurora_dsql[0].dsql_host}",
-          "iam_user": "${var.iam_database_user}",
-          "role_arn": "arn:aws:iam::${data.aws_caller_identity.current.account_id}:role/${var.project_name}-bastion-role",
-          "region": "${var.aws_region}"
-        }' \
+        --cli-binary-format raw-in-base64-out \
+        --payload file:///tmp/lambda-payload-tf.json \
         --region ${var.aws_region} \
         /tmp/lambda-response.json
       
+      echo ""
       echo "Lambda response:"
-      cat /tmp/lambda-response.json | jq .
+      cat /tmp/lambda-response.json | jq . 2>/dev/null || cat /tmp/lambda-response.json
+      echo ""
       
       # Check if Lambda succeeded
-      STATUS=$(cat /tmp/lambda-response.json | jq -r '.statusCode // 500')
-      if [ "$STATUS" != "200" ]; then
-        echo "Warning: Lambda returned status code $STATUS"
-        echo "This may be expected if the Lambda role is not yet mapped to postgres user."
-        echo ""
-        echo "One-time setup required:"
-        LAMBDA_ROLE_ARN="arn:aws:iam::${data.aws_caller_identity.current.account_id}:role/${var.project_name}-dsql-iam-grant-role"
-        echo "  AWS IAM GRANT postgres TO '$LAMBDA_ROLE_ARN';"
+      STATUS=$(cat /tmp/lambda-response.json | jq -r '.statusCode // .errorMessage // "500"')
+      if [[ "$STATUS" == *"error"* ]] || [[ "$STATUS" != "200" ]]; then
+        echo "⚠️  Warning: Lambda returned status/error: $STATUS"
+        if [[ "$STATUS" == *"psycopg2"* ]]; then
+          echo "Error: Lambda missing psycopg2 dependency. Package may not have been created correctly."
+          echo "Run: terraform apply -target=module.dsql_iam_grant.null_resource.lambda_package"
+        elif [[ "$STATUS" == *"postgres"* ]] || [[ "$STATUS" == *"access"* ]]; then
+          echo "This may be expected if the Lambda role is not yet mapped to postgres user."
+          echo ""
+          echo "One-time setup required:"
+          LAMBDA_ROLE_ARN="arn:aws:iam::${data.aws_caller_identity.current.account_id}:role/${var.project_name}-dsql-iam-grant-role"
+          echo "  AWS IAM GRANT postgres TO '$LAMBDA_ROLE_ARN';"
+        fi
         echo ""
         echo "Or grant bastion role directly:"
         echo "  AWS IAM GRANT ${var.iam_database_user} TO 'arn:aws:iam::${data.aws_caller_identity.current.account_id}:role/${var.project_name}-bastion-role';"
         exit 0  # Don't fail, just warn
       else
         echo "✅ IAM role mapping granted successfully!"
+        cat /tmp/lambda-response.json | jq -r '.body' 2>/dev/null | jq . 2>/dev/null || echo ""
       fi
     EOT
   }

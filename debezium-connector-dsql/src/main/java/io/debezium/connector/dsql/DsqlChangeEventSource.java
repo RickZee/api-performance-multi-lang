@@ -48,13 +48,36 @@ public class DsqlChangeEventSource {
             return;
         }
         
+        if (connectionPool == null) {
+            throw new SQLException("Cannot initialize schema: connection pool is null");
+        }
+        if (schema == null) {
+            throw new SQLException("Cannot initialize schema: schema object is null");
+        }
+        if (tableName == null || tableName.isEmpty()) {
+            throw new SQLException("Cannot initialize schema: table name is null or empty");
+        }
+        
         try (Connection conn = connectionPool.getConnection()) {
+            if (conn == null) {
+                throw new SQLException("Cannot initialize schema: failed to get database connection");
+            }
+            
             DatabaseMetaData metadata = conn.getMetaData();
+            if (metadata == null) {
+                throw new SQLException("Cannot initialize schema: failed to get database metadata");
+            }
+            
             // Use 'public' schema by default (PostgreSQL convention)
             schema.buildSchemas(metadata, "public");
             schema.validateRequiredColumns();
             schemaBuilt = true;
             LOGGER.info("Schema initialized for table: {}", tableName);
+        } catch (SQLException e) {
+            LOGGER.error("Failed to initialize schema for table '{}': {} - {}", 
+                        tableName, e.getClass().getSimpleName(), e.getMessage(), e);
+            throw new SQLException(String.format(
+                "Failed to initialize schema for table '%s': %s", tableName, e.getMessage()), e);
         }
     }
     
@@ -62,6 +85,23 @@ public class DsqlChangeEventSource {
      * Poll for changes and return SourceRecords.
      */
     public List<SourceRecord> poll() throws SQLException {
+        // Validate required components
+        if (connectionPool == null) {
+            throw new SQLException("Cannot poll: connection pool is null");
+        }
+        if (config == null) {
+            throw new SQLException("Cannot poll: configuration is null");
+        }
+        if (schema == null) {
+            throw new SQLException("Cannot poll: schema is null");
+        }
+        if (offsetContext == null) {
+            throw new SQLException("Cannot poll: offset context is null");
+        }
+        if (tableName == null || tableName.isEmpty()) {
+            throw new SQLException("Cannot poll: table name is null or empty");
+        }
+        
         // Initialize schema if not already done
         if (!schemaBuilt) {
             initializeSchema();
@@ -70,34 +110,49 @@ public class DsqlChangeEventSource {
         List<SourceRecord> records = new ArrayList<>();
         
         try (Connection conn = connectionPool.getConnection()) {
+            if (conn == null) {
+                throw new SQLException("Cannot poll: failed to get database connection");
+            }
+            
             String query = buildQuery();
-            LOGGER.debug("Executing query: {}", query);
+            LOGGER.debug("Executing query for table {}: {}", tableName, query);
             
             try (PreparedStatement stmt = conn.prepareStatement(query)) {
                 setQueryParameters(stmt);
                 
                 try (ResultSet rs = stmt.executeQuery()) {
+                    if (rs == null) {
+                        throw new SQLException("Cannot poll: query returned null result set");
+                    }
                     
                     int recordCount = 0;
                     Instant latestSavedDate = null;
                     String latestId = null;
                     
                     while (rs.next() && recordCount < config.getBatchSize()) {
-                        SourceRecord record = buildSourceRecord(rs);
-                        records.add(record);
-                        
-                        // Track latest values for offset update
-                        Timestamp savedDate = rs.getTimestamp("saved_date");
-                        if (savedDate != null) {
-                            latestSavedDate = savedDate.toInstant();
+                        try {
+                            SourceRecord record = buildSourceRecord(rs);
+                            if (record != null) {
+                                records.add(record);
+                            }
+                            
+                            // Track latest values for offset update
+                            Timestamp savedDate = rs.getTimestamp("saved_date");
+                            if (savedDate != null) {
+                                latestSavedDate = savedDate.toInstant();
+                            }
+                            // Use primary key column from schema
+                            String pkColumn = schema.getPrimaryKeyColumn();
+                            if (pkColumn != null) {
+                                latestId = rs.getString(pkColumn);
+                            }
+                            
+                            recordCount++;
+                        } catch (SQLException e) {
+                            LOGGER.warn("Error processing record {} from table {}: {} - {}", 
+                                       recordCount + 1, tableName, e.getClass().getSimpleName(), e.getMessage());
+                            // Continue processing other records
                         }
-                        // Use primary key column from schema
-                        String pkColumn = schema.getPrimaryKeyColumn();
-                        if (pkColumn != null) {
-                            latestId = rs.getString(pkColumn);
-                        }
-                        
-                        recordCount++;
                     }
                     
                     // Update offset if we processed records
@@ -108,6 +163,11 @@ public class DsqlChangeEventSource {
                     LOGGER.debug("Polled {} records from table {}", recordCount, tableName);
                 }
             }
+        } catch (SQLException e) {
+            LOGGER.error("Failed to poll changes from table '{}': {} - {}", 
+                        tableName, e.getClass().getSimpleName(), e.getMessage(), e);
+            throw new SQLException(String.format(
+                "Failed to poll changes from table '%s': %s", tableName, e.getMessage()), e);
         }
         
         return records;
@@ -166,16 +226,36 @@ public class DsqlChangeEventSource {
      * Build SourceRecord from ResultSet row.
      */
     private SourceRecord buildSourceRecord(ResultSet rs) throws SQLException {
+        if (rs == null) {
+            throw new SQLException("Cannot build source record: result set is null");
+        }
+        if (schema == null) {
+            throw new SQLException("Cannot build source record: schema is null");
+        }
+        if (config == null) {
+            throw new SQLException("Cannot build source record: configuration is null");
+        }
+        
         // Build key struct using primary key column
-        org.apache.kafka.connect.data.Struct keyStruct = new org.apache.kafka.connect.data.Struct(schema.getKeySchema());
+        org.apache.kafka.connect.data.Schema keySchema = schema.getKeySchema();
+        if (keySchema == null) {
+            throw new SQLException("Cannot build source record: key schema is null");
+        }
+        org.apache.kafka.connect.data.Struct keyStruct = new org.apache.kafka.connect.data.Struct(keySchema);
         String pkColumn = schema.getPrimaryKeyColumn();
         if (pkColumn != null) {
             Object pkValue = rs.getObject(pkColumn);
-            keyStruct.put(pkColumn, pkValue);
+            if (pkValue != null) {
+                keyStruct.put(pkColumn, pkValue);
+            }
         }
         
         // Build value struct
-        org.apache.kafka.connect.data.Struct valueStruct = new org.apache.kafka.connect.data.Struct(schema.getValueSchema());
+        org.apache.kafka.connect.data.Schema valueSchema = schema.getValueSchema();
+        if (valueSchema == null) {
+            throw new SQLException("Cannot build source record: value schema is null");
+        }
+        org.apache.kafka.connect.data.Struct valueStruct = new org.apache.kafka.connect.data.Struct(valueSchema);
         
         // Add table columns
         for (Map.Entry<String, org.apache.kafka.connect.data.Schema> entry : schema.getColumnSchemas().entrySet()) {

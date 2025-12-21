@@ -82,6 +82,12 @@ variable "enable_aurora_dsql_cluster" {
   default     = false
 }
 
+variable "enable_dsql_data_api" {
+  description = "Enable RDS Data API (HTTP endpoint) for DSQL cluster. Note: DSQL may not support RDS Data API."
+  type        = bool
+  default     = false
+}
+
 # Note: Aurora DSQL is serverless and uses ACU (Aurora Capacity Units) instead of instance classes
 # DEPRECATED: aurora_dsql_instance_class is no longer used for DSQL (serverless uses ACU)
 variable "aurora_dsql_instance_class" {
@@ -253,9 +259,9 @@ variable "dsql_load_test_lambda_memory_size" {
 }
 
 variable "dsql_load_test_lambda_timeout" {
-  description = "Timeout for DSQL load test Lambda in seconds (default: 900 = 15 minutes for long-running tests)"
+  description = "Timeout for DSQL load test Lambda in seconds (default: 300 = 5 minutes)"
   type        = number
-  default     = 900
+  default     = 300
 }
 
 variable "dsql_load_test_lambda_reserved_concurrency" {
