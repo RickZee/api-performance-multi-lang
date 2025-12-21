@@ -50,6 +50,36 @@
       "count": 10,
       "batch_size": 10,
       "payload_size": [null, "4k", "32k", "200k"]
+    },
+    "scenario1_super_heavy_1": {
+      "scenario": 1,
+      "threads": 200,
+      "iterations": 10000,
+      "count": 1,
+      "payload_size": null
+    },
+    "scenario1_super_heavy_2": {
+      "scenario": 1,
+      "threads": 100,
+      "iterations": 50000,
+      "count": 1,
+      "payload_size": null
+    },
+    "scenario2_super_heavy_1": {
+      "scenario": 2,
+      "threads": 200,
+      "iterations": 1000,
+      "count": 200,
+      "batch_size": 200,
+      "payload_size": null
+    },
+    "scenario2_super_heavy_2": {
+      "scenario": 2,
+      "threads": 100,
+      "iterations": 5000,
+      "count": 500,
+      "batch_size": 500,
+      "payload_size": null
     }
   }
 }

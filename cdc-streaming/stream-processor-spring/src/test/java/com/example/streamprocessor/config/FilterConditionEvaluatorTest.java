@@ -334,8 +334,10 @@ class FilterConditionEvaluatorTest {
         idCondition.setField("id");
         idCondition.setOperator("equals");
         idCondition.setValue("test-id");
-        assertThat(FilterConditionEvaluator.createPredicate(
-                new FilterConfig(null, null, null, null, "AND", Collections.singletonList(idCondition)))
+        FilterConfig idFilterConfig = new FilterConfig();
+        idFilterConfig.setConditionLogic("AND");
+        idFilterConfig.setConditions(Collections.singletonList(idCondition));
+        assertThat(FilterConditionEvaluator.createPredicate(idFilterConfig)
                 .test(fullEvent)).isTrue();
 
         // Test event_name field
@@ -343,8 +345,10 @@ class FilterConditionEvaluatorTest {
         nameCondition.setField("event_name");
         nameCondition.setOperator("equals");
         nameCondition.setValue("TestEvent");
-        assertThat(FilterConditionEvaluator.createPredicate(
-                new FilterConfig(null, null, null, null, "AND", Collections.singletonList(nameCondition)))
+        FilterConfig nameFilterConfig = new FilterConfig();
+        nameFilterConfig.setConditionLogic("AND");
+        nameFilterConfig.setConditions(Collections.singletonList(nameCondition));
+        assertThat(FilterConditionEvaluator.createPredicate(nameFilterConfig)
                 .test(fullEvent)).isTrue();
 
         // Test __ts_ms field
@@ -352,9 +356,514 @@ class FilterConditionEvaluatorTest {
         tsCondition.setField("__ts_ms");
         tsCondition.setOperator("greaterThan");
         tsCondition.setValue("1000");
-        assertThat(FilterConditionEvaluator.createPredicate(
-                new FilterConfig(null, null, null, null, "AND", Collections.singletonList(tsCondition)))
+        FilterConfig tsFilterConfig = new FilterConfig();
+        tsFilterConfig.setConditionLogic("AND");
+        tsFilterConfig.setConditions(Collections.singletonList(tsCondition));
+        assertThat(FilterConditionEvaluator.createPredicate(tsFilterConfig)
                 .test(fullEvent)).isTrue();
+    }
+
+    @Test
+    void testGreaterThanOperator_Numeric_ShouldMatch() {
+        // Given
+        EventHeader event = EventHeader.builder()
+                .tsMs(2000L)
+                .build();
+
+        FilterCondition condition = new FilterCondition();
+        condition.setField("__ts_ms");
+        condition.setOperator("greaterThan");
+        condition.setValue("1000");
+
+        FilterConfig filterConfig = new FilterConfig();
+        filterConfig.setConditions(Collections.singletonList(condition));
+
+        // When
+        Predicate<EventHeader> predicate = FilterConditionEvaluator.createPredicate(filterConfig);
+
+        // Then
+        assertThat(predicate.test(event)).isTrue();
+    }
+
+    @Test
+    void testGreaterThanOperator_Numeric_ShouldNotMatch() {
+        // Given
+        EventHeader event = EventHeader.builder()
+                .tsMs(500L)
+                .build();
+
+        FilterCondition condition = new FilterCondition();
+        condition.setField("__ts_ms");
+        condition.setOperator("greaterThan");
+        condition.setValue("1000");
+
+        FilterConfig filterConfig = new FilterConfig();
+        filterConfig.setConditions(Collections.singletonList(condition));
+
+        // When
+        Predicate<EventHeader> predicate = FilterConditionEvaluator.createPredicate(filterConfig);
+
+        // Then
+        assertThat(predicate.test(event)).isFalse();
+    }
+
+    @Test
+    void testGreaterThanOperator_String_ShouldMatch() {
+        // Given
+        EventHeader event = EventHeader.builder()
+                .eventType("CarCreated")
+                .build();
+
+        FilterCondition condition = new FilterCondition();
+        condition.setField("event_type");
+        condition.setOperator("greaterThan");
+        condition.setValue("Car");
+
+        FilterConfig filterConfig = new FilterConfig();
+        filterConfig.setConditions(Collections.singletonList(condition));
+
+        // When
+        Predicate<EventHeader> predicate = FilterConditionEvaluator.createPredicate(filterConfig);
+
+        // Then
+        assertThat(predicate.test(event)).isTrue();
+    }
+
+    @Test
+    void testLessThanOperator_Numeric_ShouldMatch() {
+        // Given
+        EventHeader event = EventHeader.builder()
+                .tsMs(500L)
+                .build();
+
+        FilterCondition condition = new FilterCondition();
+        condition.setField("__ts_ms");
+        condition.setOperator("lessThan");
+        condition.setValue("1000");
+
+        FilterConfig filterConfig = new FilterConfig();
+        filterConfig.setConditions(Collections.singletonList(condition));
+
+        // When
+        Predicate<EventHeader> predicate = FilterConditionEvaluator.createPredicate(filterConfig);
+
+        // Then
+        assertThat(predicate.test(event)).isTrue();
+    }
+
+    @Test
+    void testLessThanOperator_Numeric_ShouldNotMatch() {
+        // Given
+        EventHeader event = EventHeader.builder()
+                .tsMs(2000L)
+                .build();
+
+        FilterCondition condition = new FilterCondition();
+        condition.setField("__ts_ms");
+        condition.setOperator("lessThan");
+        condition.setValue("1000");
+
+        FilterConfig filterConfig = new FilterConfig();
+        filterConfig.setConditions(Collections.singletonList(condition));
+
+        // When
+        Predicate<EventHeader> predicate = FilterConditionEvaluator.createPredicate(filterConfig);
+
+        // Then
+        assertThat(predicate.test(event)).isFalse();
+    }
+
+    @Test
+    void testLessThanOperator_String_ShouldMatch() {
+        // Given
+        EventHeader event = EventHeader.builder()
+                .eventType("Car")
+                .build();
+
+        FilterCondition condition = new FilterCondition();
+        condition.setField("event_type");
+        condition.setOperator("lessThan");
+        condition.setValue("CarCreated");
+
+        FilterConfig filterConfig = new FilterConfig();
+        filterConfig.setConditions(Collections.singletonList(condition));
+
+        // When
+        Predicate<EventHeader> predicate = FilterConditionEvaluator.createPredicate(filterConfig);
+
+        // Then
+        assertThat(predicate.test(event)).isTrue();
+    }
+
+    @Test
+    void testGreaterThanOrEqualOperator_ShouldMatch() {
+        // Given
+        EventHeader event = EventHeader.builder()
+                .tsMs(1000L)
+                .build();
+
+        FilterCondition condition = new FilterCondition();
+        condition.setField("__ts_ms");
+        condition.setOperator("greaterThanOrEqual");
+        condition.setValue("1000");
+
+        FilterConfig filterConfig = new FilterConfig();
+        filterConfig.setConditions(Collections.singletonList(condition));
+
+        // When
+        Predicate<EventHeader> predicate = FilterConditionEvaluator.createPredicate(filterConfig);
+
+        // Then
+        assertThat(predicate.test(event)).isTrue();
+    }
+
+    @Test
+    void testGreaterThanOrEqualOperator_ShouldNotMatch() {
+        // Given
+        EventHeader event = EventHeader.builder()
+                .tsMs(500L)
+                .build();
+
+        FilterCondition condition = new FilterCondition();
+        condition.setField("__ts_ms");
+        condition.setOperator("greaterThanOrEqual");
+        condition.setValue("1000");
+
+        FilterConfig filterConfig = new FilterConfig();
+        filterConfig.setConditions(Collections.singletonList(condition));
+
+        // When
+        Predicate<EventHeader> predicate = FilterConditionEvaluator.createPredicate(filterConfig);
+
+        // Then
+        assertThat(predicate.test(event)).isFalse();
+    }
+
+    @Test
+    void testLessThanOrEqualOperator_ShouldMatch() {
+        // Given
+        EventHeader event = EventHeader.builder()
+                .tsMs(1000L)
+                .build();
+
+        FilterCondition condition = new FilterCondition();
+        condition.setField("__ts_ms");
+        condition.setOperator("lessThanOrEqual");
+        condition.setValue("1000");
+
+        FilterConfig filterConfig = new FilterConfig();
+        filterConfig.setConditions(Collections.singletonList(condition));
+
+        // When
+        Predicate<EventHeader> predicate = FilterConditionEvaluator.createPredicate(filterConfig);
+
+        // Then
+        assertThat(predicate.test(event)).isTrue();
+    }
+
+    @Test
+    void testLessThanOrEqualOperator_ShouldNotMatch() {
+        // Given
+        EventHeader event = EventHeader.builder()
+                .tsMs(2000L)
+                .build();
+
+        FilterCondition condition = new FilterCondition();
+        condition.setField("__ts_ms");
+        condition.setOperator("lessThanOrEqual");
+        condition.setValue("1000");
+
+        FilterConfig filterConfig = new FilterConfig();
+        filterConfig.setConditions(Collections.singletonList(condition));
+
+        // When
+        Predicate<EventHeader> predicate = FilterConditionEvaluator.createPredicate(filterConfig);
+
+        // Then
+        assertThat(predicate.test(event)).isFalse();
+    }
+
+    @Test
+    void testBetweenOperator_Numeric_ShouldMatch() {
+        // Given
+        EventHeader event = EventHeader.builder()
+                .tsMs(1500L)
+                .build();
+
+        FilterCondition condition = new FilterCondition();
+        condition.setField("__ts_ms");
+        condition.setOperator("between");
+        condition.setMin("1000");
+        condition.setMax("2000");
+
+        FilterConfig filterConfig = new FilterConfig();
+        filterConfig.setConditions(Collections.singletonList(condition));
+
+        // When
+        Predicate<EventHeader> predicate = FilterConditionEvaluator.createPredicate(filterConfig);
+
+        // Then
+        assertThat(predicate.test(event)).isTrue();
+    }
+
+    @Test
+    void testBetweenOperator_Numeric_ShouldMatchBoundaries() {
+        // Given
+        EventHeader eventMin = EventHeader.builder().tsMs(1000L).build();
+        EventHeader eventMax = EventHeader.builder().tsMs(2000L).build();
+
+        FilterCondition condition = new FilterCondition();
+        condition.setField("__ts_ms");
+        condition.setOperator("between");
+        condition.setMin("1000");
+        condition.setMax("2000");
+
+        FilterConfig filterConfig = new FilterConfig();
+        filterConfig.setConditions(Collections.singletonList(condition));
+
+        // When
+        Predicate<EventHeader> predicate = FilterConditionEvaluator.createPredicate(filterConfig);
+
+        // Then
+        assertThat(predicate.test(eventMin)).isTrue();
+        assertThat(predicate.test(eventMax)).isTrue();
+    }
+
+    @Test
+    void testBetweenOperator_Numeric_ShouldNotMatch() {
+        // Given
+        EventHeader eventBelow = EventHeader.builder().tsMs(500L).build();
+        EventHeader eventAbove = EventHeader.builder().tsMs(2500L).build();
+
+        FilterCondition condition = new FilterCondition();
+        condition.setField("__ts_ms");
+        condition.setOperator("between");
+        condition.setMin("1000");
+        condition.setMax("2000");
+
+        FilterConfig filterConfig = new FilterConfig();
+        filterConfig.setConditions(Collections.singletonList(condition));
+
+        // When
+        Predicate<EventHeader> predicate = FilterConditionEvaluator.createPredicate(filterConfig);
+
+        // Then
+        assertThat(predicate.test(eventBelow)).isFalse();
+        assertThat(predicate.test(eventAbove)).isFalse();
+    }
+
+    @Test
+    void testBetweenOperator_String_ShouldMatch() {
+        // Given
+        EventHeader event = EventHeader.builder()
+                .eventType("CarCreated")
+                .build();
+
+        FilterCondition condition = new FilterCondition();
+        condition.setField("event_type");
+        condition.setOperator("between");
+        condition.setMin("Car");
+        condition.setMax("Loan");
+
+        FilterConfig filterConfig = new FilterConfig();
+        filterConfig.setConditions(Collections.singletonList(condition));
+
+        // When
+        Predicate<EventHeader> predicate = FilterConditionEvaluator.createPredicate(filterConfig);
+
+        // Then
+        assertThat(predicate.test(event)).isTrue();
+    }
+
+    @Test
+    void testMatchesOperator_WithWildcard_ShouldMatch() {
+        // Given
+        EventHeader event = EventHeader.builder()
+                .eventType("CarCreated")
+                .build();
+
+        FilterCondition condition = new FilterCondition();
+        condition.setField("event_type");
+        condition.setOperator("matches");
+        condition.setValue("Car%");
+
+        FilterConfig filterConfig = new FilterConfig();
+        filterConfig.setConditions(Collections.singletonList(condition));
+
+        // When
+        Predicate<EventHeader> predicate = FilterConditionEvaluator.createPredicate(filterConfig);
+
+        // Then
+        assertThat(predicate.test(event)).isTrue();
+    }
+
+    @Test
+    void testMatchesOperator_WithWildcard_ShouldNotMatch() {
+        // Given
+        EventHeader event = EventHeader.builder()
+                .eventType("LoanCreated")
+                .build();
+
+        FilterCondition condition = new FilterCondition();
+        condition.setField("event_type");
+        condition.setOperator("matches");
+        condition.setValue("Car%");
+
+        FilterConfig filterConfig = new FilterConfig();
+        filterConfig.setConditions(Collections.singletonList(condition));
+
+        // When
+        Predicate<EventHeader> predicate = FilterConditionEvaluator.createPredicate(filterConfig);
+
+        // Then
+        assertThat(predicate.test(event)).isFalse();
+    }
+
+    @Test
+    void testMatchesOperator_WithUnderscore_ShouldMatch() {
+        // Given
+        EventHeader event = EventHeader.builder()
+                .eventType("Car_Created")
+                .build();
+
+        FilterCondition condition = new FilterCondition();
+        condition.setField("event_type");
+        condition.setOperator("matches");
+        condition.setValue("Car_Created");
+
+        FilterConfig filterConfig = new FilterConfig();
+        filterConfig.setConditions(Collections.singletonList(condition));
+
+        // When
+        Predicate<EventHeader> predicate = FilterConditionEvaluator.createPredicate(filterConfig);
+
+        // Then
+        assertThat(predicate.test(event)).isTrue();
+    }
+
+    @Test
+    void testMatchesOperator_WithMultipleWildcards_ShouldMatch() {
+        // Given
+        EventHeader event = EventHeader.builder()
+                .eventType("CarCreatedEvent")
+                .build();
+
+        FilterCondition condition = new FilterCondition();
+        condition.setField("event_type");
+        condition.setOperator("matches");
+        condition.setValue("%Created%");
+
+        FilterConfig filterConfig = new FilterConfig();
+        filterConfig.setConditions(Collections.singletonList(condition));
+
+        // When
+        Predicate<EventHeader> predicate = FilterConditionEvaluator.createPredicate(filterConfig);
+
+        // Then
+        assertThat(predicate.test(event)).isTrue();
+    }
+
+    @Test
+    void testComparisonOperators_WithNullField_ShouldReturnFalse() {
+        // Given
+        EventHeader event = EventHeader.builder()
+                .tsMs(null)
+                .build();
+
+        FilterCondition condition = new FilterCondition();
+        condition.setField("__ts_ms");
+        condition.setOperator("greaterThan");
+        condition.setValue("1000");
+
+        FilterConfig filterConfig = new FilterConfig();
+        filterConfig.setConditions(Collections.singletonList(condition));
+
+        // When
+        Predicate<EventHeader> predicate = FilterConditionEvaluator.createPredicate(filterConfig);
+
+        // Then
+        assertThat(predicate.test(event)).isFalse();
+    }
+
+    @Test
+    void testBetweenOperator_WithNullField_ShouldReturnFalse() {
+        // Given
+        EventHeader event = EventHeader.builder()
+                .tsMs(null)
+                .build();
+
+        FilterCondition condition = new FilterCondition();
+        condition.setField("__ts_ms");
+        condition.setOperator("between");
+        condition.setMin("1000");
+        condition.setMax("2000");
+
+        FilterConfig filterConfig = new FilterConfig();
+        filterConfig.setConditions(Collections.singletonList(condition));
+
+        // When
+        Predicate<EventHeader> predicate = FilterConditionEvaluator.createPredicate(filterConfig);
+
+        // Then
+        assertThat(predicate.test(event)).isFalse();
+    }
+
+    @Test
+    void testMatchesOperator_WithNullField_ShouldReturnFalse() {
+        // Given
+        EventHeader event = EventHeader.builder()
+                .eventType(null)
+                .build();
+
+        FilterCondition condition = new FilterCondition();
+        condition.setField("event_type");
+        condition.setOperator("matches");
+        condition.setValue("Car%");
+
+        FilterConfig filterConfig = new FilterConfig();
+        filterConfig.setConditions(Collections.singletonList(condition));
+
+        // When
+        Predicate<EventHeader> predicate = FilterConditionEvaluator.createPredicate(filterConfig);
+
+        // Then
+        assertThat(predicate.test(event)).isFalse();
+    }
+
+    @Test
+    void testUnknownOperator_ShouldReturnFalse() {
+        // Given
+        FilterCondition condition = new FilterCondition();
+        condition.setField("event_type");
+        condition.setOperator("unknownOperator");
+        condition.setValue("CarCreated");
+
+        FilterConfig filterConfig = new FilterConfig();
+        filterConfig.setConditions(Collections.singletonList(condition));
+
+        // When
+        Predicate<EventHeader> predicate = FilterConditionEvaluator.createPredicate(filterConfig);
+
+        // Then
+        assertThat(predicate.test(testEvent)).isFalse();
+    }
+
+    @Test
+    void testUnknownField_ShouldReturnFalse() {
+        // Given
+        FilterCondition condition = new FilterCondition();
+        condition.setField("unknown_field");
+        condition.setOperator("equals");
+        condition.setValue("value");
+
+        FilterConfig filterConfig = new FilterConfig();
+        filterConfig.setConditions(Collections.singletonList(condition));
+
+        // When
+        Predicate<EventHeader> predicate = FilterConditionEvaluator.createPredicate(filterConfig);
+
+        // Then
+        assertThat(predicate.test(testEvent)).isFalse();
     }
 }
 

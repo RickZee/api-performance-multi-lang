@@ -1,0 +1,112 @@
+# Test filter configuration with mixed status values
+# Used for testing status and lifecycle state handling
+
+filters:
+  # Active filter - should be included
+  - id: active-filter
+    name: Active Filter
+    description: Active filter for testing
+    outputTopic: filtered-active-events
+    conditionLogic: AND
+    enabled: true
+    status: active
+    conditions:
+      - field: event_type
+        operator: equals
+        value: "CarCreated"
+        valueType: string
+      - field: __op
+        operator: equals
+        value: "c"
+        valueType: string
+
+  # Deprecated filter - should be included but with warnings
+  - id: deprecated-filter
+    name: Deprecated Filter
+    description: Deprecated filter for testing
+    outputTopic: filtered-deprecated-events
+    conditionLogic: AND
+    enabled: true
+    status: deprecated
+    conditions:
+      - field: event_type
+        operator: equals
+        value: "LoanCreated"
+        valueType: string
+      - field: __op
+        operator: equals
+        value: "c"
+        valueType: string
+
+  # Deleted filter - should be excluded
+  - id: deleted-filter
+    name: Deleted Filter
+    description: Deleted filter for testing
+    outputTopic: filtered-deleted-events
+    conditionLogic: AND
+    enabled: true
+    status: deleted
+    conditions:
+      - field: event_type
+        operator: equals
+        value: "ServiceDone"
+        valueType: string
+      - field: __op
+        operator: equals
+        value: "c"
+        valueType: string
+
+  # Disabled filter - should be excluded
+  - id: disabled-filter
+    name: Disabled Filter
+    description: Disabled filter for testing
+    outputTopic: filtered-disabled-events
+    conditionLogic: AND
+    enabled: false
+    status: active
+    conditions:
+      - field: event_type
+        operator: equals
+        value: "PaymentSubmitted"
+        valueType: string
+      - field: __op
+        operator: equals
+        value: "c"
+        valueType: string
+
+  # Pending deletion filter - should be excluded
+  - id: pending-deletion-filter
+    name: Pending Deletion Filter
+    description: Pending deletion filter for testing
+    outputTopic: filtered-pending-deletion-events
+    conditionLogic: AND
+    enabled: true
+    status: pending_deletion
+    conditions:
+      - field: event_type
+        operator: equals
+        value: "TestEvent"
+        valueType: string
+      - field: __op
+        operator: equals
+        value: "c"
+        valueType: string
+
+  # Deployed filter - should be included
+  - id: deployed-filter
+    name: Deployed Filter
+    description: Deployed filter for testing
+    outputTopic: filtered-deployed-events
+    conditionLogic: AND
+    enabled: true
+    status: deployed
+    conditions:
+      - field: event_type
+        operator: equals
+        value: "CarCreated"
+        valueType: string
+      - field: __op
+        operator: equals
+        value: "c"
+        valueType: string
+

@@ -44,14 +44,13 @@ class FilterConfigTest {
         condition.setValue("LoanCreated");
 
         // When
-        FilterConfig filterConfig = new FilterConfig(
-                "loan-filter",
-                "Loan Filter",
-                "Filters loan events",
-                "filtered-loan-events",
-                "AND",
-                Collections.singletonList(condition)
-        );
+        FilterConfig filterConfig = new FilterConfig();
+        filterConfig.setId("loan-filter");
+        filterConfig.setName("Loan Filter");
+        filterConfig.setDescription("Filters loan events");
+        filterConfig.setOutputTopic("filtered-loan-events");
+        filterConfig.setConditionLogic("AND");
+        filterConfig.setConditions(Collections.singletonList(condition));
 
         // Then
         assertThat(filterConfig.getId()).isEqualTo("loan-filter");

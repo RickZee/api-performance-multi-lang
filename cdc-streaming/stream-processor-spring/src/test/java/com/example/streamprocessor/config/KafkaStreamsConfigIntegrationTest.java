@@ -416,5 +416,309 @@ class KafkaStreamsConfigIntegrationTest {
         config.setFilters(List.of(carFilter, loanFilter, serviceFilter));
         return config;
     }
+
+    @Test
+    void testYamlConfigWithMixedStatusFilters_OnlyActiveAndDeprecatedProcess() {
+        // Given - Load filters from status test YAML
+        FiltersConfig statusFiltersConfig = loadFiltersFromStatusTestYaml();
+        
+        KafkaStreamsConfig config = new KafkaStreamsConfig();
+        ReflectionTestUtils.setField(config, "sourceTopic", "raw-event-headers");
+        ReflectionTestUtils.setField(config, "filtersConfig", statusFiltersConfig);
+
+        StreamsBuilder builder = new StreamsBuilder();
+        config.eventRoutingStream(builder);
+
+        Properties props = new Properties();
+        props.put("application.id", "test-app");
+        props.put("bootstrap.servers", "dummy:1234");
+
+        TopologyTestDriver statusTestDriver = new TopologyTestDriver(builder.build(), props);
+
+        TestInputTopic<String, EventHeader> input = statusTestDriver.createInputTopic(
+                "raw-event-headers",
+                stringSerde.serializer(),
+                eventHeaderSerde.serializer()
+        );
+
+        EventHeader carEvent = EventHeader.builder()
+                .id("event-car")
+                .eventType("CarCreated")
+                .op("c")
+                .table("event_headers")
+                .build();
+
+        // When
+        input.pipeInput("key-car", carEvent);
+
+        // Then - Only active and deployed filters should process (deleted, disabled, pending_deletion excluded)
+        TestOutputTopic<String, EventHeader> activeOutput = statusTestDriver.createOutputTopic(
+                "filtered-active-events-spring",
+                stringSerde.deserializer(),
+                eventHeaderSerde.deserializer()
+        );
+
+        TestOutputTopic<String, EventHeader> deprecatedOutput = statusTestDriver.createOutputTopic(
+                "filtered-deprecated-events-spring",
+                stringSerde.deserializer(),
+                eventHeaderSerde.deserializer()
+        );
+
+        TestOutputTopic<String, EventHeader> deletedOutput = statusTestDriver.createOutputTopic(
+                "filtered-deleted-events-spring",
+                stringSerde.deserializer(),
+                eventHeaderSerde.deserializer()
+        );
+
+        TestOutputTopic<String, EventHeader> disabledOutput = statusTestDriver.createOutputTopic(
+                "filtered-disabled-events-spring",
+                stringSerde.deserializer(),
+                eventHeaderSerde.deserializer()
+        );
+
+        TestOutputTopic<String, EventHeader> deployedOutput = statusTestDriver.createOutputTopic(
+                "filtered-deployed-events-spring",
+                stringSerde.deserializer(),
+                eventHeaderSerde.deserializer()
+        );
+
+        // Active and deployed filters should process
+        assertThat(activeOutput.isEmpty()).isFalse();
+        assertThat(deployedOutput.isEmpty()).isFalse();
+        
+        // Deleted and disabled filters should not process
+        assertThat(deletedOutput.isEmpty()).isTrue();
+        assertThat(disabledOutput.isEmpty()).isTrue();
+        
+        // Deprecated filter doesn't match CarCreated, so empty
+        assertThat(deprecatedOutput.isEmpty()).isTrue();
+
+        statusTestDriver.close();
+    }
+
+    @Test
+    void testYamlConfigWithDeprecatedFilters_StillProcessEvents() {
+        // Given - Load filters with deprecated status
+        FiltersConfig statusFiltersConfig = loadFiltersFromStatusTestYaml();
+        
+        KafkaStreamsConfig config = new KafkaStreamsConfig();
+        ReflectionTestUtils.setField(config, "sourceTopic", "raw-event-headers");
+        ReflectionTestUtils.setField(config, "filtersConfig", statusFiltersConfig);
+
+        StreamsBuilder builder = new StreamsBuilder();
+        config.eventRoutingStream(builder);
+
+        Properties props = new Properties();
+        props.put("application.id", "test-app");
+        props.put("bootstrap.servers", "dummy:1234");
+
+        TopologyTestDriver statusTestDriver = new TopologyTestDriver(builder.build(), props);
+
+        TestInputTopic<String, EventHeader> input = statusTestDriver.createInputTopic(
+                "raw-event-headers",
+                stringSerde.serializer(),
+                eventHeaderSerde.serializer()
+        );
+
+        EventHeader loanEvent = EventHeader.builder()
+                .id("event-loan")
+                .eventType("LoanCreated")
+                .op("c")
+                .table("event_headers")
+                .build();
+
+        // When
+        input.pipeInput("key-loan", loanEvent);
+
+        // Then - Deprecated filter should still process events
+        TestOutputTopic<String, EventHeader> deprecatedOutput = statusTestDriver.createOutputTopic(
+                "filtered-deprecated-events-spring",
+                stringSerde.deserializer(),
+                eventHeaderSerde.deserializer()
+        );
+
+        var output = deprecatedOutput.readKeyValue();
+        assertThat(output).isNotNull();
+        assertThat(output.value.getEventType()).isEqualTo("LoanCreated");
+
+        statusTestDriver.close();
+    }
+
+    @Test
+    void testYamlConfigWithDisabledFilters_ShouldNotCreateStreams() {
+        // Given - Load filters with disabled status
+        FiltersConfig statusFiltersConfig = loadFiltersFromStatusTestYaml();
+        
+        KafkaStreamsConfig config = new KafkaStreamsConfig();
+        ReflectionTestUtils.setField(config, "sourceTopic", "raw-event-headers");
+        ReflectionTestUtils.setField(config, "filtersConfig", statusFiltersConfig);
+
+        StreamsBuilder builder = new StreamsBuilder();
+        config.eventRoutingStream(builder);
+
+        Properties props = new Properties();
+        props.put("application.id", "test-app");
+        props.put("bootstrap.servers", "dummy:1234");
+
+        TopologyTestDriver statusTestDriver = new TopologyTestDriver(builder.build(), props);
+
+        TestInputTopic<String, EventHeader> input = statusTestDriver.createInputTopic(
+                "raw-event-headers",
+                stringSerde.serializer(),
+                eventHeaderSerde.serializer()
+        );
+
+        EventHeader paymentEvent = EventHeader.builder()
+                .id("event-payment")
+                .eventType("PaymentSubmitted")
+                .op("c")
+                .table("event_headers")
+                .build();
+
+        // When
+        input.pipeInput("key-payment", paymentEvent);
+
+        // Then - Disabled filter should not process
+        TestOutputTopic<String, EventHeader> disabledOutput = statusTestDriver.createOutputTopic(
+                "filtered-disabled-events-spring",
+                stringSerde.deserializer(),
+                eventHeaderSerde.deserializer()
+        );
+
+        assertThat(disabledOutput.isEmpty()).isTrue();
+
+        statusTestDriver.close();
+    }
+
+    /**
+     * Loads filters from status test YAML file.
+     */
+    private FiltersConfig loadFiltersFromStatusTestYaml() {
+        try {
+            InputStream inputStream = getClass().getClassLoader()
+                    .getResourceAsStream("filters-status-test.yml");
+            
+            if (inputStream == null) {
+                // Fallback: create test filters programmatically
+                return createStatusTestFiltersConfig();
+            }
+
+            Yaml yaml = new Yaml();
+            Map<String, Object> data = yaml.load(inputStream);
+            
+            FiltersConfig config = new FiltersConfig();
+            List<Map<String, Object>> filtersList = (List<Map<String, Object>>) data.get("filters");
+            
+            List<FilterConfig> filterConfigs = filtersList.stream()
+                    .map(this::mapToFilterConfigWithStatus)
+                    .toList();
+            
+            config.setFilters(filterConfigs);
+            return config;
+        } catch (Exception e) {
+            // Fallback: create test filters programmatically
+            return createStatusTestFiltersConfig();
+        }
+    }
+
+    private FilterConfig mapToFilterConfigWithStatus(Map<String, Object> map) {
+        FilterConfig config = mapToFilterConfig(map);
+        
+        // Map status and enabled fields
+        if (map.containsKey("status")) {
+            config.setStatus((String) map.get("status"));
+        }
+        if (map.containsKey("enabled")) {
+            config.setEnabled((Boolean) map.get("enabled"));
+        }
+        if (map.containsKey("version")) {
+            config.setVersion((Integer) map.get("version"));
+        }
+        
+        return config;
+    }
+
+    private FiltersConfig createStatusTestFiltersConfig() {
+        FiltersConfig config = new FiltersConfig();
+        
+        // Active filter
+        FilterCondition activeCondition = new FilterCondition();
+        activeCondition.setField("event_type");
+        activeCondition.setOperator("equals");
+        activeCondition.setValue("CarCreated");
+
+        FilterCondition activeOpCondition = new FilterCondition();
+        activeOpCondition.setField("__op");
+        activeOpCondition.setOperator("equals");
+        activeOpCondition.setValue("c");
+
+        FilterConfig activeFilter = new FilterConfig();
+        activeFilter.setId("active-filter");
+        activeFilter.setName("Active Filter");
+        activeFilter.setOutputTopic("filtered-active-events");
+        activeFilter.setConditions(List.of(activeCondition, activeOpCondition));
+        activeFilter.setConditionLogic("AND");
+        activeFilter.setStatus("active");
+        activeFilter.setEnabled(true);
+
+        // Deprecated filter
+        FilterCondition deprecatedCondition = new FilterCondition();
+        deprecatedCondition.setField("event_type");
+        deprecatedCondition.setOperator("equals");
+        deprecatedCondition.setValue("LoanCreated");
+
+        FilterCondition deprecatedOpCondition = new FilterCondition();
+        deprecatedOpCondition.setField("__op");
+        deprecatedOpCondition.setOperator("equals");
+        deprecatedOpCondition.setValue("c");
+
+        FilterConfig deprecatedFilter = new FilterConfig();
+        deprecatedFilter.setId("deprecated-filter");
+        deprecatedFilter.setName("Deprecated Filter");
+        deprecatedFilter.setOutputTopic("filtered-deprecated-events");
+        deprecatedFilter.setConditions(List.of(deprecatedCondition, deprecatedOpCondition));
+        deprecatedFilter.setConditionLogic("AND");
+        deprecatedFilter.setStatus("deprecated");
+        deprecatedFilter.setEnabled(true);
+
+        // Deleted filter
+        FilterConfig deletedFilter = new FilterConfig();
+        deletedFilter.setId("deleted-filter");
+        deletedFilter.setName("Deleted Filter");
+        deletedFilter.setOutputTopic("filtered-deleted-events");
+        deletedFilter.setStatus("deleted");
+        deletedFilter.setEnabled(true);
+
+        // Disabled filter
+        FilterConfig disabledFilter = new FilterConfig();
+        disabledFilter.setId("disabled-filter");
+        disabledFilter.setName("Disabled Filter");
+        disabledFilter.setOutputTopic("filtered-disabled-events");
+        disabledFilter.setStatus("active");
+        disabledFilter.setEnabled(false);
+
+        // Deployed filter
+        FilterCondition deployedCondition = new FilterCondition();
+        deployedCondition.setField("event_type");
+        deployedCondition.setOperator("equals");
+        deployedCondition.setValue("CarCreated");
+
+        FilterCondition deployedOpCondition = new FilterCondition();
+        deployedOpCondition.setField("__op");
+        deployedOpCondition.setOperator("equals");
+        deployedOpCondition.setValue("c");
+
+        FilterConfig deployedFilter = new FilterConfig();
+        deployedFilter.setId("deployed-filter");
+        deployedFilter.setName("Deployed Filter");
+        deployedFilter.setOutputTopic("filtered-deployed-events");
+        deployedFilter.setConditions(List.of(deployedCondition, deployedOpCondition));
+        deployedFilter.setConditionLogic("AND");
+        deployedFilter.setStatus("deployed");
+        deployedFilter.setEnabled(true);
+
+        config.setFilters(List.of(activeFilter, deprecatedFilter, deletedFilter, disabledFilter, deployedFilter));
+        return config;
+    }
 }
 

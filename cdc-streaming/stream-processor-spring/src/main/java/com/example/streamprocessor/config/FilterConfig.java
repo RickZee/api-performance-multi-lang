@@ -19,5 +19,8 @@ public class FilterConfig {
     private String outputTopic;
     private String conditionLogic;
     private List<FilterCondition> conditions;
+    private Boolean enabled;
+    private String status;
+    private Integer version;
 }
 

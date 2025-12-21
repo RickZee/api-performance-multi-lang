@@ -358,5 +358,303 @@ class KafkaStreamsConfigDynamicTest {
         // Then - Should complete without errors (invalid filter skipped)
         testDriverInvalid.close();
     }
+
+    @Test
+    void testDisabledFilter_ShouldNotCreateStream() {
+        // Given - Disabled filter
+        FilterCondition condition = new FilterCondition();
+        condition.setField("event_type");
+        condition.setOperator("equals");
+        condition.setValue("CarCreated");
+
+        FilterConfig disabledFilter = new FilterConfig();
+        disabledFilter.setId("disabled-filter");
+        disabledFilter.setName("Disabled Filter");
+        disabledFilter.setOutputTopic("filtered-disabled-events");
+        disabledFilter.setConditions(Collections.singletonList(condition));
+        disabledFilter.setConditionLogic("AND");
+        disabledFilter.setEnabled(false);
+
+        FiltersConfig filtersConfig = new FiltersConfig();
+        filtersConfig.setFilters(Collections.singletonList(disabledFilter));
+
+        KafkaStreamsConfig configWithDisabled = new KafkaStreamsConfig();
+        ReflectionTestUtils.setField(configWithDisabled, "sourceTopic", "raw-event-headers");
+        ReflectionTestUtils.setField(configWithDisabled, "filtersConfig", filtersConfig);
+
+        StreamsBuilder builder = new StreamsBuilder();
+        configWithDisabled.eventRoutingStream(builder);
+
+        Properties props = new Properties();
+        props.put("application.id", "test-app");
+        props.put("bootstrap.servers", "dummy:1234");
+
+        TopologyTestDriver testDriverDisabled = new TopologyTestDriver(builder.build(), props);
+
+        TestInputTopic<String, EventHeader> input = testDriverDisabled.createInputTopic(
+                "raw-event-headers",
+                stringSerde.serializer(),
+                eventHeaderSerde.serializer()
+        );
+
+        EventHeader event = EventHeader.builder()
+                .id("event-1")
+                .eventType("CarCreated")
+                .op("c")
+                .build();
+
+        // When
+        input.pipeInput("key-1", event);
+
+        // Then - Should not create output topic for disabled filter
+        TestOutputTopic<String, EventHeader> outputTopic = testDriverDisabled.createOutputTopic(
+                "filtered-disabled-events-spring",
+                stringSerde.deserializer(),
+                eventHeaderSerde.deserializer()
+        );
+
+        assertThat(outputTopic.isEmpty()).isTrue();
+        testDriverDisabled.close();
+    }
+
+    @Test
+    void testDeletedStatusFilter_ShouldNotCreateStream() {
+        // Given - Deleted filter
+        FilterCondition condition = new FilterCondition();
+        condition.setField("event_type");
+        condition.setOperator("equals");
+        condition.setValue("CarCreated");
+
+        FilterConfig deletedFilter = new FilterConfig();
+        deletedFilter.setId("deleted-filter");
+        deletedFilter.setName("Deleted Filter");
+        deletedFilter.setOutputTopic("filtered-deleted-events");
+        deletedFilter.setConditions(Collections.singletonList(condition));
+        deletedFilter.setConditionLogic("AND");
+        deletedFilter.setStatus("deleted");
+        deletedFilter.setEnabled(true);
+
+        FiltersConfig filtersConfig = new FiltersConfig();
+        filtersConfig.setFilters(Collections.singletonList(deletedFilter));
+
+        KafkaStreamsConfig configWithDeleted = new KafkaStreamsConfig();
+        ReflectionTestUtils.setField(configWithDeleted, "sourceTopic", "raw-event-headers");
+        ReflectionTestUtils.setField(configWithDeleted, "filtersConfig", filtersConfig);
+
+        StreamsBuilder builder = new StreamsBuilder();
+        configWithDeleted.eventRoutingStream(builder);
+
+        Properties props = new Properties();
+        props.put("application.id", "test-app");
+        props.put("bootstrap.servers", "dummy:1234");
+
+        TopologyTestDriver testDriverDeleted = new TopologyTestDriver(builder.build(), props);
+
+        TestInputTopic<String, EventHeader> input = testDriverDeleted.createInputTopic(
+                "raw-event-headers",
+                stringSerde.serializer(),
+                eventHeaderSerde.serializer()
+        );
+
+        EventHeader event = EventHeader.builder()
+                .id("event-1")
+                .eventType("CarCreated")
+                .op("c")
+                .build();
+
+        // When
+        input.pipeInput("key-1", event);
+
+        // Then - Should not create output topic for deleted filter
+        TestOutputTopic<String, EventHeader> outputTopic = testDriverDeleted.createOutputTopic(
+                "filtered-deleted-events-spring",
+                stringSerde.deserializer(),
+                eventHeaderSerde.deserializer()
+        );
+
+        assertThat(outputTopic.isEmpty()).isTrue();
+        testDriverDeleted.close();
+    }
+
+    @Test
+    void testDeprecatedFilter_ShouldStillProcessEvents() {
+        // Given - Deprecated filter (should still work, just log warning)
+        FilterCondition condition = new FilterCondition();
+        condition.setField("event_type");
+        condition.setOperator("equals");
+        condition.setValue("CarCreated");
+
+        FilterCondition opCondition = new FilterCondition();
+        opCondition.setField("__op");
+        opCondition.setOperator("equals");
+        opCondition.setValue("c");
+
+        FilterConfig deprecatedFilter = new FilterConfig();
+        deprecatedFilter.setId("deprecated-filter");
+        deprecatedFilter.setName("Deprecated Filter");
+        deprecatedFilter.setOutputTopic("filtered-deprecated-events");
+        deprecatedFilter.setConditions(Arrays.asList(condition, opCondition));
+        deprecatedFilter.setConditionLogic("AND");
+        deprecatedFilter.setStatus("deprecated");
+        deprecatedFilter.setEnabled(true);
+
+        FiltersConfig filtersConfig = new FiltersConfig();
+        filtersConfig.setFilters(Collections.singletonList(deprecatedFilter));
+
+        KafkaStreamsConfig configWithDeprecated = new KafkaStreamsConfig();
+        ReflectionTestUtils.setField(configWithDeprecated, "sourceTopic", "raw-event-headers");
+        ReflectionTestUtils.setField(configWithDeprecated, "filtersConfig", filtersConfig);
+
+        StreamsBuilder builder = new StreamsBuilder();
+        configWithDeprecated.eventRoutingStream(builder);
+
+        Properties props = new Properties();
+        props.put("application.id", "test-app");
+        props.put("bootstrap.servers", "dummy:1234");
+
+        TopologyTestDriver testDriverDeprecated = new TopologyTestDriver(builder.build(), props);
+
+        TestInputTopic<String, EventHeader> input = testDriverDeprecated.createInputTopic(
+                "raw-event-headers",
+                stringSerde.serializer(),
+                eventHeaderSerde.serializer()
+        );
+
+        EventHeader event = EventHeader.builder()
+                .id("event-1")
+                .eventType("CarCreated")
+                .op("c")
+                .table("event_headers")
+                .build();
+
+        // When
+        input.pipeInput("key-1", event);
+
+        // Then - Deprecated filter should still process events
+        TestOutputTopic<String, EventHeader> outputTopic = testDriverDeprecated.createOutputTopic(
+                "filtered-deprecated-events-spring",
+                stringSerde.deserializer(),
+                eventHeaderSerde.deserializer()
+        );
+
+        var output = outputTopic.readKeyValue();
+        assertThat(output).isNotNull();
+        assertThat(output.value.getEventType()).isEqualTo("CarCreated");
+        testDriverDeprecated.close();
+    }
+
+    @Test
+    void testMultipleFiltersWithDifferentStatuses() {
+        // Given - Multiple filters with different statuses
+        FilterCondition condition = new FilterCondition();
+        condition.setField("event_type");
+        condition.setOperator("equals");
+        condition.setValue("CarCreated");
+
+        FilterCondition opCondition = new FilterCondition();
+        opCondition.setField("__op");
+        opCondition.setOperator("equals");
+        opCondition.setValue("c");
+
+        // Active filter
+        FilterConfig activeFilter = new FilterConfig();
+        activeFilter.setId("active-filter");
+        activeFilter.setOutputTopic("filtered-active-events");
+        activeFilter.setConditions(Arrays.asList(condition, opCondition));
+        activeFilter.setConditionLogic("AND");
+        activeFilter.setStatus("active");
+        activeFilter.setEnabled(true);
+
+        // Deprecated filter
+        FilterConfig deprecatedFilter = new FilterConfig();
+        deprecatedFilter.setId("deprecated-filter");
+        deprecatedFilter.setOutputTopic("filtered-deprecated-events");
+        deprecatedFilter.setConditions(Arrays.asList(condition, opCondition));
+        deprecatedFilter.setConditionLogic("AND");
+        deprecatedFilter.setStatus("deprecated");
+        deprecatedFilter.setEnabled(true);
+
+        // Deleted filter
+        FilterConfig deletedFilter = new FilterConfig();
+        deletedFilter.setId("deleted-filter");
+        deletedFilter.setOutputTopic("filtered-deleted-events");
+        deletedFilter.setConditions(Arrays.asList(condition, opCondition));
+        deletedFilter.setConditionLogic("AND");
+        deletedFilter.setStatus("deleted");
+        deletedFilter.setEnabled(true);
+
+        // Disabled filter
+        FilterConfig disabledFilter = new FilterConfig();
+        disabledFilter.setId("disabled-filter");
+        disabledFilter.setOutputTopic("filtered-disabled-events");
+        disabledFilter.setConditions(Arrays.asList(condition, opCondition));
+        disabledFilter.setConditionLogic("AND");
+        disabledFilter.setStatus("active");
+        disabledFilter.setEnabled(false);
+
+        FiltersConfig filtersConfig = new FiltersConfig();
+        filtersConfig.setFilters(Arrays.asList(activeFilter, deprecatedFilter, deletedFilter, disabledFilter));
+
+        KafkaStreamsConfig config = new KafkaStreamsConfig();
+        ReflectionTestUtils.setField(config, "sourceTopic", "raw-event-headers");
+        ReflectionTestUtils.setField(config, "filtersConfig", filtersConfig);
+
+        StreamsBuilder builder = new StreamsBuilder();
+        config.eventRoutingStream(builder);
+
+        Properties props = new Properties();
+        props.put("application.id", "test-app");
+        props.put("bootstrap.servers", "dummy:1234");
+
+        TopologyTestDriver testDriver = new TopologyTestDriver(builder.build(), props);
+
+        TestInputTopic<String, EventHeader> input = testDriver.createInputTopic(
+                "raw-event-headers",
+                stringSerde.serializer(),
+                eventHeaderSerde.serializer()
+        );
+
+        EventHeader event = EventHeader.builder()
+                .id("event-1")
+                .eventType("CarCreated")
+                .op("c")
+                .table("event_headers")
+                .build();
+
+        // When
+        input.pipeInput("key-1", event);
+
+        // Then - Only active and deprecated filters should process
+        TestOutputTopic<String, EventHeader> activeOutput = testDriver.createOutputTopic(
+                "filtered-active-events-spring",
+                stringSerde.deserializer(),
+                eventHeaderSerde.deserializer()
+        );
+
+        TestOutputTopic<String, EventHeader> deprecatedOutput = testDriver.createOutputTopic(
+                "filtered-deprecated-events-spring",
+                stringSerde.deserializer(),
+                eventHeaderSerde.deserializer()
+        );
+
+        TestOutputTopic<String, EventHeader> deletedOutput = testDriver.createOutputTopic(
+                "filtered-deleted-events-spring",
+                stringSerde.deserializer(),
+                eventHeaderSerde.deserializer()
+        );
+
+        TestOutputTopic<String, EventHeader> disabledOutput = testDriver.createOutputTopic(
+                "filtered-disabled-events-spring",
+                stringSerde.deserializer(),
+                eventHeaderSerde.deserializer()
+        );
+
+        assertThat(activeOutput.isEmpty()).isFalse();
+        assertThat(deprecatedOutput.isEmpty()).isFalse();
+        assertThat(deletedOutput.isEmpty()).isTrue();
+        assertThat(disabledOutput.isEmpty()).isTrue();
+
+        testDriver.close();
+    }
 }
 

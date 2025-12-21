@@ -75,6 +75,29 @@ public class KafkaStreamsConfig {
                     continue;
                 }
                 
+                // Skip disabled filters
+                if (filterConfig.getEnabled() != null && !filterConfig.getEnabled()) {
+                    log.info("{} Skipping disabled filter: {}", LOG_PREFIX, filterConfig.getId());
+                    continue;
+                }
+                
+                // Skip deleted filters
+                if ("deleted".equals(filterConfig.getStatus())) {
+                    log.info("{} Skipping deleted filter: {}", LOG_PREFIX, filterConfig.getId());
+                    continue;
+                }
+                
+                // Skip pending_deletion filters
+                if ("pending_deletion".equals(filterConfig.getStatus())) {
+                    log.info("{} Skipping pending_deletion filter: {}", LOG_PREFIX, filterConfig.getId());
+                    continue;
+                }
+                
+                // Log warning for deprecated filters
+                if ("deprecated".equals(filterConfig.getStatus())) {
+                    log.warn("{} Filter {} is deprecated and may be removed soon", LOG_PREFIX, filterConfig.getId());
+                }
+                
                 // Add -spring suffix if not already present
                 final String outputTopic = filterConfig.getOutputTopic().endsWith("-spring") 
                     ? filterConfig.getOutputTopic() 

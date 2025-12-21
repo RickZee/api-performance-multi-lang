@@ -21,11 +21,20 @@ if [ -z "$BASTION_INSTANCE_ID" ] || [ -z "$DSQL_HOST" ]; then
     exit 1
 fi
 
-# Create results directory
-TIMESTAMP=$(date +"%Y-%m-%d_%H-%M-%S")
-RESULTS_DIR="$SCRIPT_DIR/results/$TIMESTAMP"
-mkdir -p "$RESULTS_DIR"
-ln -sfn "$TIMESTAMP" "$SCRIPT_DIR/results/latest"
+# Check for resume option
+RESUME="${RESUME:-false}"
+if [ "$RESUME" = "true" ] && [ -d "$SCRIPT_DIR/results/latest" ]; then
+    RESULTS_DIR="$SCRIPT_DIR/results/latest"
+    TIMESTAMP=$(basename "$RESULTS_DIR")
+    echo "Resuming from previous test run: $TIMESTAMP"
+    echo "Will skip already completed tests"
+else
+    # Create new results directory
+    TIMESTAMP=$(date +"%Y-%m-%d_%H-%M-%S")
+    RESULTS_DIR="$SCRIPT_DIR/results/$TIMESTAMP"
+    mkdir -p "$RESULTS_DIR"
+    ln -sfn "$TIMESTAMP" "$SCRIPT_DIR/results/latest"
+fi
 
 echo "=========================================="
 echo "DSQL Performance Test Suite"
@@ -250,8 +259,13 @@ for group in $(jq -r '.test_groups | keys[]' "$CONFIG_FILE"); do
                     test_id=$(printf "test-%03d-scenario%d-threads%d-loops%d-count%d-payload%s" \
                              $TEST_NUM $scenario $t $i $c "$payload_str")
                     
-                    echo "[$TEST_NUM/$TOTAL_TESTS]"
-                    run_test "$test_id" "$scenario" "$t" "$i" "$c" "$p"
+                    # Check if test already completed (resume mode)
+                    if [ "$RESUME" = "true" ] && [ -f "$RESULTS_DIR/$test_id.json" ]; then
+                        echo "[$TEST_NUM/$TOTAL_TESTS] SKIPPED (already completed): $test_id"
+                    else
+                        echo "[$TEST_NUM/$TOTAL_TESTS]"
+                        run_test "$test_id" "$scenario" "$t" "$i" "$c" "$p"
+                    fi
                     
                     TEST_NUM=$((TEST_NUM + 1))
                 done
