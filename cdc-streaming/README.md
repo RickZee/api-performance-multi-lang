@@ -168,10 +168,24 @@ Consumers subscribe to the appropriate topic based on which processor is active.
 
 ### Filter Configuration
 
-Filtering rules are defined in Flink SQL files:
+**Dynamic Filter Configuration (Recommended)**
+
+Filters can be managed through a unified JSON configuration file:
+
+- `config/filters.json` - Unified filter configuration (single source of truth)
+- `scripts/filters/generate-filters.sh` - Generate Flink SQL and Spring YAML from config
+- `scripts/filters/validate-filters.sh` - Validate filter configuration
+- `scripts/filters/deploy-flink-filters.sh` - Deploy filters to Flink
+- `scripts/filters/deploy-spring-filters.sh` - Deploy filters to Spring Boot
+
+See [FILTER_CONFIGURATION.md](docs/FILTER_CONFIGURATION.md) for complete documentation.
+
+**Legacy Manual Configuration**
+
+Filtering rules can also be defined manually in Flink SQL files:
 
 - `flink-jobs/business-events-routing-confluent-cloud.sql` - Main routing job (streams from event_headers)
-- Edit SQL files to modify filtering rules
+- `flink-jobs/generated/business-events-routing-confluent-cloud-generated.sql` - Auto-generated from filters.json
 
 ### Connector Configuration
 

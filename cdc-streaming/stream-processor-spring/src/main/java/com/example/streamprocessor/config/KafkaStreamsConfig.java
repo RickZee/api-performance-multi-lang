@@ -8,13 +8,18 @@ import org.apache.kafka.streams.kstream.Consumed;
 import org.apache.kafka.streams.kstream.KStream;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.kafka.annotation.EnableKafkaStreams;
 
+import java.util.List;
+import java.util.function.Predicate;
+
 /**
  * Kafka Streams configuration for event routing.
+ * Dynamically loads filters from filters.yml configuration.
  */
 @Configuration
 @EnableKafkaStreams
@@ -25,6 +30,9 @@ public class KafkaStreamsConfig {
 
     @Value("${spring.kafka.streams.source-topic}")
     private String sourceTopic;
+
+    @Autowired(required = false)
+    private FiltersConfig filtersConfig;
 
     private final Serde<String> stringSerde = Serdes.String();
     private final Serde<com.example.streamprocessor.model.EventHeader> eventHeaderSerde = new EventHeaderSerde();
@@ -56,74 +64,46 @@ public class KafkaStreamsConfig {
             }
         });
 
-        // Route to filtered-car-created-events-spring
-        // Filter: event_type = 'CarCreated' AND __op = 'c'
-        // Note: Spring Boot writes to -spring suffixed topics to distinguish from Flink processor
-        source.filter((key, value) -> 
-            value != null && 
-            "CarCreated".equals(value.getEventType()) && 
-            "c".equals(value.getOp())
-        ).peek((key, value) -> {
-            log.info("{} Event sent to filtered-car-created-events-spring - id={}, event_name={}, event_type={}, __op={}, __ts_ms={}",
-                LOG_PREFIX,
-                value != null ? value.getId() : "null",
-                value != null ? value.getEventName() : "null",
-                value != null ? value.getEventType() : "null",
-                value != null ? value.getOp() : "null",
-                value != null ? value.getTsMs() : null
-            );
-        }).to("filtered-car-created-events-spring");
-
-        // Route to filtered-loan-created-events-spring
-        // Filter: event_type = 'LoanCreated' AND __op = 'c'
-        source.filter((key, value) -> 
-            value != null && 
-            "LoanCreated".equals(value.getEventType()) && 
-            "c".equals(value.getOp())
-        ).peek((key, value) -> {
-            log.info("{} Event sent to filtered-loan-created-events-spring - id={}, event_name={}, event_type={}, __op={}, __ts_ms={}",
-                LOG_PREFIX,
-                value != null ? value.getId() : "null",
-                value != null ? value.getEventName() : "null",
-                value != null ? value.getEventType() : "null",
-                value != null ? value.getOp() : "null",
-                value != null ? value.getTsMs() : null
-            );
-        }).to("filtered-loan-created-events-spring");
-
-        // Route to filtered-loan-payment-submitted-events-spring
-        // Filter: event_type = 'LoanPaymentSubmitted' AND __op = 'c'
-        source.filter((key, value) -> 
-            value != null && 
-            "LoanPaymentSubmitted".equals(value.getEventType()) && 
-            "c".equals(value.getOp())
-        ).peek((key, value) -> {
-            log.info("{} Event sent to filtered-loan-payment-submitted-events-spring - id={}, event_name={}, event_type={}, __op={}, __ts_ms={}",
-                LOG_PREFIX,
-                value != null ? value.getId() : "null",
-                value != null ? value.getEventName() : "null",
-                value != null ? value.getEventType() : "null",
-                value != null ? value.getOp() : "null",
-                value != null ? value.getTsMs() : null
-            );
-        }).to("filtered-loan-payment-submitted-events-spring");
-
-        // Route to filtered-service-events-spring
-        // Filter: event_type = 'CarServiceDone' AND __op = 'c'
-        source.filter((key, value) -> 
-            value != null && 
-            "CarServiceDone".equals(value.getEventType()) && 
-            "c".equals(value.getOp())
-        ).peek((key, value) -> {
-            log.info("{} Event sent to filtered-service-events-spring - id={}, event_name={}, event_type={}, __op={}, __ts_ms={}",
-                LOG_PREFIX,
-                value != null ? value.getId() : "null",
-                value != null ? value.getEventName() : "null",
-                value != null ? value.getEventType() : "null",
-                value != null ? value.getOp() : "null",
-                value != null ? value.getTsMs() : null
-            );
-        }).to("filtered-service-events-spring");
+        // Apply dynamic filters from configuration
+        if (filtersConfig != null && filtersConfig.getFilters() != null) {
+            List<FilterConfig> filters = filtersConfig.getFilters();
+            log.info("{} Loading {} filter(s) from configuration", LOG_PREFIX, filters.size());
+            
+            for (FilterConfig filterConfig : filters) {
+                if (filterConfig == null || filterConfig.getId() == null || filterConfig.getOutputTopic() == null) {
+                    log.warn("{} Skipping invalid filter configuration", LOG_PREFIX);
+                    continue;
+                }
+                
+                // Add -spring suffix if not already present
+                final String outputTopic = filterConfig.getOutputTopic().endsWith("-spring") 
+                    ? filterConfig.getOutputTopic() 
+                    : filterConfig.getOutputTopic() + "-spring";
+                
+                log.info("{} Configuring filter: {} -> {}", LOG_PREFIX, filterConfig.getId(), outputTopic);
+                
+                // Create predicate from filter conditions
+                final Predicate<com.example.streamprocessor.model.EventHeader> filterPredicate = 
+                    FilterConditionEvaluator.createPredicate(filterConfig);
+                
+                // Apply filter and route to output topic
+                source.filter((key, value) -> filterPredicate.test(value))
+                    .peek((key, value) -> {
+                        log.info("{} Event sent to {} - id={}, event_name={}, event_type={}, __op={}, __ts_ms={}",
+                            LOG_PREFIX, outputTopic,
+                            value != null ? value.getId() : "null",
+                            value != null ? value.getEventName() : "null",
+                            value != null ? value.getEventType() : "null",
+                            value != null ? value.getOp() : "null",
+                            value != null ? value.getTsMs() : null
+                        );
+                    })
+                    .to(outputTopic);
+            }
+        } else {
+            log.warn("{} No filter configuration found. Filters will not be applied.", LOG_PREFIX);
+            log.warn("{} Ensure filters.yml exists in src/main/resources/", LOG_PREFIX);
+        }
 
         return source;
     }

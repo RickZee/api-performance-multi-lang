@@ -229,6 +229,76 @@ For more information, see:
 - [Lambda gRPC API README](../producer-api-go-grpc-lambda/README.md)
 - [Terraform README](../terraform/README.md)
 
+## DSQL Java Load Test - Deployment Package
+
+The DSQL Java load test suite uses an S3-based deployment mechanism to execute tests on a bastion host (EC2 instance) with direct access to the DSQL database.
+
+### Deployment Package Overview
+
+The **deployment package** is a compressed archive containing the Java load test source code that gets uploaded to S3 and then deployed to the bastion host for execution.
+
+**What it contains:**
+- `pom.xml` - Maven project configuration and dependencies
+- `src/` - All Java source code (DSQLLoadTest, EventGenerator, EventRepository, etc.)
+
+### Deployment Process
+
+The deployment process follows these steps:
+
+1. **Create Package** (local):
+   ```bash
+   tar czf /tmp/dsql-load-test-java.tar.gz pom.xml src/
+   ```
+   Creates a compressed tar archive of the Java project.
+
+2. **Upload to S3**:
+   ```bash
+   aws s3 cp /tmp/dsql-load-test-java.tar.gz "s3://$S3_BUCKET/dsql-load-test-java.tar.gz"
+   ```
+   Uploads the archive to an S3 bucket (bucket name from Terraform outputs).
+
+3. **Download on Bastion** (for each test):
+   ```bash
+   aws s3 cp s3://$S3_BUCKET/dsql-load-test-java.tar.gz ./
+   ```
+   Each test downloads the package to the bastion host via AWS SSM.
+
+4. **Build and Run**:
+   ```bash
+   tar xzf dsql-load-test-java.tar.gz
+   mvn clean package -DskipTests -q
+   java -jar target/dsql-load-test-1.0.0.jar
+   ```
+   Extracts, builds with Maven, and executes the test.
+
+### Why This Approach?
+
+- **Remote Execution**: Tests run on the bastion host (EC2 instance) which has direct network access to DSQL
+- **Code Distribution**: The bastion host doesn't have the code locally, so it's transferred via S3
+- **Version Control**: Ensures each test uses the latest code version from the repository
+- **Automation**: Avoids manual code deployment steps
+- **Isolation**: Each test gets a fresh build environment
+
+### S3 Bucket Configuration
+
+The S3 bucket name is retrieved from Terraform outputs (`s3_bucket_name`). The bucket is typically named something like `producer-api-lambda-deployments-{account-id}` and is created as part of the infrastructure setup.
+
+### Test Execution Flow
+
+1. Test suite script (`run-performance-suite.sh`) creates and uploads the deployment package once
+2. For each test in the matrix:
+   - SSM command is sent to the bastion host
+   - Bastion downloads the package from S3
+   - Code is extracted and built
+   - Test executes with specified parameters
+   - Results are collected and saved locally
+
+This approach ensures consistent, reproducible test execution across all test runs while maintaining separation between the test orchestration (local) and test execution (bastion host).
+
+For more information, see:
+- [DSQL Load Test Java README](../load-test/dsql-load-test-java/README.md)
+- [DSQL Performance Test Suite](../load-test/dsql-load-test-java/PERFORMANCE_TEST_SUITE_README.md)
+
 ## K6 Shared Utilities
 
 The `k6/shared/` subdirectory contains shared JavaScript utilities for k6 load testing scripts.

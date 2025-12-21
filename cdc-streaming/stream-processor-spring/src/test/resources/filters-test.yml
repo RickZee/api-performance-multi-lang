@@ -1,0 +1,41 @@
+# Test filter configuration for integration tests
+filters:
+  - id: car-created-filter
+    name: Car Created Events
+    description: Filters CarCreated events by event_type
+    outputTopic: filtered-car-created-events
+    conditionLogic: AND
+    conditions:
+      - field: event_type
+        operator: equals
+        value: "CarCreated"
+      - field: __op
+        operator: equals
+        value: "c"
+  
+  - id: loan-created-filter
+    name: Loan Created Events
+    description: Filters LoanCreated events by event_type
+    outputTopic: filtered-loan-created-events
+    conditionLogic: AND
+    conditions:
+      - field: event_type
+        operator: equals
+        value: "LoanCreated"
+      - field: __op
+        operator: equals
+        value: "c"
+  
+  - id: service-events-filter
+    name: Service Events
+    description: Filters CarServiceDone events by event_type
+    outputTopic: filtered-service-events
+    conditionLogic: AND
+    conditions:
+      - field: event_type
+        operator: equals
+        value: "CarServiceDone"
+      - field: __op
+        operator: equals
+        value: "c"
+

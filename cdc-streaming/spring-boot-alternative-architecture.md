@@ -1,5 +1,38 @@
 # Spring Boot CDC Alternative Architecture on AWS EKS
 
+## Recommendation Summary
+
+| Dimension | Winner | Notes |
+|-----------|--------|-------|
+| **Infrastructure Cost** | Spring Boot | ~25-30% cheaper (eliminates Flink compute costs; connector costs same for both) |
+| **Engineering Cost** | Confluent Flink | Lower initial (Flink SQL simpler than Java), similar ongoing (both require Kafka Connect ops) |
+| **Maintainability** | Confluent Flink | Flink SQL simpler than Java code; connector maintenance same for both |
+| **Risk** | Confluent Flink | Flink managed HA/auto-recovery; connector risks same for both (K8s operational maturity required) |
+| **CI/CD** | Spring Boot | Better testing, but more complex; connector deployment same for both |
+| **Schema Evolution** | Tie | Both support well |
+| **Security** | Confluent Flink | Flink managed compliance; connector security same for both |
+| **Monitoring** | Confluent Flink | Pre-built Flink dashboards; connector monitoring same for both |
+| **Performance** | Confluent Flink | Flink auto-scales better; connector scaling same for both |
+
+**Overall Recommendation:**
+
+Choose **Spring Boot** if:
+
+- Cost reduction is primary driver (eliminates Flink compute costs)
+- Team has strong Java/Kotlin and Kubernetes expertise
+- You need full control over the stream processing stack
+- Simple filtering workloads (current case)
+- You have operational maturity for managing Kafka Connect (required for both implementations)
+
+Stay with **Confluent Flink** if:
+
+- Operational simplicity is priority (managed Flink reduces operational burden)
+- Team prefers SQL-based development
+- Compliance requirements need managed services (Flink)
+- Complex stream processing may be needed later
+- Limited Java/Kotlin expertise
+- Both implementations require Kafka Connect operational expertise, so connector management is not a differentiator
+
 ## Confluent Flink Architecture Analysis
 
 The existing CDC streaming system ([ARCHITECTURE.md](ARCHITECTURE.md)) uses:
@@ -450,38 +483,3 @@ cd cdc-streaming/e2e-tests
 ./gradlew test --tests LatencyBenchmarkTest
 ./gradlew test --tests ResilienceTest
 ```
-
----
-
-## Recommendation Summary
-
-| Dimension | Winner | Notes |
-|-----------|--------|-------|
-| **Infrastructure Cost** | Spring Boot | ~25-30% cheaper (eliminates Flink compute costs; connector costs same for both) |
-| **Engineering Cost** | Confluent Flink | Lower initial (Flink SQL simpler than Java), similar ongoing (both require Kafka Connect ops) |
-| **Maintainability** | Confluent Flink | Flink SQL simpler than Java code; connector maintenance same for both |
-| **Risk** | Confluent Flink | Flink managed HA/auto-recovery; connector risks same for both (K8s operational maturity required) |
-| **CI/CD** | Spring Boot | Better testing, but more complex; connector deployment same for both |
-| **Schema Evolution** | Tie | Both support well |
-| **Security** | Confluent Flink | Flink managed compliance; connector security same for both |
-| **Monitoring** | Confluent Flink | Pre-built Flink dashboards; connector monitoring same for both |
-| **Performance** | Confluent Flink | Flink auto-scales better; connector scaling same for both |
-
-**Overall Recommendation:**
-
-Choose **Spring Boot** if:
-
-- Cost reduction is primary driver (eliminates Flink compute costs)
-- Team has strong Java/Kotlin and Kubernetes expertise
-- You need full control over the stream processing stack
-- Simple filtering workloads (current case)
-- You have operational maturity for managing Kafka Connect (required for both implementations)
-
-Stay with **Confluent Flink** if:
-
-- Operational simplicity is priority (managed Flink reduces operational burden)
-- Team prefers SQL-based development
-- Compliance requirements need managed services (Flink)
-- Complex stream processing may be needed later
-- Limited Java/Kotlin expertise
-- Both implementations require Kafka Connect operational expertise, so connector management is not a differentiator

@@ -1,0 +1,56 @@
+{
+  "baseline": {
+    "threads": 10,
+    "iterations": 100,
+    "batch_size": 10,
+    "payload_size": null,
+    "event_type": "CarCreated"
+  },
+  "test_groups": {
+    "scenario1_thread_scaling": {
+      "scenario": 1,
+      "threads": [1, 10, 25, 50, 100],
+      "iterations": 100,
+      "count": 1,
+      "payload_size": null
+    },
+    "scenario1_loop_impact": {
+      "scenario": 1,
+      "threads": 10,
+      "iterations": [10, 100, 1000, 5000],
+      "count": 1,
+      "payload_size": null
+    },
+    "scenario1_payload_impact": {
+      "scenario": 1,
+      "threads": 10,
+      "iterations": 100,
+      "count": 1,
+      "payload_size": [null, "4k", "32k", "200k"]
+    },
+    "scenario2_thread_scaling": {
+      "scenario": 2,
+      "threads": [1, 10, 25, 50, 100],
+      "iterations": 100,
+      "count": 10,
+      "batch_size": 10,
+      "payload_size": null
+    },
+    "scenario2_batch_impact": {
+      "scenario": 2,
+      "threads": 10,
+      "iterations": 100,
+      "count": [1, 10, 25, 50, 100],
+      "payload_size": null
+    },
+    "scenario2_payload_impact": {
+      "scenario": 2,
+      "threads": 10,
+      "iterations": 100,
+      "count": 10,
+      "batch_size": 10,
+      "payload_size": [null, "4k", "32k", "200k"]
+    }
+  }
+}
+

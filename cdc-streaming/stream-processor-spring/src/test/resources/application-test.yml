@@ -1,0 +1,19 @@
+spring:
+  application:
+    name: stream-processor-spring-test
+  
+  kafka:
+    streams:
+      application-id: test-event-stream-processor
+      bootstrap-servers: localhost:9092
+      source-topic: raw-event-headers
+      properties:
+        default.key.serde: org.apache.kafka.common.serialization.Serdes$StringSerde
+        default.value.serde: com.example.streamprocessor.serde.EventHeaderSerde
+
+logging:
+  level:
+    com.example.streamprocessor: DEBUG
+    org.apache.kafka: WARN
+    org.springframework.kafka: WARN
+

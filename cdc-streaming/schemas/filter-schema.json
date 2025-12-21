@@ -82,12 +82,6 @@
                   "enum": ["string", "number", "boolean", "timestamp"],
                   "default": "string",
                   "description": "Type of the value for proper SQL casting"
-                },
-                "logicalOperator": {
-                  "type": "string",
-                  "enum": ["AND", "OR"],
-                  "default": "AND",
-                  "description": "Logical operator to combine with previous condition"
                 }
               },
               "allOf": [
@@ -156,9 +150,9 @@
           },
           "status": {
             "type": "string",
-            "enum": ["pending_approval", "approved", "deploying", "deployed", "failed", "disabled"],
+            "enum": ["pending_approval", "approved", "deploying", "deployed", "failed", "disabled", "active", "deprecated", "pending_deletion", "deleted"],
             "default": "pending_approval",
-            "description": "Current status of the filter in the deployment workflow"
+            "description": "Current status of the filter in the deployment workflow. Lifecycle states: active (enabled and deployed), deprecated (disabled, may be removed soon), pending_deletion (awaiting cleanup), deleted (marked for removal, kept for audit trail)"
           },
           "createdAt": {
             "type": "string",

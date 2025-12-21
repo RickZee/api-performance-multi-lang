@@ -40,6 +40,9 @@ dependencies {
     testImplementation 'org.springframework.kafka:spring-kafka-test'
     testImplementation 'org.apache.kafka:kafka-streams-test-utils'
     testImplementation 'org.assertj:assertj-core'
+    
+    // YAML parsing for tests
+    testImplementation 'org.yaml:snakeyaml'
 }
 
 tasks.named('test') {

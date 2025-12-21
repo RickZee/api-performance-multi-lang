@@ -2,6 +2,11 @@ spring:
   application:
     name: stream-processor-spring
   
+  config:
+    import: optional:file:./filters.yml
+    activate:
+      on-profile: default
+  
   kafka:
     streams:
       application-id: event-stream-processor

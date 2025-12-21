@@ -1,0 +1,106 @@
+{
+  "version": 1,
+  "filters": [
+    {
+      "id": "car-created-filter",
+      "name": "Car Created Events",
+      "description": "Filters CarCreated events by event_type",
+      "consumerId": "car-consumer",
+      "outputTopic": "filtered-car-created-events",
+      "enabled": true,
+      "conditions": [
+        {
+          "field": "event_type",
+          "operator": "equals",
+          "value": "CarCreated",
+          "valueType": "string"
+        },
+        {
+          "field": "__op",
+          "operator": "equals",
+          "value": "c",
+          "valueType": "string"
+        }
+      ],
+      "conditionLogic": "AND",
+      "status": "deployed",
+      "version": 1
+    },
+    {
+      "id": "loan-created-filter",
+      "name": "Loan Created Events",
+      "description": "Filters LoanCreated events by event_type",
+      "consumerId": "loan-consumer",
+      "outputTopic": "filtered-loan-created-events",
+      "enabled": true,
+      "conditions": [
+        {
+          "field": "event_type",
+          "operator": "equals",
+          "value": "LoanCreated",
+          "valueType": "string"
+        },
+        {
+          "field": "__op",
+          "operator": "equals",
+          "value": "c",
+          "valueType": "string"
+        }
+      ],
+      "conditionLogic": "AND",
+      "status": "deployed",
+      "version": 1
+    },
+    {
+      "id": "loan-payment-submitted-filter",
+      "name": "Loan Payment Submitted Events",
+      "description": "Filters LoanPaymentSubmitted events by event_type",
+      "consumerId": "loan-payment-consumer",
+      "outputTopic": "filtered-loan-payment-submitted-events",
+      "enabled": true,
+      "conditions": [
+        {
+          "field": "event_type",
+          "operator": "equals",
+          "value": "LoanPaymentSubmitted",
+          "valueType": "string"
+        },
+        {
+          "field": "__op",
+          "operator": "equals",
+          "value": "c",
+          "valueType": "string"
+        }
+      ],
+      "conditionLogic": "AND",
+      "status": "deployed",
+      "version": 1
+    },
+    {
+      "id": "service-events-filter",
+      "name": "Service Events",
+      "description": "Filters CarServiceDone events by event_type",
+      "consumerId": "service-consumer",
+      "outputTopic": "filtered-service-events",
+      "enabled": true,
+      "conditions": [
+        {
+          "field": "event_type",
+          "operator": "equals",
+          "value": "CarServiceDone",
+          "valueType": "string"
+        },
+        {
+          "field": "__op",
+          "operator": "equals",
+          "value": "c",
+          "valueType": "string"
+        }
+      ],
+      "conditionLogic": "AND",
+      "status": "deployed",
+      "version": 1
+    }
+  ]
+}
+

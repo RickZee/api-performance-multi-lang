@@ -186,6 +186,8 @@ public class DSQLLoadTest {
         String countStr = System.getenv("COUNT");
         String eventType = System.getenv("EVENT_TYPE");
         String payloadSizeStr = System.getenv("PAYLOAD_SIZE");
+        String outputDir = System.getenv("OUTPUT_DIR");
+        String testId = System.getenv("TEST_ID");
         
         // Defaults
         if (dsqlHost == null) dsqlHost = "vftmkydwxvxys6asbsc6ih2the.dsql-fnh4.us-east-1.on.aws";
@@ -218,7 +220,15 @@ public class DSQLLoadTest {
         int iterations = Integer.parseInt(iterationsStr);
         int count = Integer.parseInt(countStr);
         
+        // Generate test ID if not provided
+        if (testId == null || testId.isEmpty()) {
+            testId = String.format("test-%s-threads%d-loops%d-count%d-%s", 
+                                  scenario, threads, iterations, count, 
+                                  payloadSize != null ? payloadSize + "bytes" : "default");
+        }
+        
         System.out.println("DSQL Load Test Configuration:");
+        System.out.println("  Test ID: " + testId);
         System.out.println("  Host: " + dsqlHost);
         System.out.println("  Port: " + port);
         System.out.println("  Database: " + databaseName);
@@ -234,7 +244,19 @@ public class DSQLLoadTest {
         } else {
             System.out.println("  Payload Size: default (~0.5-0.7 KB)");
         }
+        if (outputDir != null && !outputDir.isEmpty()) {
+            System.out.println("  Output Directory: " + outputDir);
+        }
         System.out.println();
+        
+        // Initialize results collector
+        TestResultsCollector collector = null;
+        if (outputDir != null && !outputDir.isEmpty()) {
+            collector = new TestResultsCollector(outputDir, testId);
+            int scenarioNum = "1".equals(scenario) ? 1 : ("2".equals(scenario) ? 2 : 0);
+            collector.setConfiguration(scenarioNum, threads, iterations, count, eventType, payloadSize,
+                                       dsqlHost, databaseName, iamUsername, region);
+        }
         
         DSQLConnection connection = new DSQLConnection(dsqlHost, port, databaseName, iamUsername, region);
         DSQLLoadTest test = new DSQLLoadTest(connection, eventType, payloadSize);
@@ -247,7 +269,8 @@ public class DSQLLoadTest {
             if ("1".equals(scenario) || "both".equals(scenario)) {
                 System.out.println("=== Scenario 1: Individual Inserts ===");
                 System.out.println("Starting " + threads + " threads, " + iterations + " iterations each, " + count + " inserts per iteration");
-                System.out.println("Expected total: " + (threads * iterations * count) + " rows");
+                int expectedRows1 = threads * iterations * count;
+                System.out.println("Expected total: " + expectedRows1 + " rows");
                 System.out.println();
                 
                 long startTime = System.currentTimeMillis();
@@ -275,6 +298,17 @@ public class DSQLLoadTest {
                 
                 long totalDuration = System.currentTimeMillis() - startTime;
                 printResults("Scenario 1", results1, totalDuration);
+                
+                // Record results
+                if (collector != null) {
+                    int totalSuccess = results1.stream().mapToInt(r -> r.successCount).sum();
+                    int totalErrors = results1.stream().mapToInt(r -> r.errorCount).sum();
+                    double avgRate = results1.stream().mapToDouble(r -> r.insertsPerSecond).average().orElse(0);
+                    double throughput = totalDuration > 0 ? (totalSuccess * 1000.0) / totalDuration : 0;
+                    collector.recordScenarioResult(1, totalSuccess, totalErrors, totalDuration, 
+                                                   throughput, avgRate, expectedRows1, totalSuccess, results1);
+                }
+                
                 futures.clear();
             }
             
@@ -282,7 +316,8 @@ public class DSQLLoadTest {
             if ("2".equals(scenario) || "both".equals(scenario)) {
                 System.out.println("\n=== Scenario 2: Batch Inserts ===");
                 System.out.println("Starting " + threads + " threads, " + iterations + " iterations each, " + count + " rows per batch");
-                System.out.println("Expected total: " + (threads * iterations * count) + " rows");
+                int expectedRows2 = threads * iterations * count;
+                System.out.println("Expected total: " + expectedRows2 + " rows");
                 System.out.println();
                 
                 long startTime = System.currentTimeMillis();
@@ -310,6 +345,45 @@ public class DSQLLoadTest {
                 
                 long totalDuration = System.currentTimeMillis() - startTime;
                 printResults("Scenario 2", results2, totalDuration);
+                
+                // Record results
+                if (collector != null) {
+                    int totalSuccess = results2.stream().mapToInt(r -> r.successCount).sum();
+                    int totalErrors = results2.stream().mapToInt(r -> r.errorCount).sum();
+                    double avgRate = results2.stream().mapToDouble(r -> r.insertsPerSecond).average().orElse(0);
+                    double throughput = totalDuration > 0 ? (totalSuccess * 1000.0) / totalDuration : 0;
+                    collector.recordScenarioResult(2, totalSuccess, totalErrors, totalDuration, 
+                                                   throughput, avgRate, expectedRows2, totalSuccess, results2);
+                }
+            }
+            
+            // Export results to JSON
+            if (collector != null) {
+                try {
+                    // Calculate total expected and actual for validation
+                    int totalExpected = 0;
+                    int totalActual = 0;
+                    if ("1".equals(scenario) || "both".equals(scenario)) {
+                        totalExpected += threads * iterations * count;
+                        if (collector.getMetrics().getResults() != null && 
+                            collector.getMetrics().getResults().getScenario1() != null) {
+                            totalActual += collector.getMetrics().getResults().getScenario1().getActualRows();
+                        }
+                    }
+                    if ("2".equals(scenario) || "both".equals(scenario)) {
+                        totalExpected += threads * iterations * count;
+                        if (collector.getMetrics().getResults() != null && 
+                            collector.getMetrics().getResults().getScenario2() != null) {
+                            totalActual += collector.getMetrics().getResults().getScenario2().getActualRows();
+                        }
+                    }
+                    collector.setDatabaseValidation(totalExpected, totalActual);
+                    
+                    collector.exportToJson();
+                    System.out.println("\nResults exported to: " + outputDir + "/" + testId + ".json");
+                } catch (Exception e) {
+                    LOGGER.error("Failed to export results: {}", e.getMessage(), e);
+                }
             }
             
         } catch (Exception e) {
