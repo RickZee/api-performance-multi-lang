@@ -101,24 +101,29 @@ flowchart LR
             SP["Spring Boot
             Stream Processor
             Kafka Streams"]
-            Consumer["Consumer"]
+            subgraph Consumer["Consumers"]
+                C1[loan-consumer]
+                C2[car-consumer]
+                C3[service-consumer]
+                C4[loan-payment-consumer]
+            end
         end
     end
 
     subgraph ConfluentCloud["Confluent Cloud"]
-        KR[raw-business-events]
-        KF1[filtered-loan-events]
-        KF2[filtered-car-events]
-        KF3[filtered-service-events]
-        KF4[filtered-payment-events]
+        KR[raw-event-headers]
+        KF1[filtered-loan-created-events-spring]
+        KF2[filtered-car-created-events-spring]
+        KF3[filtered-service-events-spring]
+        KF4[filtered-loan-payment-submitted-events-spring]
     end
 
     PG --> KC --> KR --> SP
     SP --> KF1 & KF2 & KF3 & KF4
-    KF1 --> Consumer
-    KF2 --> Consumer
-    KF3 --> Consumer
-    KF4 --> Consumer
+    KF1 --> C1
+    KF2 --> C2
+    KF3 --> C3
+    KF4 --> C4
 ```
 
 ### Service Components
@@ -233,7 +238,7 @@ Both implementations use the same filter configuration system (`cdc-streaming/co
 **Flink CI/CD Workflow:**
 
 ```mermaid
-flowchart LR
+flowchart TD
     A[Filter Config Change] --> B[validate-filters.sh]
     B --> C[generate-filters.sh]
     C --> D[deploy-flink-filters.sh]
@@ -256,7 +261,7 @@ flowchart LR
 **Spring Boot CI/CD Workflow:**
 
 ```mermaid
-flowchart LR
+flowchart TD
     A[Filter Config Change] --> B[validate-filters.sh]
     B --> C[generate-filters.sh]
     C --> D[deploy-spring-filters.sh]
@@ -772,8 +777,11 @@ spring-cloud-stream-binder-kafka-streams
 
 **Features:**
 
-- Consumer application processes filtered events from all 4 topics
-- Consumes from filtered-loan-events, filtered-car-events, filtered-service-events, and filtered-payment-events
+- 4 separate consumer applications, each processing events from their specific topic
+- loan-consumer: consumes from `filtered-loan-created-events-spring`
+- car-consumer: consumes from `filtered-car-created-events-spring`
+- service-consumer: consumes from `filtered-service-events-spring`
+- loan-payment-consumer: consumes from `filtered-loan-payment-submitted-events-spring`
 - Runs in AWS account (EKS or other AWS infrastructure)
 - Integrates with monitoring and observability stack
 

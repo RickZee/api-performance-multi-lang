@@ -1,3 +1,15 @@
+-- ⚠️ DEPRECATED: DO NOT USE THIS FILE ⚠️
+-- ============================================================================
+-- WARNING: This file creates topics WITHOUT the required -flink suffix
+-- ============================================================================
+-- This file creates topics like "filtered-car-created-events" instead of
+-- "filtered-car-created-events-flink", which breaks the processor-specific
+-- naming scheme and creates orphaned topics.
+--
+-- ⚠️ ALWAYS USE: business-events-routing-confluent-cloud.sql instead
+-- ⚠️ This file is kept for historical reference only
+-- ============================================================================
+--
 -- Flink SQL Statements for Event Headers Filtering and Routing (Confluent Cloud)
 -- Modified version: Works WITHOUT __op field (PostgresCdcSource doesn't add it)
 -- Processes 4 types of filtered event headers:
@@ -7,11 +19,11 @@
 -- 4. Service Events (CarServiceDone)
 --
 -- Source: event_headers table from Aurora PostgreSQL
--- Target: Filtered Kafka topics for each event type
+-- Target: Filtered Kafka topics for each event type (WITHOUT -flink suffix - WRONG!)
 --
 -- DEPLOYMENT NOTE: Deploy statements in order:
 -- 1. Source table (raw-event-headers)
--- 2. Sink tables (filtered-*-events)
+-- 2. Sink tables (filtered-*-events) - ⚠️ Missing -flink suffix!
 -- 3. INSERT statements (one per filter)
 
 -- ============================================================================

@@ -479,10 +479,10 @@ export FLINK_REST_ENDPOINT="https://flink.us-east-1.aws.confluent.cloud"
 - **Consumes from Kafka**: Reads events from `raw-event-headers` topic
 - **Applies Filtering**: Filters using relational columns (`event_type`, `__op`) via SQL WHERE clauses
 - **Writes to Kafka**: Writes filtered events to consumer-specific topics:
-  - `filtered-loan-created-events`
-  - `filtered-loan-payment-submitted-events`
-  - `filtered-service-events`
-  - `filtered-car-created-events`
+  - `filtered-loan-created-events-flink` (Flink) or `filtered-loan-created-events-spring` (Spring Boot)
+  - `filtered-loan-payment-submitted-events-flink` (Flink) or `filtered-loan-payment-submitted-events-spring` (Spring Boot)
+  - `filtered-service-events-flink` (Flink) or `filtered-service-events-spring` (Spring Boot)
+  - `filtered-car-created-events-flink` (Flink) or `filtered-car-created-events-spring` (Spring Boot)
 - **Auto-Topic Creation**: Filtered topics are automatically created by Flink when it first writes to them
 - **Preserves Structure**: Maintains relational structure + `header_data` JSONB field for consumers
 - **Fault Tolerance**: Automatic checkpoints ensure exactly-once semantics
@@ -829,7 +829,13 @@ WHERE __op IN ('c', 'u');
    - **Filtering**: Can filter by `__op` field (e.g., `WHERE event_type = 'LoanCreated' AND __op = 'c'`)
    - **Compatible Connector**: `postgres-cdc-source-v2-debezium-event-headers-confluent-cloud.json`
 
-**Note**: The `business-events-routing-confluent-cloud-no-op.sql` file exists for compatibility with connectors that do not include ExtractNewRecordState transform, but it is not recommended. Always use the recommended PostgresCdcSourceV2 connector with `business-events-routing-confluent-cloud.sql`.
+**⚠️ DEPRECATED FILE WARNING**: The `business-events-routing-confluent-cloud-no-op.sql` file creates topics **WITHOUT** the required `-flink` suffix (e.g., `filtered-car-created-events` instead of `filtered-car-created-events-flink`). 
+
+**DO NOT USE THIS FILE** - it will create orphaned topics without suffixes that don't match the processor-specific naming scheme.
+
+**Always use**: `business-events-routing-confluent-cloud.sql` which correctly creates topics with `-flink` suffix.
+
+The no-op file exists only for historical reference and compatibility with very old connector configurations that do not include ExtractNewRecordState transform. The recommended PostgresCdcSourceV2 connector should always be used with `business-events-routing-confluent-cloud.sql`.
 
 **Complete Example** (from `flink-jobs/business-events-routing-confluent-cloud.sql`):
 
@@ -993,10 +999,10 @@ If you have existing Flink statements that write to topics without suffixes, rem
 confluent flink statement list --compute-pool <compute-pool-id>
 
 # Delete old statements (if they exist)
-confluent flink statement delete "sink-filtered-car-created-events" --force
-confluent flink statement delete "sink-filtered-loan-created-events" --force
-confluent flink statement delete "sink-filtered-loan-payment-submitted-events" --force
-confluent flink statement delete "sink-filtered-service-events" --force
+confluent flink statement delete "sink-filtered-car-created-events-flink" --force
+confluent flink statement delete "sink-filtered-loan-created-events-flink" --force
+confluent flink statement delete "sink-filtered-loan-payment-submitted-events-flink" --force
+confluent flink statement delete "sink-filtered-service-events-flink" --force
 confluent flink statement delete "insert-car-created-filter" --force
 confluent flink statement delete "insert-loan-created-filter" --force
 confluent flink statement delete "insert-loan-payment-submitted-filter" --force
@@ -1558,7 +1564,7 @@ The Flink statement expects CDC metadata fields (`__op`, `__table`, `__ts_ms`) t
 
 **Example Flink Statement:**
 ```sql
-INSERT INTO `filtered-service-events`
+INSERT INTO `filtered-service-events-flink`
 SELECT `id`, `event_name`, `event_type`, `created_date`, `saved_date`, `header_data`, `__op`, `__table`
 FROM `raw-event-headers`
 WHERE `event_name` = 'CarServiceDone' AND `__op` = 'c';
@@ -1682,8 +1688,8 @@ WHERE `event_type` = 'LoanCreated' AND `__op` = 'c';
 
 **Example of Correct Statement:**
 ```sql
--- CORRECT: Includes INSERT INTO clause
-INSERT INTO `filtered-loan-created-events`
+-- CORRECT: Includes INSERT INTO clause with -flink suffix
+INSERT INTO `filtered-loan-created-events-flink`
 SELECT CAST(`id` AS BYTES) AS `key`, `id`, `event_name`, `event_type`, ...
 FROM `raw-event-headers`
 WHERE `event_type` = 'LoanCreated' AND `__op` = 'c';
@@ -1709,7 +1715,8 @@ cd /path/to/project
 FLINK_SQL_FILE="cdc-streaming/flink-jobs/business-events-routing-confluent-cloud.sql"
 
 # Extract INSERT statement with proper awk pattern that includes INSERT INTO
-INSERT_SQL=$(awk '/INSERT INTO.*filtered-loan-created-events/,/;/{if(/INSERT/ || /SELECT/ || /FROM/ || /WHERE/ || /^[^-\/]/) print}' "$FLINK_SQL_FILE" | \
+# Note: Use -flink suffixed topic name
+INSERT_SQL=$(awk '/INSERT INTO.*filtered-loan-created-events-flink/,/;/{if(/INSERT/ || /SELECT/ || /FROM/ || /WHERE/ || /^[^-\/]/) print}' "$FLINK_SQL_FILE" | \
   grep -v "^--" | tr '\n' ' ' | sed 's/  */ /g' | sed 's/^ *//;s/ *$//')
 
 # Verify the SQL starts with INSERT INTO

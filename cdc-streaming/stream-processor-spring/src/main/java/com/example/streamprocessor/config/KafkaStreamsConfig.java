@@ -14,6 +14,10 @@ import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.kafka.annotation.EnableKafkaStreams;
 
+import java.time.Instant;
+import java.time.ZoneId;
+import java.time.ZonedDateTime;
+import java.time.format.DateTimeFormatter;
 import java.util.List;
 import java.util.function.Predicate;
 
@@ -31,11 +35,57 @@ public class KafkaStreamsConfig {
     @Value("${spring.kafka.streams.source-topic}")
     private String sourceTopic;
 
+    @Value("${app.display-timezone:America/New_York}")
+    private String displayTimezone;
+
     @Autowired(required = false)
     private FiltersConfig filtersConfig;
 
     private final Serde<String> stringSerde = Serdes.String();
     private final Serde<com.example.streamprocessor.model.EventHeader> eventHeaderSerde = new EventHeaderSerde();
+    private static final DateTimeFormatter LOCAL_TIME_FORMATTER = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss zzz");
+
+    /**
+     * Format epoch milliseconds to local time display string.
+     * 
+     * @param tsMs Epoch milliseconds (can be null)
+     * @return Formatted string: "tsMs (yyyy-MM-dd HH:mm:ss TIMEZONE)" or "null" if tsMs is null
+     */
+    private String formatTimestamp(Long tsMs) {
+        if (tsMs == null) {
+            return "null";
+        }
+        try {
+            Instant instant = Instant.ofEpochMilli(tsMs);
+            ZonedDateTime zonedDateTime = instant.atZone(ZoneId.of(displayTimezone));
+            String localTime = zonedDateTime.format(LOCAL_TIME_FORMATTER);
+            return String.format("%d (%s)", tsMs, localTime);
+        } catch (Exception e) {
+            log.warn("{} Failed to format timestamp {}: {}", LOG_PREFIX, tsMs, e.getMessage());
+            return String.valueOf(tsMs);
+        }
+    }
+
+    /**
+     * Format ISO 8601 UTC timestamp string to local time display string.
+     * 
+     * @param utcTimestamp ISO 8601 UTC timestamp string (can be null)
+     * @return Formatted string: "UTC_TIMESTAMP (Local: yyyy-MM-dd HH:mm:ss TIMEZONE)" or original if null/invalid
+     */
+    private String formatTimestampString(String utcTimestamp) {
+        if (utcTimestamp == null || utcTimestamp.isEmpty() || "Unknown".equals(utcTimestamp)) {
+            return utcTimestamp;
+        }
+        try {
+            Instant instant = Instant.parse(utcTimestamp.replace("Z", "+00:00"));
+            ZonedDateTime zonedDateTime = instant.atZone(ZoneId.of(displayTimezone));
+            String localTime = zonedDateTime.format(LOCAL_TIME_FORMATTER);
+            return String.format("%s (Local: %s)", utcTimestamp, localTime);
+        } catch (Exception e) {
+            log.warn("{} Failed to format timestamp string {}: {}", LOG_PREFIX, utcTimestamp, e.getMessage());
+            return utcTimestamp;
+        }
+    }
 
     @Bean
     public KStream<String, com.example.streamprocessor.model.EventHeader> eventRoutingStream(StreamsBuilder builder) {
@@ -55,9 +105,9 @@ public class KafkaStreamsConfig {
                     value.getEventType(),
                     value.getOp(),
                     value.getTable(),
-                    value.getTsMs(),
-                    value.getCreatedDate(),
-                    value.getSavedDate()
+                    formatTimestamp(value.getTsMs()),
+                    formatTimestampString(value.getCreatedDate()),
+                    formatTimestampString(value.getSavedDate())
                 );
             } else {
                 log.warn("{} Received null event from {} with key={}", LOG_PREFIX, sourceTopic, key);
@@ -118,7 +168,7 @@ public class KafkaStreamsConfig {
                             value != null ? value.getEventName() : "null",
                             value != null ? value.getEventType() : "null",
                             value != null ? value.getOp() : "null",
-                            value != null ? value.getTsMs() : null
+                            value != null ? formatTimestamp(value.getTsMs()) : "null"
                         );
                     })
                     .to(outputTopic);

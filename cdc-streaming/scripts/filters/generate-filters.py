@@ -155,6 +155,10 @@ def generate_flink_sql(filters: List[Dict[str, Any]]) -> str:
     for filter_config in enabled_filters:
         filter_id = filter_config["id"]
         output_topic = filter_config["outputTopic"]
+        # Always add -flink suffix to topic names from filters.json
+        # filters.json has base names (e.g., "filtered-car-created-events")
+        # We convert to "filtered-car-created-events-flink" for Flink
+        # This distinguishes Flink topics from Spring Boot topics (-spring suffix)
         flink_topic = f"{output_topic}-flink"
         name = filter_config.get("name", filter_id)
         

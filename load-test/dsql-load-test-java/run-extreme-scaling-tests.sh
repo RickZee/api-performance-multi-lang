@@ -1,6 +1,11 @@
 #!/bin/bash
 # Re-run extreme scaling tests (tests 25-32) that had corrupted result files
 # These tests use 500-5000 threads and may produce large result files
+#
+# Enhanced for improved connection handling:
+# - Increased connection pool size (up to 2000)
+# - Connection retry with exponential backoff
+# - Per-iteration connection acquisition for better distribution
 
 set -e
 
@@ -131,6 +136,10 @@ for test_config in "${EXTREME_TESTS[@]}"; do
             "unset PAYLOAD_SIZE",
             "export TEST_ID=" + $test_id,
             "export OUTPUT_DIR=/tmp/results",
+            "# Enhanced connection settings for extreme scaling",
+            "export MAX_POOL_SIZE=$(( " + $threads + " / 3 < 2000 ? " + $threads + " / 3 : 2000 ))",
+            "export CONNECTION_MAX_RETRIES=5",
+            "export CONNECTION_RETRY_DELAY_MS=300",
             "java -jar target/dsql-load-test-1.0.0.jar 2>&1 | tee /tmp/test-output.log || echo \"Warning: Java application failed\"",
             "sleep 5",
             "echo \"=== Result files ===\"",

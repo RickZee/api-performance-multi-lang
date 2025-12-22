@@ -13,6 +13,12 @@ import struct
 from datetime import datetime
 from confluent_kafka import Consumer, KafkaError
 
+try:
+    from zoneinfo import ZoneInfo
+except ImportError:
+    # Fallback for Python < 3.9
+    from backports.zoneinfo import ZoneInfo
+
 # Configure logging
 logging.basicConfig(
     level=logging.INFO,
@@ -29,8 +35,46 @@ KAFKA_TOPIC = os.getenv('KAFKA_TOPIC', 'filtered-service-events-dealer-003')
 KAFKA_API_KEY = os.getenv('KAFKA_API_KEY', '')
 KAFKA_API_SECRET = os.getenv('KAFKA_API_SECRET', '')
 CONSUMER_GROUP_ID = os.getenv('CONSUMER_GROUP_ID', 'dealer-003-service-consumer-group')
+DISPLAY_TIMEZONE = os.getenv('DISPLAY_TIMEZONE', 'America/New_York')
 DEALER_ID = 'DEALER-003'
 DEALER_NAME = 'Mercedes Service Center - New York'
+
+def format_timestamp(utc_timestamp_str):
+    """
+    Convert UTC ISO 8601 timestamp to local time display format.
+    Returns formatted string with both UTC and local time.
+    
+    Args:
+        utc_timestamp_str: ISO 8601 UTC timestamp string (e.g., '2024-01-15T10:30:00Z')
+    
+    Returns:
+        Formatted string: 'UTC_TIMESTAMP (Local: LOCAL_TIME TIMEZONE)'
+    """
+    if not utc_timestamp_str or utc_timestamp_str == 'Unknown':
+        return utc_timestamp_str
+    
+    try:
+        # Parse UTC timestamp
+        if utc_timestamp_str.endswith('Z'):
+            dt_utc = datetime.fromisoformat(utc_timestamp_str.replace('Z', '+00:00'))
+        else:
+            dt_utc = datetime.fromisoformat(utc_timestamp_str)
+            if dt_utc.tzinfo is None:
+                dt_utc = dt_utc.replace(tzinfo=ZoneInfo('UTC'))
+        
+        # Convert to display timezone
+        try:
+            display_tz = ZoneInfo(DISPLAY_TIMEZONE)
+            dt_local = dt_utc.astimezone(display_tz)
+            tz_abbr = dt_local.strftime('%Z')
+            local_str = dt_local.strftime('%Y-%m-%d %H:%M:%S')
+            return f"{utc_timestamp_str} (Local: {local_str} {tz_abbr})"
+        except Exception as e:
+            logger.warning(f"Failed to convert to timezone {DISPLAY_TIMEZONE}: {e}")
+            return utc_timestamp_str
+    except Exception as e:
+        logger.warning(f"Failed to parse timestamp '{utc_timestamp_str}': {e}")
+        return utc_timestamp_str
 
 def deserialize_json_schema_registry(msg_value):
     """
@@ -105,13 +149,13 @@ def process_event(event_value):
         logger.info(f"  Event ID: {event_id}")
         logger.info(f"  Event Name: {event_name}")
         logger.info(f"  Event Type: {event_type}")
-        logger.info(f"  Created Date: {created_date}")
-        logger.info(f"  Saved Date: {saved_date}")
+        logger.info(f"  Created Date: {format_timestamp(created_date)}")
+        logger.info(f"  Saved Date: {format_timestamp(saved_date)}")
         logger.info(f"  CDC Operation: {cdc_op}")
         logger.info(f"  CDC Table: {cdc_table}")
         logger.info(f"  Service Details:")
         logger.info(f"    Car ID: {car_id}")
-        logger.info(f"    Service Date: {service_date}")
+        logger.info(f"    Service Date: {format_timestamp(service_date) if service_date else service_date}")
         logger.info(f"    Amount Paid: ${amount_paid:.2f}")
         logger.info(f"    Mileage at Service: {mileage_at_service}")
         logger.info(f"    Description: {description}")

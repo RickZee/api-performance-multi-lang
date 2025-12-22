@@ -20,6 +20,14 @@ COMPUTE_POOL_ID="${FLINK_COMPUTE_POOL_ID:-lfcp-2xqo0m}"
 KAFKA_CLUSTER_ID="${KAFKA_CLUSTER_ID:-lkc-rno3vp}"
 SQL_FILE="$PROJECT_ROOT/cdc-streaming/flink-jobs/business-events-routing-confluent-cloud.sql"
 
+# Validate SQL file - prevent using deprecated no-op file
+if [[ "$SQL_FILE" == *"no-op"* ]]; then
+    echo -e "${RED}✗ ERROR: Do not use the no-op SQL file!${NC}"
+    echo -e "${RED}✗ It creates topics without -flink suffix${NC}"
+    echo -e "${YELLOW}Use: business-events-routing-confluent-cloud.sql instead${NC}"
+    exit 1
+fi
+
 echo -e "${BLUE}========================================${NC}"
 echo -e "${BLUE}Deploy Flink SQL to Confluent Cloud${NC}"
 echo -e "${BLUE}========================================${NC}"

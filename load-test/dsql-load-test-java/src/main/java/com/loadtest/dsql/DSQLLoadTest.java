@@ -30,7 +30,7 @@ public class DSQLLoadTest {
     }
     
     /**
-     * Run Scenario 1: Individual inserts
+     * Run Scenario 1: Individual inserts with connection resilience for extreme scaling.
      */
     public TestResult runScenario1(int iterations, int insertsPerIteration, int threadIndex) {
         LOGGER.info("Starting Scenario 1: thread={}, iterations={}, insertsPerIter={}, eventType={}, payloadSize={}", 
@@ -39,13 +39,32 @@ public class DSQLLoadTest {
         long startTime = System.currentTimeMillis();
         AtomicInteger successCount = new AtomicInteger(0);
         AtomicInteger errorCount = new AtomicInteger(0);
+        AtomicInteger connectionRetries = new AtomicInteger(0);
         int totalExpected = iterations * insertsPerIteration;
         int logInterval = Math.max(1, iterations / 10); // Log every 10% progress
         
-        try (Connection conn = connection.getConnection()) {
+        Connection conn = null;
+        try {
+            conn = getConnectionWithRetry(threadIndex, connectionRetries);
+            
+            if (conn == null) {
+                LOGGER.error("Thread {} could not get initial connection after retries", threadIndex);
+                errorCount.addAndGet(totalExpected);
+                return new TestResult(0, totalExpected, System.currentTimeMillis() - startTime, 0);
+            }
+            
             for (int i = 0; i < iterations; i++) {
                 for (int j = 0; j < insertsPerIteration; j++) {
                     try {
+                        // Validate connection before use
+                        if (conn == null || conn.isClosed()) {
+                            conn = getConnectionWithRetry(threadIndex, connectionRetries);
+                            if (conn == null) {
+                                errorCount.incrementAndGet();
+                                continue;
+                            }
+                        }
+                        
                         String eventId = String.format("load-test-individual-%d-%d-%d-%s", 
                                                        threadIndex, i, j, UUID.randomUUID().toString());
                         ObjectNode event = generateEvent(eventType, threadIndex, i, j, payloadSize);
@@ -55,8 +74,16 @@ public class DSQLLoadTest {
                             successCount.incrementAndGet();
                         }
                     } catch (Exception e) {
-                        LOGGER.error("Error inserting event: {}", e.getMessage(), e);
+                        LOGGER.debug("Thread {} error inserting event: {}", threadIndex, e.getMessage());
                         errorCount.incrementAndGet();
+                        
+                        // Try to reconnect if the connection might be stale
+                        if (conn != null) {
+                            try {
+                                conn.close();
+                            } catch (Exception ignore) {}
+                            conn = null;
+                        }
                     }
                 }
                 
@@ -65,28 +92,38 @@ public class DSQLLoadTest {
                     int currentProgress = (i + 1) * insertsPerIteration;
                     double percentComplete = (currentProgress * 100.0) / totalExpected;
                     long elapsed = System.currentTimeMillis() - startTime;
-                    double currentRate = currentProgress > 0 ? (currentProgress * 1000.0) / elapsed : 0;
-                    LOGGER.info("Thread {} progress: {}/{} ({:.1f}%) - Success: {}, Errors: {}, Rate: {:.2f} inserts/sec", 
+                    double currentRate = successCount.get() > 0 ? (successCount.get() * 1000.0) / elapsed : 0;
+                    LOGGER.info("Thread {} progress: {}/{} ({:.1f}%) - Success: {}, Errors: {}, Rate: {:.2f} inserts/sec, Retries: {}", 
                                threadIndex, currentProgress, totalExpected, percentComplete, 
-                               successCount.get(), errorCount.get(), currentRate);
+                               successCount.get(), errorCount.get(), currentRate, connectionRetries.get());
                 }
             }
         } catch (Exception e) {
-            LOGGER.error("Connection error: {}", e.getMessage(), e);
-            errorCount.addAndGet(iterations * insertsPerIteration);
+            LOGGER.error("Thread {} fatal error: {}", threadIndex, e.getMessage());
+            // Only count remaining operations as errors
+            int completed = successCount.get() + errorCount.get();
+            int remaining = totalExpected - completed;
+            errorCount.addAndGet(remaining);
+        } finally {
+            if (conn != null) {
+                try {
+                    conn.close();
+                } catch (Exception ignore) {}
+            }
         }
         
         long durationMs = System.currentTimeMillis() - startTime;
-        double insertsPerSecond = (successCount.get() * 1000.0) / durationMs;
+        double insertsPerSecond = durationMs > 0 ? (successCount.get() * 1000.0) / durationMs : 0;
         
-        LOGGER.info("Thread {} completed: Success={}, Errors={}, Duration={}ms, Rate={:.2f} inserts/sec", 
-                   threadIndex, successCount.get(), errorCount.get(), durationMs, insertsPerSecond);
+        LOGGER.info("Thread {} completed: Success={}, Errors={}, Duration={}ms, Rate={:.2f} inserts/sec, ConnectionRetries={}", 
+                   threadIndex, successCount.get(), errorCount.get(), durationMs, insertsPerSecond, connectionRetries.get());
         
         return new TestResult(successCount.get(), errorCount.get(), durationMs, insertsPerSecond);
     }
     
     /**
-     * Run Scenario 2: Batch inserts
+     * Run Scenario 2: Batch inserts with per-iteration connection resilience.
+     * For extreme scaling, acquires fresh connections per iteration to handle pool contention.
      */
     public TestResult runScenario2(int iterations, int batchSize, int threadIndex) {
         LOGGER.info("Starting Scenario 2: thread={}, iterations={}, batchSize={}, eventType={}, payloadSize={}", 
@@ -95,12 +132,46 @@ public class DSQLLoadTest {
         long startTime = System.currentTimeMillis();
         AtomicInteger successCount = new AtomicInteger(0);
         AtomicInteger errorCount = new AtomicInteger(0);
+        AtomicInteger connectionRetries = new AtomicInteger(0);
         int totalExpected = iterations * batchSize;
         int logInterval = Math.max(1, iterations / 10); // Log every 10% progress
         
-        try (Connection conn = connection.getConnection()) {
+        // Determine if we should use per-iteration connections (for extreme scaling)
+        // This gives other threads a chance to get connections
+        boolean usePerIterationConnections = iterations <= 20 && batchSize >= 100;
+        
+        Connection sharedConn = null;
+        try {
+            // For small iteration counts with large batches, use per-iteration connections
+            // For high iteration counts, reuse connection to reduce overhead
+            if (!usePerIterationConnections) {
+                sharedConn = getConnectionWithRetry(threadIndex, connectionRetries);
+            }
+            
             for (int i = 0; i < iterations; i++) {
+                Connection conn = null;
+                boolean ownConnection = false;
+                
                 try {
+                    // Get connection for this iteration
+                    if (usePerIterationConnections) {
+                        conn = getConnectionWithRetry(threadIndex, connectionRetries);
+                        ownConnection = true;
+                    } else {
+                        conn = sharedConn;
+                        // Validate shared connection is still valid
+                        if (conn == null || conn.isClosed()) {
+                            sharedConn = getConnectionWithRetry(threadIndex, connectionRetries);
+                            conn = sharedConn;
+                        }
+                    }
+                    
+                    if (conn == null) {
+                        LOGGER.warn("Thread {} iteration {}: Could not get connection, skipping batch", threadIndex, i);
+                        errorCount.addAndGet(batchSize);
+                        continue;
+                    }
+                    
                     String[] eventIds = new String[batchSize];
                     ObjectNode[] events = new ObjectNode[batchSize];
                     
@@ -113,8 +184,23 @@ public class DSQLLoadTest {
                     int inserted = EventRepository.insertBatch(conn, eventIds, events);
                     successCount.addAndGet(inserted);
                 } catch (Exception e) {
-                    LOGGER.error("Error in batch insert: {}", e.getMessage(), e);
+                    LOGGER.debug("Thread {} iteration {} error: {}", threadIndex, i, e.getMessage());
                     errorCount.addAndGet(batchSize);
+                    
+                    // If shared connection failed, try to reconnect for next iteration
+                    if (!usePerIterationConnections && sharedConn != null) {
+                        try {
+                            sharedConn.close();
+                        } catch (Exception ignore) {}
+                        sharedConn = null;
+                    }
+                } finally {
+                    // Only close per-iteration connections
+                    if (ownConnection && conn != null) {
+                        try {
+                            conn.close();
+                        } catch (Exception ignore) {}
+                    }
                 }
                 
                 // Log progress every N iterations
@@ -122,24 +208,63 @@ public class DSQLLoadTest {
                     int currentProgress = (i + 1) * batchSize;
                     double percentComplete = (currentProgress * 100.0) / totalExpected;
                     long elapsed = System.currentTimeMillis() - startTime;
-                    double currentRate = currentProgress > 0 ? (currentProgress * 1000.0) / elapsed : 0;
-                    LOGGER.info("Thread {} progress: {}/{} ({:.1f}%) - Success: {}, Errors: {}, Rate: {:.2f} inserts/sec", 
+                    double currentRate = successCount.get() > 0 ? (successCount.get() * 1000.0) / elapsed : 0;
+                    LOGGER.info("Thread {} progress: {}/{} ({:.1f}%) - Success: {}, Errors: {}, Rate: {:.2f} inserts/sec, Retries: {}", 
                                threadIndex, currentProgress, totalExpected, percentComplete, 
-                               successCount.get(), errorCount.get(), currentRate);
+                               successCount.get(), errorCount.get(), currentRate, connectionRetries.get());
                 }
             }
         } catch (Exception e) {
-            LOGGER.error("Connection error: {}", e.getMessage(), e);
-            errorCount.addAndGet(iterations * batchSize);
+            LOGGER.error("Thread {} fatal error: {}", threadIndex, e.getMessage());
+            // Only count remaining iterations as errors
+            int completedIterations = (successCount.get() + errorCount.get()) / batchSize;
+            int remainingIterations = iterations - completedIterations;
+            errorCount.addAndGet(remainingIterations * batchSize);
+        } finally {
+            if (sharedConn != null) {
+                try {
+                    sharedConn.close();
+                } catch (Exception ignore) {}
+            }
         }
         
         long durationMs = System.currentTimeMillis() - startTime;
-        double insertsPerSecond = (successCount.get() * 1000.0) / durationMs;
+        double insertsPerSecond = durationMs > 0 ? (successCount.get() * 1000.0) / durationMs : 0;
         
-        LOGGER.info("Thread {} completed: Success={}, Errors={}, Duration={}ms, Rate={:.2f} inserts/sec", 
-                   threadIndex, successCount.get(), errorCount.get(), durationMs, insertsPerSecond);
+        LOGGER.info("Thread {} completed: Success={}, Errors={}, Duration={}ms, Rate={:.2f} inserts/sec, ConnectionRetries={}", 
+                   threadIndex, successCount.get(), errorCount.get(), durationMs, insertsPerSecond, connectionRetries.get());
         
         return new TestResult(successCount.get(), errorCount.get(), durationMs, insertsPerSecond);
+    }
+    
+    /**
+     * Get connection with retry and exponential backoff.
+     */
+    private Connection getConnectionWithRetry(int threadIndex, AtomicInteger retryCounter) {
+        int maxAttempts = 5;
+        long baseDelay = 200; // Start with 200ms
+        
+        for (int attempt = 0; attempt < maxAttempts; attempt++) {
+            try {
+                return connection.getConnection();
+            } catch (Exception e) {
+                retryCounter.incrementAndGet();
+                if (attempt < maxAttempts - 1) {
+                    // Exponential backoff with jitter
+                    long delay = baseDelay * (1L << attempt) + (long)(Math.random() * 100);
+                    LOGGER.debug("Thread {} connection attempt {} failed, retrying in {}ms", 
+                               threadIndex, attempt + 1, delay);
+                    try {
+                        Thread.sleep(delay);
+                    } catch (InterruptedException ie) {
+                        Thread.currentThread().interrupt();
+                        return null;
+                    }
+                }
+            }
+        }
+        LOGGER.warn("Thread {} exhausted all {} connection attempts", threadIndex, maxAttempts);
+        return null;
     }
     
     /**

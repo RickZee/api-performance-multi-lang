@@ -54,3 +54,6 @@ logging:
     com.example.streamprocessor: INFO
     org.apache.kafka: WARN
     org.springframework.kafka: INFO
+
+app:
+  display-timezone: ${DISPLAY_TIMEZONE:America/New_York}
