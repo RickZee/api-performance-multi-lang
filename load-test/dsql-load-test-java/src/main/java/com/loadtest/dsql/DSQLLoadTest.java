@@ -258,7 +258,8 @@ public class DSQLLoadTest {
                                        dsqlHost, databaseName, iamUsername, region);
         }
         
-        DSQLConnection connection = new DSQLConnection(dsqlHost, port, databaseName, iamUsername, region);
+        // Create connection with pool size optimized for thread count
+        DSQLConnection connection = new DSQLConnection(dsqlHost, port, databaseName, iamUsername, region, threads);
         DSQLLoadTest test = new DSQLLoadTest(connection, eventType, payloadSize);
         
         ExecutorService executor = Executors.newFixedThreadPool(threads);
@@ -297,6 +298,13 @@ public class DSQLLoadTest {
                 }
                 
                 long totalDuration = System.currentTimeMillis() - startTime;
+                
+                // Log connection pool metrics
+                DSQLConnection.PoolMetrics poolMetrics = connection.getPoolMetrics();
+                System.out.println("\n=== Connection Pool Metrics (Scenario 1) ===");
+                System.out.println("  " + poolMetrics.toString());
+                LOGGER.info("Connection pool metrics after Scenario 1: {}", poolMetrics);
+                
                 printResults("Scenario 1", results1, totalDuration);
                 
                 // Record results
@@ -344,6 +352,13 @@ public class DSQLLoadTest {
                 }
                 
                 long totalDuration = System.currentTimeMillis() - startTime;
+                
+                // Log connection pool metrics
+                DSQLConnection.PoolMetrics poolMetrics = connection.getPoolMetrics();
+                System.out.println("\n=== Connection Pool Metrics (Scenario 2) ===");
+                System.out.println("  " + poolMetrics.toString());
+                LOGGER.info("Connection pool metrics after Scenario 2: {}", poolMetrics);
+                
                 printResults("Scenario 2", results2, totalDuration);
                 
                 // Record results

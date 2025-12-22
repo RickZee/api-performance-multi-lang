@@ -369,9 +369,9 @@ variable "enable_dsql_test_runner_ec2" {
 }
 
 variable "dsql_test_runner_instance_type" {
-  description = "EC2 instance type for DSQL test runner"
+  description = "EC2 instance type for DSQL test runner (ARM/Graviton recommended)"
   type        = string
-  default     = "t3.small"
+  default     = "t4g.small"
 }
 
 variable "enable_bastion_host" {
@@ -381,9 +381,9 @@ variable "enable_bastion_host" {
 }
 
 variable "bastion_instance_type" {
-  description = "EC2 instance type for bastion host"
+  description = "EC2 instance type for bastion host (keep small, not used for load tests)"
   type        = string
-  default     = "t3.micro"
+  default     = "t4g.nano"
 }
 
 variable "bastion_ssh_public_key" {

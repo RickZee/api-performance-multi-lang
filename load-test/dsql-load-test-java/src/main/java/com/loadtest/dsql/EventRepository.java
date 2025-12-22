@@ -47,15 +47,32 @@ public class EventRepository {
         }
     }
     
+    // PostgreSQL parameter limit: 65,535 parameters per statement
+    // Each row has 6 parameters (id, event_name, event_type, created_date, saved_date, event_data)
+    // Max safe batch size: 65,535 / 6 = ~10,925 rows. We cap at 10,000 for safety.
+    private static final int MAX_BATCH_SIZE = 10000;
+    
     /**
      * Insert a batch of events in a single statement.
+     * Supports up to 10,000 rows per batch (PostgreSQL parameter limit).
      */
     public static int insertBatch(Connection conn, String[] eventIds, ObjectNode[] events) throws SQLException {
         if (events.length == 0) {
             return 0;
         }
         
+        // Validate batch size
+        if (events.length > MAX_BATCH_SIZE) {
+            throw new IllegalArgumentException(
+                String.format("Batch size %d exceeds maximum of %d rows (PostgreSQL parameter limit)", 
+                             events.length, MAX_BATCH_SIZE));
+        }
+        
+        // Optimize SQL string building for large batches
+        int totalParams = events.length * 6;
         StringBuilder sql = new StringBuilder(BATCH_INSERT_SQL_PREFIX);
+        sql.ensureCapacity(BATCH_INSERT_SQL_PREFIX.length() + (events.length * 30)); // Pre-allocate capacity
+        
         for (int i = 0; i < events.length; i++) {
             if (i > 0) {
                 sql.append(", ");

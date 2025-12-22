@@ -5,14 +5,14 @@
 data "aws_caller_identity" "current" {}
 data "aws_region" "current" {}
 
-# Get latest Amazon Linux 2023 AMI
+# Get latest Amazon Linux 2023 AMI (ARM64 for Graviton/t4g instances)
 data "aws_ami" "amazon_linux_2023" {
   most_recent = true
   owners      = ["amazon"]
 
   filter {
     name   = "name"
-    values = ["al2023-ami-*-x86_64"]
+    values = ["al2023-ami-*-arm64"]
   }
 
   filter {
@@ -224,7 +224,7 @@ resource "aws_instance" "bastion" {
     # Update system
     dnf update -y
     
-    # Install base packages
+    # Install base packages (PostgreSQL client, Git, AWS CLI, Python 3)
     dnf install -y postgresql16 git unzip python3 python3-pip
     
     # Install AWS CLI v2

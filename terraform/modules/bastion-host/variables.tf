@@ -19,9 +19,9 @@ variable "vpc_cidr_block" {
 }
 
 variable "instance_type" {
-  description = "EC2 instance type"
+  description = "EC2 instance type (keep small, not used for load tests)"
   type        = string
-  default     = "t3.micro"
+  default     = "t4g.nano"
 }
 
 variable "aurora_dsql_cluster_resource_id" {

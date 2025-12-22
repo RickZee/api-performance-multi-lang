@@ -176,8 +176,20 @@ output "terraform_state_bucket_name" {
 # }
 
 # DSQL Test Runner EC2 Outputs
-# DSQL Test Runner Outputs - REMOVED (now using bastion host)
-# Use bastion_host_instance_id and bastion_host_ssm_command instead
+output "dsql_test_runner_instance_id" {
+  description = "DSQL test runner EC2 instance ID"
+  value       = var.enable_dsql_test_runner_ec2 && var.enable_aurora_dsql_cluster ? module.dsql_test_runner[0].instance_id : null
+}
+
+output "dsql_test_runner_private_ip" {
+  description = "DSQL test runner EC2 instance private IP address"
+  value       = var.enable_dsql_test_runner_ec2 && var.enable_aurora_dsql_cluster ? module.dsql_test_runner[0].private_ip : null
+}
+
+output "dsql_test_runner_ssm_command" {
+  description = "SSM command to connect to DSQL test runner EC2 instance"
+  value       = var.enable_dsql_test_runner_ec2 && var.enable_aurora_dsql_cluster ? "aws ssm start-session --target ${module.dsql_test_runner[0].instance_id} --region ${var.aws_region}" : null
+}
 
 # Bastion Host Outputs
 output "bastion_host_instance_id" {

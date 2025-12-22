@@ -2,6 +2,7 @@ package com.loadtest.dsql;
 
 import com.zaxxer.hikari.HikariConfig;
 import com.zaxxer.hikari.HikariDataSource;
+import com.zaxxer.hikari.HikariPoolMXBean;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -22,15 +23,38 @@ public class DSQLConnection {
     private final String databaseName;
     private final String iamUsername;
     private final String region;
+    private final int maxPoolSize;
     private HikariDataSource dataSource;
     
     public DSQLConnection(String dsqlHost, int port, String databaseName, 
                          String iamUsername, String region) {
+        this(dsqlHost, port, databaseName, iamUsername, region, 5);
+    }
+    
+    public DSQLConnection(String dsqlHost, int port, String databaseName, 
+                         String iamUsername, String region, int threadCount) {
         this.dsqlHost = dsqlHost;
         this.port = port;
         this.databaseName = databaseName;
         this.iamUsername = iamUsername;
         this.region = region;
+        // Support up to 1000 connections for extreme scaling
+        // Use environment variable if set, otherwise calculate based on thread count
+        String maxPoolSizeEnv = System.getenv("MAX_POOL_SIZE");
+        int calculatedPoolSize;
+        if (maxPoolSizeEnv != null && !maxPoolSizeEnv.isEmpty()) {
+            try {
+                calculatedPoolSize = Math.min(Integer.parseInt(maxPoolSizeEnv), 1000);
+            } catch (NumberFormatException e) {
+                LOGGER.warn("Invalid MAX_POOL_SIZE environment variable: {}, using calculated value", maxPoolSizeEnv);
+                calculatedPoolSize = Math.min(Math.max(threadCount / 2, 10), 1000);
+            }
+        } else {
+            // Dynamic pool sizing: threads/2 (more connections per thread for high concurrency)
+            // Minimum 10, maximum 1000 for extreme scaling tests
+            calculatedPoolSize = Math.min(Math.max(threadCount / 2, 10), 1000);
+        }
+        this.maxPoolSize = calculatedPoolSize;
     }
     
     /**
@@ -74,14 +98,20 @@ public class DSQLConnection {
             // The connector registers itself via META-INF/services/java.sql.Driver
             config.setUsername(iamUsername); // Explicit for clarity
             
-            // Pool settings
-            config.setMaximumPoolSize(5);
-            config.setMinimumIdle(1);
-            config.setConnectionTimeout(30000); // 30 seconds
+            // Pool settings - optimized for high concurrency
+            config.setMaximumPoolSize(maxPoolSize);
+            // Pre-warm connections for high-concurrency tests (match max pool size)
+            config.setMinimumIdle(maxPoolSize >= 100 ? maxPoolSize : Math.min(maxPoolSize / 2, 5));
+            config.setConnectionTimeout(60000); // 60 seconds for high concurrency
             config.setIdleTimeout(600000); // 10 minutes
             config.setMaxLifetime(1800000); // 30 minutes
             config.setLeakDetectionThreshold(60000); // 1 minute
             config.setPoolName("DSQL-LoadTest-Pool");
+            
+            // Connection validation
+            config.setConnectionTestQuery("SELECT 1");
+            config.setValidationTimeout(5000); // 5 seconds
+            config.setRegisterMbeans(true); // Enable monitoring via JMX
             
             // AWS DSQL connector configuration
             // Connector automatically uses DefaultCredentialsProvider from EC2 instance profile
@@ -100,7 +130,8 @@ public class DSQLConnection {
             config.setConnectionInitSql("SET search_path TO car_entities_schema");
             
             dataSource = new HikariDataSource(config);
-            LOGGER.info("Created DSQL connection pool using AWS DSQL JDBC connector for {}", dsqlHost);
+            LOGGER.info("Created DSQL connection pool using AWS DSQL JDBC connector for {} (pool size: {})", 
+                       dsqlHost, maxPoolSize);
         } finally {
             // Restore original system properties
             if (originalHostnameVerifier != null) {
@@ -112,6 +143,55 @@ public class DSQLConnection {
     public void close() {
         if (dataSource != null && !dataSource.isClosed()) {
             dataSource.close();
+        }
+    }
+    
+    /**
+     * Get connection pool metrics for monitoring.
+     */
+    public PoolMetrics getPoolMetrics() {
+        if (dataSource == null || dataSource.isClosed()) {
+            return new PoolMetrics(0, 0, 0, 0, 0);
+        }
+        
+        HikariPoolMXBean poolBean = dataSource.getHikariPoolMXBean();
+        if (poolBean == null) {
+            return new PoolMetrics(0, 0, 0, 0, 0);
+        }
+        
+        return new PoolMetrics(
+            poolBean.getActiveConnections(),
+            poolBean.getIdleConnections(),
+            poolBean.getThreadsAwaitingConnection(),
+            poolBean.getTotalConnections(),
+            maxPoolSize
+        );
+    }
+    
+    /**
+     * Connection pool metrics.
+     */
+    public static class PoolMetrics {
+        public final int activeConnections;
+        public final int idleConnections;
+        public final int threadsAwaitingConnection;
+        public final int totalConnections;
+        public final int maxPoolSize;
+        
+        public PoolMetrics(int activeConnections, int idleConnections, 
+                          int threadsAwaitingConnection, int totalConnections, int maxPoolSize) {
+            this.activeConnections = activeConnections;
+            this.idleConnections = idleConnections;
+            this.threadsAwaitingConnection = threadsAwaitingConnection;
+            this.totalConnections = totalConnections;
+            this.maxPoolSize = maxPoolSize;
+        }
+        
+        @Override
+        public String toString() {
+            return String.format("Pool[active=%d, idle=%d, waiting=%d, total=%d, max=%d]",
+                               activeConnections, idleConnections, threadsAwaitingConnection,
+                               totalConnections, maxPoolSize);
         }
     }
 }

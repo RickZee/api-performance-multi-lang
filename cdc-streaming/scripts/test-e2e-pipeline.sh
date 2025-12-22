@@ -18,6 +18,7 @@
 #   --skip-prereqs      Skip dependency and login checks
 #   --skip-aurora       Skip Aurora cluster status check
 #   --skip-build        Skip Docker image builds
+#   --skip-clear-logs   Skip clearing consumer logs before validation
 #   --skip-to-step N    Resume from step N (1-10)
 #   --debug             Enable verbose output with timing
 #
@@ -33,7 +34,8 @@ set +e
 set +u
 #   - Python 3 with psycopg2 or asyncpg
 
-set -e
+# Don't set -e - we want to continue even if some validations fail
+# Individual critical operations will check exit codes explicitly
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
@@ -70,6 +72,7 @@ section() { echo -e "${CYAN}========================================${NC}"; echo
 SKIP_PREREQUISITES=false
 SKIP_AURORA_CHECK=false
 SKIP_BUILD=false
+SKIP_CLEAR_LOGS=false
 SKIP_TO_STEP=0
 DEBUG=false
 FAST_MODE=false
@@ -94,6 +97,10 @@ while [[ $# -gt 0 ]]; do
       ;;
     --skip-build)
       SKIP_BUILD=true
+      shift
+      ;;
+    --skip-clear-logs)
+      SKIP_CLEAR_LOGS=true
       shift
       ;;
     --skip-to-step)
@@ -522,6 +529,22 @@ else
   step_end
   save_checkpoint "5"
   echo ""
+fi
+
+# Clear consumer logs for clean validation (default: enabled)
+# Done early so logs are fresh when we start processing events
+if [ "$SKIP_CLEAR_LOGS" = false ]; then
+  section "Clearing Consumer Logs"
+  echo ""
+  info "Clearing consumer logs for clean validation..."
+  if "$SCRIPT_DIR/clear-consumer-logs.sh" --restart 2>&1 | tail -10; then
+    pass "Consumer logs cleared"
+  else
+    warn "Some consumer logs could not be cleared (continuing anyway)"
+  fi
+  echo ""
+else
+  info "Skipping log clearing (--skip-clear-logs flag)"
 fi
 
 # Step 6: Start Stream Processor

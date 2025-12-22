@@ -32,7 +32,7 @@ echo ""
 
 # Get initial counts
 echo "=== Getting Initial Database State ==="
-INITIAL_COUNT=$(./scripts/query-dsql.sh "SELECT COUNT(*) FROM car_entities_schema.business_events;" 2>/dev/null | grep -E '^[0-9]+$' | head -1 || echo "0")
+INITIAL_COUNT=$(./scripts/query-dsql.sh "SELECT COUNT(*) FROM car_entities_schema.business_events;" 2>/dev/null | grep -E '^[[:space:]]*[0-9]+[[:space:]]*$' | tr -d '[:space:]' | head -1 || echo "0")
 echo "Initial business_events count: $INITIAL_COUNT"
 echo ""
 
@@ -160,7 +160,7 @@ echo "=========================================="
 sleep 3  # Wait for database propagation
 
 # Get final counts
-FINAL_COUNT=$(./scripts/query-dsql.sh "SELECT COUNT(*) FROM car_entities_schema.business_events;" 2>/dev/null | grep -E '^[0-9]+$' | head -1 || echo "0")
+FINAL_COUNT=$(./scripts/query-dsql.sh "SELECT COUNT(*) FROM car_entities_schema.business_events;" 2>/dev/null | grep -E '^[[:space:]]*[0-9]+[[:space:]]*$' | tr -d '[:space:]' | head -1 || echo "0")
 NEW_ROWS=$((FINAL_COUNT - INITIAL_COUNT))
 
 echo ""

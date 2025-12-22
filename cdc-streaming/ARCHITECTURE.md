@@ -37,9 +37,9 @@ These examples are used throughout the system for:
 ┌─────────────────────────────────────────────────────────────────────────┐
 │                         PostgreSQL Database                             │
 │  ┌──────────────────────────────────────────────────────────────────┐   │
-│  │ event_headers table                                             │   │
-│  │ - id, event_name, event_type, created_date, saved_date          │   │
-│  │ - header_data (JSONB) - event header structure                  │   │
+│  │ event_headers table                                              │   │
+│  │ - id, event_name, event_type, created_date, saved_date           │   │
+│  │ - header_data (JSONB) - event header structure                   │   │
 │  └──────────────────────────────────────────────────────────────────┘   │
 └──────────────────────────────┬──────────────────────────────────────────┘
                                │
@@ -51,7 +51,7 @@ These examples are used throughout the system for:
 │  ┌──────────────────────────────────────────────────────────────────┐   │
 │  │ Confluent Managed PostgresCdcSource OR Debezium Connector        │   │
 │  │ - Extracts relational columns (id, event_name, event_type, etc.) │   │
-│  │ - Includes header_data as JSON string                           │   │
+│  │ - Includes header_data as JSON string                            │   │
 │  │ - Adds CDC metadata (__op, __table, __ts_ms)                     │   │
 │  │ - Uses ExtractNewRecordState transform                           │   │
 │  └──────────────────────────────────────────────────────────────────┘   │
@@ -78,9 +78,9 @@ These examples are used throughout the system for:
                                │ Stream Processing
                                ▼
 ┌────────────────────────────────────────────────────────────────────────┐
-│                    Stream Processors                                    │
+│                    Stream Processors                                   │
 │                                                                        │
-│  Option 1: Confluent Flink (SQL-based)                                │
+│  Option 1: Confluent Flink (SQL-based)                                 │
 │  - Filter by event_type, __op (operation type)                         │
 │  - Route to filtered-*-events-flink topics                             │
 │  - Preserves relational structure + header_data                        │
@@ -95,25 +95,25 @@ These examples are used throughout the system for:
                                ▼
 ┌─────────────────────────────────────────────────────────────────────────┐
 │                    Processor-Specific Kafka Topics                      │
-│                                                                        │
-│  Flink Topics (-flink suffix):                                        │
+│                                                                         │
+│  Flink Topics (-flink suffix):                                          │
 │  ┌──────────────────────────┐    ┌──────────────────────────┐           │
 │  │filtered-loan-created-    │    │filtered-service-events-  │           │
-│  │events-flink              │    │flink                      │           │
+│  │events-flink              │    │flink                     │           │
 │  └──────────────────────────┘    └──────────────────────────┘           │
 │  ┌──────────────────────────┐    ┌──────────────────────────┐           │
-│  │filtered-loan-payment-     │    │filtered-car-created-      │           │
-│  │submitted-events-flink     │    │events-flink               │           │
+│  │filtered-loan-payment-     │    │filtered-car-created-    │           │
+│  │submitted-events-flink     │    │events-flink             │           │
 │  └──────────────────────────┘    └──────────────────────────┘           │
-│                                                                        │
-│  Spring Boot Topics (-spring suffix):                                 │
+│                                                                         │
+│  Spring Boot Topics (-spring suffix):                                   │
 │  ┌──────────────────────────┐    ┌──────────────────────────┐           │
 │  │filtered-loan-created-    │    │filtered-service-events-  │           │
-│  │events-spring             │    │spring                     │           │
+│  │events-spring             │    │spring                    │           │
 │  └──────────────────────────┘    └──────────────────────────┘           │
 │  ┌──────────────────────────┐    ┌──────────────────────────┐           │
-│  │filtered-loan-payment-    │    │filtered-car-created-      │           │
-│  │submitted-events-spring   │    │events-spring               │           │
+│  │filtered-loan-payment-    │    │filtered-car-created-     │           │
+│  │submitted-events-spring   │    │events-spring             │           │
 │  └──────────────────────────┘    └──────────────────────────┘           │
 └──────────────────────────────┬──────────────────────────────────────────┘
                                │

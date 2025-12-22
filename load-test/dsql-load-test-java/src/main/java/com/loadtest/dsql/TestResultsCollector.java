@@ -124,6 +124,7 @@ public class TestResultsCollector {
     public void exportToJson() throws IOException {
         if (outputDir == null || outputDir.isEmpty()) {
             LOGGER.warn("Output directory not set, skipping JSON export");
+            System.err.println("ERROR: Output directory not set, skipping JSON export");
             return;
         }
         
@@ -136,8 +137,18 @@ public class TestResultsCollector {
         File outputFile = dir.resolve(filename).toFile();
         
         // Write JSON
-        writer.writeValue(outputFile, metrics);
-        LOGGER.info("Exported test results to: {}", outputFile.getAbsolutePath());
+        try {
+            writer.writeValue(outputFile, metrics);
+            LOGGER.info("Exported test results to: {}", outputFile.getAbsolutePath());
+            System.out.println("SUCCESS: Exported test results to: " + outputFile.getAbsolutePath());
+            System.out.println("File exists: " + outputFile.exists());
+            System.out.println("File size: " + outputFile.length() + " bytes");
+        } catch (Exception e) {
+            LOGGER.error("Failed to write JSON file: {}", e.getMessage(), e);
+            System.err.println("ERROR: Failed to write JSON file: " + e.getMessage());
+            e.printStackTrace();
+            throw e;
+        }
     }
     
     /**

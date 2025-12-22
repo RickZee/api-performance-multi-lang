@@ -117,7 +117,7 @@ def generate_flink_sql(filters: List[Dict[str, Any]]) -> str:
     lines.append("    `__ts_ms` BIGINT")
     lines.append(") WITH (")
     lines.append("    'connector' = 'confluent',")
-    lines.append("    'value.format' = 'json-registry',")
+    lines.append("    'value.format' = 'json',")
     lines.append("    'scan.startup.mode' = 'earliest-offset'")
     lines.append(");")
     lines.append("")

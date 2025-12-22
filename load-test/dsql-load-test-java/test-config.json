@@ -1,7 +1,7 @@
 {
   "baseline": {
     "threads": 10,
-    "iterations": 100,
+    "iterations": 20,
     "batch_size": 10,
     "payload_size": null,
     "event_type": "CarCreated"
@@ -10,28 +10,28 @@
     "scenario1_thread_scaling": {
       "scenario": 1,
       "threads": [1, 10, 25, 50, 100],
-      "iterations": 100,
+      "iterations": 20,
       "count": 1,
       "payload_size": null
     },
     "scenario1_loop_impact": {
       "scenario": 1,
       "threads": 10,
-      "iterations": [10, 100, 1000, 5000],
+      "iterations": [10, 20, 50, 100],
       "count": 1,
       "payload_size": null
     },
     "scenario1_payload_impact": {
       "scenario": 1,
       "threads": 10,
-      "iterations": 100,
+      "iterations": 20,
       "count": 1,
-      "payload_size": [null, "4k", "32k", "200k"]
+      "payload_size": [null, "4k", "32k"]
     },
     "scenario2_thread_scaling": {
       "scenario": 2,
       "threads": [1, 10, 25, 50, 100],
-      "iterations": 100,
+      "iterations": 20,
       "count": 10,
       "batch_size": 10,
       "payload_size": null
@@ -39,46 +39,78 @@
     "scenario2_batch_impact": {
       "scenario": 2,
       "threads": 10,
-      "iterations": 100,
-      "count": [1, 10, 25, 50, 100],
+      "iterations": 20,
+      "count": [1, 10, 25, 50],
       "payload_size": null
     },
     "scenario2_payload_impact": {
       "scenario": 2,
       "threads": 10,
-      "iterations": 100,
+      "iterations": 20,
       "count": 10,
       "batch_size": 10,
-      "payload_size": [null, "4k", "32k", "200k"]
+      "payload_size": [null, "4k", "32k"]
     },
     "scenario1_super_heavy_1": {
       "scenario": 1,
-      "threads": 200,
-      "iterations": 10000,
-      "count": 1,
+      "threads": 500,
+      "iterations": 10,
+      "count": 20,
       "payload_size": null
     },
     "scenario1_super_heavy_2": {
       "scenario": 1,
-      "threads": 100,
-      "iterations": 50000,
-      "count": 1,
+      "threads": 1000,
+      "iterations": 10,
+      "count": 20,
       "payload_size": null
     },
     "scenario2_super_heavy_1": {
       "scenario": 2,
-      "threads": 200,
-      "iterations": 1000,
-      "count": 200,
-      "batch_size": 200,
+      "threads": 500,
+      "iterations": 5,
+      "count": 100,
+      "batch_size": 100,
       "payload_size": null
     },
     "scenario2_super_heavy_2": {
       "scenario": 2,
-      "threads": 100,
-      "iterations": 5000,
+      "threads": 1000,
+      "iterations": 5,
+      "count": 100,
+      "batch_size": 100,
+      "payload_size": null
+    },
+    "scenario2_extreme_scaling_1": {
+      "scenario": 2,
+      "threads": 500,
+      "iterations": 10,
       "count": 500,
       "batch_size": 500,
+      "payload_size": null
+    },
+    "scenario2_extreme_scaling_2": {
+      "scenario": 2,
+      "threads": 1000,
+      "iterations": 10,
+      "count": 500,
+      "batch_size": 500,
+      "payload_size": null
+    },
+    "scenario2_extreme_scaling_3": {
+      "scenario": 2,
+      "threads": 2000,
+      "iterations": 5,
+      "count": 1000,
+      "batch_size": 1000,
+      "payload_size": null
+    },
+    "scenario2_extreme_scaling_4": {
+      "scenario": 2,
+      "threads": 5000,
+      "iterations": 2,
+      "count": 1000,
+      "batch_size": 1000,
       "payload_size": null
     }
   }

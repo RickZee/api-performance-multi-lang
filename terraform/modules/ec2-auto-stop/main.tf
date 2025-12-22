@@ -1,5 +1,6 @@
 # EC2 Auto-Stop Lambda Module
-# Monitors SSM logins and EC2 activity, stops EC2 if no activity for 3 hours
+# Monitors SSM logins and EC2 activity, stops EC2 if no activity for specified time period
+# Default: 30 minutes (0.5 hours) for bastion host cost optimization
 
 # IAM role for Lambda execution
 resource "aws_iam_role" "ec2_auto_stop" {
@@ -170,11 +171,11 @@ import json
 def handler(event, context):
     """
     Check EC2 instance activity (SSM sessions, DSQL API calls, CloudWatch metrics) 
-    and stop EC2 if no activity for specified hours
+    and stop EC2 if no activity for specified time period (supports fractional hours, e.g., 0.5 for 30 minutes)
     """
     instance_id = os.environ['EC2_INSTANCE_ID']
     region = os.environ['AWS_REGION']
-    inactivity_hours = int(os.environ.get('INACTIVITY_HOURS', '3'))
+    inactivity_hours = float(os.environ.get('INACTIVITY_HOURS', '3'))  # Support fractional hours (e.g., 0.5 for 30 minutes)
     bastion_role_arn = os.environ.get('BASTION_ROLE_ARN', '')
     sns_topic_arn = os.environ.get('SNS_TOPIC_ARN', '')
     
@@ -390,13 +391,21 @@ def handler(event, context):
         if sns and sns_topic_arn:
             try:
                 timestamp = datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S UTC')
+                # Format inactivity period for display
+                if inactivity_hours < 1:
+                    inactivity_display = f"{int(inactivity_hours * 60)} minutes"
+                elif inactivity_hours == 1:
+                    inactivity_display = "1 hour"
+                else:
+                    inactivity_display = f"{inactivity_hours} hours"
+                
                 subject = f"Bastion Host Stopped - {instance_id}"
                 message = f"""The bastion host EC2 instance '{instance_id}' has been automatically stopped due to inactivity.
 
 Details:
 - Instance ID: {instance_id}
 - Stopped at: {timestamp}
-- Reason: No activity detected for {inactivity_hours} hours
+- Reason: No activity detected for {inactivity_display}
 - Activity check results:
   * SSM sessions: {ssm_activity}
   * DSQL API calls: {dsql_activity}
@@ -481,8 +490,8 @@ resource "aws_lambda_function" "ec2_auto_stop" {
 # EventBridge rule to trigger Lambda every hour
 resource "aws_cloudwatch_event_rule" "ec2_auto_stop_schedule" {
   name                = "${var.function_name}-schedule"
-  description         = "Trigger EC2 auto-stop check every hour"
-  schedule_expression = "rate(1 hour)"
+  description         = "Trigger EC2 auto-stop check every 15 minutes"
+  schedule_expression = "rate(15 minutes)"  # Check every 15 minutes for 30-minute inactivity threshold
 
   tags = var.tags
 }

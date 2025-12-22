@@ -9,9 +9,9 @@ variable "ec2_instance_id" {
 }
 
 variable "inactivity_hours" {
-  description = "Number of hours of inactivity before stopping the instance"
+  description = "Number of hours of inactivity before stopping the instance (supports fractional hours, e.g., 0.5 for 30 minutes)"
   type        = number
-  default     = 3
+  default     = 0.5  # 30 minutes default for bastion host cost optimization
 }
 
 variable "cloudwatch_logs_retention_days" {

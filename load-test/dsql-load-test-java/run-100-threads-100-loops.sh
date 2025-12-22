@@ -48,7 +48,7 @@ echo ""
 
 # Get initial count
 echo "=== Getting Initial Database State ==="
-INITIAL_COUNT=$(./scripts/query-dsql.sh "SELECT COUNT(*) FROM car_entities_schema.business_events WHERE id LIKE 'load-test-%';" 2>/dev/null | grep -E '^[0-9]+$' | head -1 || echo "0")
+INITIAL_COUNT=$(./scripts/query-dsql.sh "SELECT COUNT(*) FROM car_entities_schema.business_events WHERE id LIKE 'load-test-%';" 2>/dev/null | grep -E '^[[:space:]]*[0-9]+[[:space:]]*$' | tr -d '[:space:]' | head -1 || echo "0")
 echo "Initial load-test rows: $INITIAL_COUNT"
 echo ""
 
@@ -164,7 +164,7 @@ echo "=========================================="
 sleep 5  # Wait for database propagation
 
 # Get final counts
-FINAL_COUNT=$(./scripts/query-dsql.sh "SELECT COUNT(*) FROM car_entities_schema.business_events WHERE id LIKE 'load-test-%';" 2>/dev/null | grep -E '^[0-9]+$' | head -1 || echo "0")
+FINAL_COUNT=$(./scripts/query-dsql.sh "SELECT COUNT(*) FROM car_entities_schema.business_events WHERE id LIKE 'load-test-%';" 2>/dev/null | grep -E '^[[:space:]]*[0-9]+[[:space:]]*$' | tr -d '[:space:]' | head -1 || echo "0")
 NEW_ROWS=$((FINAL_COUNT - INITIAL_COUNT))
 
 echo ""
@@ -192,8 +192,8 @@ ORDER BY scenario;" 2>/dev/null || echo "Could not query scenario breakdown"
 
 echo ""
 echo "=== Performance Statistics ==="
-SCENARIO1_COUNT=$(./scripts/query-dsql.sh "SELECT COUNT(*) FROM car_entities_schema.business_events WHERE id LIKE 'load-test-individual-%';" 2>/dev/null | grep -E '^[0-9]+$' | head -1 || echo "0")
-SCENARIO2_COUNT=$(./scripts/query-dsql.sh "SELECT COUNT(*) FROM car_entities_schema.business_events WHERE id LIKE 'load-test-batch-%';" 2>/dev/null | grep -E '^[0-9]+$' | head -1 || echo "0")
+SCENARIO1_COUNT=$(./scripts/query-dsql.sh "SELECT COUNT(*) FROM car_entities_schema.business_events WHERE id LIKE 'load-test-individual-%';" 2>/dev/null | grep -E '^[[:space:]]*[0-9]+[[:space:]]*$' | tr -d '[:space:]' | head -1 || echo "0")
+SCENARIO2_COUNT=$(./scripts/query-dsql.sh "SELECT COUNT(*) FROM car_entities_schema.business_events WHERE id LIKE 'load-test-batch-%';" 2>/dev/null | grep -E '^[[:space:]]*[0-9]+[[:space:]]*$' | tr -d '[:space:]' | head -1 || echo "0")
 
 echo "Scenario 1 (Individual): $SCENARIO1_COUNT rows (Expected: $EXPECTED_SCENARIO1)"
 echo "Scenario 2 (Batch): $SCENARIO2_COUNT rows (Expected: $EXPECTED_SCENARIO2)"

@@ -7,6 +7,7 @@ This guide explains how to add, modify, and delete filters using the unified fil
 The filter configuration system provides a unified way to manage event filters for both Flink SQL and Spring Boot Kafka Streams processors. Filters are defined in a single JSON configuration file and automatically generated for both platforms.
 
 ### Architecture
+
 ```mermaid
 flowchart TD
     subgraph config [Configuration Layer]
@@ -554,7 +555,8 @@ Backups are created automatically before deployments:
 
 **Problem**: Schema validation fails
 
-**Solution**: 
+**Solution**:
+
 - Check JSON syntax: `python3 -m json.tool config/filters.json`
 - Install jsonschema: `pip3 install jsonschema`
 - Review schema: `cdc-streaming/schemas/filter-schema.json`
@@ -564,6 +566,7 @@ Backups are created automatically before deployments:
 **Problem**: Filter generation produces errors
 
 **Solution**:
+
 - Check filter conditions are valid
 - Ensure all required fields are present
 - Review operator and value combinations
@@ -573,6 +576,7 @@ Backups are created automatically before deployments:
 **Problem**: Flink or Spring deployment fails
 
 **Solution**:
+
 - Check Confluent Cloud credentials and permissions
 - Verify compute pool and cluster IDs are correct
 - Check Spring Boot build succeeds: `./gradlew build`
@@ -583,6 +587,7 @@ Backups are created automatically before deployments:
 **Problem**: Filters are configured but not processing events
 
 **Solution**:
+
 - Verify filters are enabled: `"enabled": true`
 - Check Spring Boot logs for filter loading messages
 - Verify Flink statements are running: `confluent flink statement list`
@@ -618,4 +623,3 @@ Backups are created automatically before deployments:
 | `cleanup-filters.sh` | Identify and remove orphaned resources (topics, Flink statements) |
 
 All scripts are located in `cdc-streaming/scripts/filters/`.
-

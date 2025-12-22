@@ -5,14 +5,14 @@
 data "aws_caller_identity" "current" {}
 data "aws_region" "current" {}
 
-# Get latest Amazon Linux 2023 AMI
+# Get latest Amazon Linux 2023 AMI (ARM64 for Graviton/m6g instances)
 data "aws_ami" "amazon_linux_2023" {
   most_recent = true
   owners      = ["amazon"]
 
   filter {
     name   = "name"
-    values = ["al2023-ami-*-x86_64"]
+    values = ["al2023-ami-*-arm64"]
   }
 
   filter {
@@ -107,10 +107,10 @@ resource "aws_iam_role_policy" "kms_decrypt" {
   })
 }
 
-# IAM policy for S3 read access (to download deployment packages)
-resource "aws_iam_role_policy" "s3_read" {
+# IAM policy for S3 read/write access (to download deployment packages and upload test results)
+resource "aws_iam_role_policy" "s3_access" {
   count = var.s3_bucket_name != "" ? 1 : 0
-  name  = "${var.project_name}-dsql-test-runner-s3-read"
+  name  = "${var.project_name}-dsql-test-runner-s3-access"
   role  = aws_iam_role.test_runner.id
 
   policy = jsonencode({
@@ -120,6 +120,7 @@ resource "aws_iam_role_policy" "s3_read" {
         Effect = "Allow"
         Action = [
           "s3:GetObject",
+          "s3:PutObject",
           "s3:ListBucket"
         ]
         Resource = [
@@ -196,16 +197,39 @@ resource "aws_instance" "test_runner" {
   iam_instance_profile   = aws_iam_instance_profile.test_runner.name
   vpc_security_group_ids = [aws_security_group.test_runner.id]
 
-  # User data to install basic tools
+  # User data to install Java 21, Maven, Docker, PostgreSQL client, Git, and AWS CLI
   user_data = <<-EOF
     #!/bin/bash
-    # Install Java 17, PostgreSQL client, Git, and AWS CLI
+    set -e
+    
+    # Update system
     dnf update -y
-    dnf install -y java-17-amazon-corretto-headless postgresql15 git unzip
+    
+    # Install Java 21 (LTS - Amazon Corretto), Maven, Docker, PostgreSQL client, Git
+    dnf install -y java-21-amazon-corretto-devel maven docker postgresql16 git unzip python3 python3-pip
+    
+    # Start and enable Docker
+    systemctl start docker
+    systemctl enable docker
+    usermod -aG docker ec2-user
+    
+    # Install AWS CLI v2
     curl "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "awscliv2.zip"
     unzip awscliv2.zip
     ./aws/install
     rm -rf aws awscliv2.zip
+    
+    # Set Java 21 as default
+    alternatives --set java /usr/lib/jvm/java-21-amazon-corretto/bin/java || true
+    
+    # Install Python packages for validation
+    pip3 install --upgrade pip
+    pip3 install asyncpg boto3 botocore
+    
+    # Log completion
+    echo "Test runner EC2 setup complete at $(date)" >> /var/log/test-runner-setup.log
+    echo "Java version:" >> /var/log/test-runner-setup.log
+    java -version >> /var/log/test-runner-setup.log 2>&1
   EOF
 
   tags = merge(

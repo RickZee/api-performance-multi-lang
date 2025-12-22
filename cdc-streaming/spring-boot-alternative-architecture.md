@@ -208,27 +208,349 @@ flowchart LR
 
 ### 4. CI/CD Complexity
 
+Both implementations use the same filter configuration system (`cdc-streaming/config/filters.json`) with shared validation and generation scripts, but differ significantly in deployment complexity and testing capabilities.
+
+#### 4.1 Comprehensive Comparison
+
 | Aspect | Confluent Flink | Spring Boot |
-|--------|---------|-------------|
+|--------|----------------|-------------|
 | **Deployment Model** | SQL statements (Flink), connector JSON via Kafka Connect REST API | Container images, Helm charts, connector JSON via Kafka Connect REST API |
-| **Testing** | Limited (SQL validation), connector integration tests | Full unit/integration tests |
-| **Rollback** | Statement versioning (Flink), connector config rollback | K8s rollout undo, connector config rollback |
-| **Pipeline Stages** | Deploy SQL, deploy connector via Kafka Connect REST API | Build, test, push image, deploy, deploy connector via Kafka Connect REST API |
-| **Environment Parity** | Different configs per env | Same images, different configs |
+| **Pipeline Stages** | 3 stages: validate → generate → deploy SQL | 6+ stages: validate → generate → build → test → image → deploy |
+| **Deployment Time** | ~2-5 minutes | ~10-20 minutes |
+| **Testing** | Schema validation, SQL syntax validation, dry-run generation | Schema validation, SQL syntax validation, dry-run generation, unit tests, integration tests, TopologyTestDriver tests |
+| **Test Execution Time** | ~30 seconds (validation only) | ~3-5 minutes (full test suite) |
+| **Rollback** | Delete statement, redeploy previous version (manual SQL extraction) | Helm rollback, Kubernetes rollout undo, container image versioning |
+| **Rollback Time** | ~1-2 minutes (manual) | ~30 seconds (automated) |
+| **Operational Overhead** | Low (3 script steps, direct CLI deployment) | Medium-High (6+ steps, build infrastructure, container registry, K8s cluster) |
+| **Failure Recovery** | Manual statement deletion and redeployment | Automated health checks, pod restarts, circuit breakers |
+| **Approval Workflow** | Status field in `filters.json` (`pending_approval` → `approved` → `deployed`) | Status field in `filters.json` + PR review process |
+| **Environment Parity** | Different SQL configs per env | Same images, different configs per env |
 | **Connector Deployment** | Kafka Connect REST API (same for both) | Kafka Connect REST API (same for both) |
+| **Infrastructure Requirements** | Confluent CLI, Confluent Cloud access | Gradle, Docker, container registry (ECR), Kubernetes cluster, Helm |
 
-**CI/CD Pipeline for Spring Boot:**
+#### 4.2 CI/CD Workflow Diagrams
 
-```yaml
-# Simplified GitHub Actions workflow
-stages:
-  - build: ./gradlew build
-  - test: ./gradlew test integrationTest
-  - image: docker build + push to ECR
-  - deploy: helm upgrade --install
+**Flink CI/CD Workflow:**
+
+```mermaid
+flowchart LR
+    A[Filter Config Change] --> B[validate-filters.sh]
+    B --> C[generate-filters.sh]
+    C --> D[deploy-flink-filters.sh]
+    D --> E[Confluent CLI]
+    E --> F[Flink Statements Deployed]
+    
+    B -->|Schema Validation| B1[JSON Schema Check]
+    B -->|Dry Run| B2[Generation Preview]
+    C -->|Generate| C1[SQL File Created]
+    D -->|Deploy| D1[Source Table]
+    D -->|Deploy| D2[Sink Tables]
+    D -->|Deploy| D3[INSERT Statements]
+    
+    style A fill:#e1f5ff
+    style F fill:#c8e6c9
+    style B1 fill:#fff9c4
+    style B2 fill:#fff9c4
 ```
 
-**Complexity:** Spring Boot requires more sophisticated CI/CD but enables better testing and rollback capabilities.
+**Spring Boot CI/CD Workflow:**
+
+```mermaid
+flowchart LR
+    A[Filter Config Change] --> B[validate-filters.sh]
+    B --> C[generate-filters.sh]
+    C --> D[deploy-spring-filters.sh]
+    D --> E1[Gradle Build]
+    E1 --> E2[Unit Tests]
+    E2 --> E3[Integration Tests]
+    E3 --> E4[Docker Build]
+    E4 --> E5[Image Push to ECR]
+    E5 --> E6[Helm Deploy]
+    E6 --> F[K8s Pods Running]
+    
+    B -->|Schema Validation| B1[JSON Schema Check]
+    B -->|Dry Run| B2[Generation Preview]
+    C -->|Generate| C1[YAML Config Created]
+    E2 -->|Fail| E2A[Stop Pipeline]
+    E3 -->|Fail| E3A[Stop Pipeline]
+    
+    style A fill:#e1f5ff
+    style F fill:#c8e6c9
+    style B1 fill:#fff9c4
+    style B2 fill:#fff9c4
+    style E2A fill:#ffcdd2
+    style E3A fill:#ffcdd2
+```
+
+#### 4.3 Script-Based Implementation
+
+Both implementations share the same filter configuration system and use identical scripts for validation and generation:
+
+**Shared Scripts (Both Implementations):**
+- `cdc-streaming/scripts/filters/validate-filters.sh` - Validates `filters.json` against JSON schema, performs dry-run generation
+- `cdc-streaming/scripts/filters/generate-filters.sh` - Generates Flink SQL and Spring Boot YAML from `filters.json`
+- `cdc-streaming/scripts/filters/rollback-filters.sh` - Rollback support for both implementations
+- `cdc-streaming/scripts/filters/cleanup-filters.sh` - Cleanup orphaned resources (topics, statements)
+
+**Flink-Specific Scripts:**
+- `cdc-streaming/scripts/filters/deploy-flink-filters.sh` - Deploys generated SQL to Confluent Cloud via CLI
+  - Extracts source table, sink tables, and INSERT statements from generated SQL
+  - Uses `confluent flink statement create` to deploy each component
+  - Validates schema registry requirements before deployment
+
+**Spring Boot-Specific Scripts:**
+- `cdc-streaming/scripts/filters/deploy-spring-filters.sh` - Builds and deploys Spring Boot application
+  - Runs Gradle build (`./gradlew clean build`)
+  - Supports multiple deployment methods: Docker, Kubernetes/Helm, or local
+  - Generates YAML configuration from `filters.json`
+
+#### 4.4 Testing Comparison
+
+**Flink Testing:**
+- **Schema Validation**: JSON schema validation against `filter-schema.json`
+- **SQL Syntax Validation**: Basic SQL syntax checking via dry-run
+- **Dry-Run Generation**: Preview of generated SQL without deployment
+- **Limitations**: No unit tests, no integration tests, no runtime validation
+
+**Spring Boot Testing:**
+- **Schema Validation**: Same JSON schema validation as Flink
+- **SQL Syntax Validation**: Same dry-run generation as Flink
+- **Unit Tests**: Comprehensive unit tests for `FilterConditionEvaluator`, `FilterConfig`, filter status handling
+- **Integration Tests**: YAML-based configuration loading, dynamic filter application, TopologyTestDriver tests
+- **Test Coverage**: Validates all operators (`equals`, `in`, `greaterThan`, `lessThan`, `between`, `matches`, etc.), status handling, disabled/deleted filters, deprecated filter warnings
+
+**Test Execution:**
+```bash
+# Flink: Validation only (~30 seconds)
+./cdc-streaming/scripts/filters/validate-filters.sh
+
+# Spring Boot: Full test suite (~3-5 minutes)
+cd cdc-streaming/stream-processor-spring
+./gradlew test integrationTest
+```
+
+#### 4.5 Rollback Procedures
+
+**Flink Rollback:**
+1. Identify previous SQL version (manual extraction from git history or backup)
+2. Delete current Flink statement: `confluent flink statement delete <statement-name> --force`
+3. Redeploy previous SQL version: `confluent flink statement create <statement-name> --sql "<previous-sql>"`
+4. **Time**: ~1-2 minutes (manual process)
+5. **Limitations**: Requires manual SQL extraction, no automated versioning
+
+**Spring Boot Rollback:**
+1. **Helm Rollback**: `helm rollback stream-processor <revision-number>` (~10 seconds)
+2. **Kubernetes Rollout Undo**: `kubectl rollout undo deployment/stream-processor` (~10 seconds)
+3. **Container Image Versioning**: Deploy previous image tag from container registry
+4. **Time**: ~30 seconds (automated)
+5. **Advantages**: Native K8s/Helm versioning, automated rollback, maintains deployment history
+
+#### 4.6 Deployment Time Estimates
+
+**Flink Deployment:**
+- Validation: ~10 seconds
+- Generation: ~5 seconds
+- SQL Deployment: ~1-3 minutes (depends on statement count and Confluent Cloud API latency)
+- **Total**: ~2-5 minutes
+
+**Spring Boot Deployment:**
+- Validation: ~10 seconds
+- Generation: ~5 seconds
+- Gradle Build: ~2-3 minutes
+- Unit/Integration Tests: ~3-5 minutes
+- Docker Build: ~2-3 minutes
+- Image Push to ECR: ~30 seconds
+- Helm Deploy: ~1-2 minutes
+- **Total**: ~10-20 minutes
+
+#### 4.7 Operational Complexity
+
+**Flink Operational Overhead:**
+- **Low Complexity**: 3 script steps, direct CLI deployment
+- **Infrastructure**: Confluent CLI, Confluent Cloud access
+- **Monitoring**: Confluent Cloud UI for statement status
+- **Failure Handling**: Manual statement deletion and redeployment
+- **Scaling**: Automatic (managed by Confluent Cloud)
+
+**Spring Boot Operational Overhead:**
+- **Medium-High Complexity**: 6+ pipeline stages
+- **Infrastructure**: Gradle build system, Docker, container registry (ECR), Kubernetes cluster, Helm
+- **Monitoring**: Kubernetes metrics, Prometheus, application logs
+- **Failure Handling**: Automated health checks, pod restarts, circuit breakers, dead-letter queues
+- **Scaling**: Manual HPA configuration, requires Kubernetes expertise
+
+#### 4.8 Approval Workflow
+
+Both implementations use the same approval workflow via the `status` field in `filters.json`:
+
+1. **pending_approval** - Initial state when filter is created
+2. **approved** - Filter has been approved for deployment
+3. **deploying** - Filter is currently being deployed
+4. **deployed** - Filter is successfully deployed
+5. **failed** - Deployment failed
+6. **disabled** - Filter is disabled (skipped during generation)
+7. **deprecated** - Filter is deprecated (generated with warnings)
+8. **pending_deletion** - Filter marked for deletion
+9. **deleted** - Filter is deleted (not generated)
+
+**Workflow Process:**
+- Developer creates/modifies filter with `status: "pending_approval"`
+- PR review and approval
+- Update status to `approved` in PR
+- Merge triggers CI/CD pipeline
+- Deployment script updates status to `deployed` on success
+
+#### 4.9 CI/CD Pipeline Examples
+
+**Flink CI/CD Pipeline (GitHub Actions):**
+
+```yaml
+name: Deploy Flink Filters
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'cdc-streaming/config/filters.json'
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+      - name: Validate filters
+        run: ./cdc-streaming/scripts/filters/validate-filters.sh
+  
+  deploy:
+    needs: validate
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/main'
+    steps:
+      - uses: actions/checkout@v3
+      - name: Setup Confluent CLI
+        run: |
+          brew install confluentinc/tap/cli
+          confluent login --api-key ${{ secrets.CONFLUENT_API_KEY }} --api-secret ${{ secrets.CONFLUENT_API_SECRET }}
+      - name: Generate filters
+        run: ./cdc-streaming/scripts/filters/generate-filters.sh --flink-only
+      - name: Deploy Flink filters
+        env:
+          FLINK_COMPUTE_POOL_ID: ${{ secrets.FLINK_COMPUTE_POOL_ID }}
+          KAFKA_CLUSTER_ID: ${{ secrets.KAFKA_CLUSTER_ID }}
+        run: ./cdc-streaming/scripts/filters/deploy-flink-filters.sh
+```
+
+**Spring Boot CI/CD Pipeline (GitHub Actions):**
+
+```yaml
+name: Deploy Spring Boot Filters
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'cdc-streaming/config/filters.json'
+      - 'cdc-streaming/stream-processor-spring/**'
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+      - name: Validate filters
+        run: ./cdc-streaming/scripts/filters/validate-filters.sh
+  
+  build-and-test:
+    needs: validate
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+      - name: Set up JDK 17
+        uses: actions/setup-java@v3
+        with:
+          java-version: '17'
+          distribution: 'temurin'
+      - name: Generate filters
+        run: ./cdc-streaming/scripts/filters/generate-filters.sh --spring-only
+      - name: Build with Gradle
+        working-directory: cdc-streaming/stream-processor-spring
+        run: ./gradlew build
+      - name: Run tests
+        working-directory: cdc-streaming/stream-processor-spring
+        run: ./gradlew test integrationTest
+  
+  build-image:
+    needs: build-and-test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v2
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: us-east-1
+      - name: Login to Amazon ECR
+        id: login-ecr
+        uses: aws-actions/amazon-ecr-login@v1
+      - name: Build and push Docker image
+        working-directory: cdc-streaming/stream-processor-spring
+        run: |
+          docker build -t ${{ secrets.ECR_REGISTRY }}/stream-processor-spring:${{ github.sha }} .
+          docker push ${{ secrets.ECR_REGISTRY }}/stream-processor-spring:${{ github.sha }}
+  
+  deploy:
+    needs: build-image
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v2
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: us-east-1
+      - name: Install Helm
+        run: |
+          curl https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 | bash
+      - name: Deploy to Kubernetes
+        working-directory: cdc-streaming/stream-processor-spring/helm
+        run: |
+          helm upgrade --install stream-processor ./stream-processor \
+            --set image.tag=${{ github.sha }} \
+            --set kafka.bootstrapServers=${{ secrets.KAFKA_BOOTSTRAP_SERVERS }} \
+            --set kafka.apiKey=${{ secrets.KAFKA_API_KEY }} \
+            --set kafka.apiSecret=${{ secrets.KAFKA_API_SECRET }}
+```
+
+#### 4.10 Summary
+
+**Flink CI/CD Advantages:**
+- Simpler deployment process (3 steps vs 6+)
+- Faster deployment time (~2-5 minutes vs ~10-20 minutes)
+- Lower operational overhead (CLI-based, no build infrastructure)
+- Direct SQL deployment (no container builds)
+
+**Flink CI/CD Disadvantages:**
+- Limited testing (validation only, no runtime tests)
+- Manual rollback (requires SQL extraction)
+- No automated versioning
+- Less robust failure recovery
+
+**Spring Boot CI/CD Advantages:**
+- Comprehensive testing (unit, integration, TopologyTestDriver)
+- Automated rollback (Helm/K8s native)
+- Container image versioning
+- Better failure recovery (health checks, pod restarts)
+- Full CI/CD pipeline visibility
+
+**Spring Boot CI/CD Disadvantages:**
+- More complex deployment (6+ stages)
+- Longer deployment time (~10-20 minutes)
+- Higher operational overhead (build infrastructure, container registry, K8s)
+- Requires more infrastructure setup
+
+**Recommendation:** Choose Flink if deployment speed and simplicity are priorities. Choose Spring Boot if comprehensive testing and robust rollback capabilities are more important.
 
 ### 5. Schema Evolution
 

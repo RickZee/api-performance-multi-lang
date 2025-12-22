@@ -19,9 +19,9 @@ variable "vpc_cidr_block" {
 }
 
 variable "instance_type" {
-  description = "EC2 instance type"
+  description = "EC2 instance type (ARM/Graviton recommended for better price/performance)"
   type        = string
-  default     = "t3.small"
+  default     = "t4g.small"
 }
 
 variable "iam_database_user" {

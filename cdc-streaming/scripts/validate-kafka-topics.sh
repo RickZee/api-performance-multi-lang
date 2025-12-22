@@ -199,44 +199,46 @@ poll_consume_complete() {
 
 # Consume messages - use a background process
 # Note: confluent CLI doesn't support --max-messages, so we limit with head and poll
-# Try --from-beginning first to get all messages
-info "Consuming messages from beginning of topic..."
+# Since events propagate quickly, consume from latest offset first (much faster)
+# Only use --from-beginning as fallback if needed
+info "Consuming recent messages from topic (from latest offset)..."
+LATEST_CONSUMER_GROUP="validation-group-latest-$(date +%s)"
 (confluent kafka topic consume "$RAW_TOPIC" \
-    --from-beginning \
-    --group "$CONSUMER_GROUP" 2>&1 | \
+    --group "$LATEST_CONSUMER_GROUP" 2>&1 | \
     grep -v "^Consumer group" | \
     grep -v "^Starting consumer" | \
     grep -v "^No messages" | \
     grep -v "^Waiting" | \
     grep -E '^\{|^\[|"id"' | \
     head -$((EVENT_COUNT + 20)) > "$CONSUMED_RAW_FILE" 2>&1 &)
-CONSUME_PID=$!
-# Poll instead of fixed wait
-if poll_consume_complete "$CONSUMED_RAW_FILE" "$EVENT_COUNT" 15; then
-  info "Consumed enough messages (early exit)"
+LATEST_CONSUME_PID=$!
+# Poll with timeout - wait up to 10 seconds for new messages
+if poll_consume_complete "$CONSUMED_RAW_FILE" "$EVENT_COUNT" 10; then
+  info "Consumed enough messages from latest (early exit)"
 fi
-kill $CONSUME_PID 2>/dev/null || true
-wait $CONSUME_PID 2>/dev/null || true
+kill $LATEST_CONSUME_PID 2>/dev/null || true
+wait $LATEST_CONSUME_PID 2>/dev/null || true
 
-# If no messages found from beginning, try reading from latest offset as fallback
+# If no messages found from latest, try reading from beginning as fallback
+# (but only if we really need to - this is slow with many messages)
 if [ ! -s "$CONSUMED_RAW_FILE" ] || [ "$(wc -l < "$CONSUMED_RAW_FILE" 2>/dev/null | tr -d ' ')" -eq 0 ]; then
-    warn "No messages found from beginning, trying latest offset..."
-    LATEST_CONSUMER_GROUP="validation-group-latest-$(date +%s)"
+    warn "No recent messages found, trying from beginning (this may take longer)..."
     (confluent kafka topic consume "$RAW_TOPIC" \
-        --group "$LATEST_CONSUMER_GROUP" 2>&1 | \
+        --from-beginning \
+        --group "$CONSUMER_GROUP" 2>&1 | \
         grep -v "^Consumer group" | \
         grep -v "^Starting consumer" | \
         grep -v "^No messages" | \
         grep -v "^Waiting" | \
         grep -E '^\{|^\[|"id"' | \
         head -$((EVENT_COUNT + 20)) > "$CONSUMED_RAW_FILE" 2>&1 &)
-    LATEST_CONSUME_PID=$!
-    # Poll instead of fixed wait
-    if poll_consume_complete "$CONSUMED_RAW_FILE" "$EVENT_COUNT" 10; then
-      info "Consumed enough messages from latest (early exit)"
+    CONSUME_PID=$!
+    # Poll with shorter timeout for from-beginning (it's slow)
+    if poll_consume_complete "$CONSUMED_RAW_FILE" "$EVENT_COUNT" 5; then
+      info "Consumed enough messages from beginning (early exit)"
     fi
-    kill $LATEST_CONSUME_PID 2>/dev/null || true
-    wait $LATEST_CONSUME_PID 2>/dev/null || true
+    kill $CONSUME_PID 2>/dev/null || true
+    wait $CONSUME_PID 2>/dev/null || true
 fi
 
 # Extract UUIDs from raw topic
@@ -327,43 +329,45 @@ for event_type in CarCreated LoanCreated LoanPaymentSubmitted CarServiceDone; do
         fi
         
         # Consume messages - use a background process
-        # Try --from-beginning first to get all messages
+        # Since events propagate quickly, consume from latest offset first (much faster)
+        info "  Consuming recent messages from latest offset..."
+        LATEST_FILTERED_GROUP="validation-filtered-latest-${topic}-$(date +%s)"
         (confluent kafka topic consume "$topic" \
-            --from-beginning \
-            --group "$FILTERED_CONSUMER_GROUP" 2>&1 | \
+            --group "$LATEST_FILTERED_GROUP" 2>&1 | \
             grep -v "^Consumer group" | \
             grep -v "^Starting consumer" | \
             grep -v "^No messages" | \
             grep -v "^Waiting" | \
             grep -E '^\{|^\[|"id"' | \
             head -$((expected_count + 10)) > "$CONSUMED_FILE" 2>&1 &)
-        CONSUME_PID=$!
-        # Poll instead of fixed wait
-        if poll_consume_complete "$CONSUMED_FILE" "$expected_count" 15; then
-          info "  Consumed enough messages (early exit)"
+        LATEST_CONSUME_PID=$!
+        # Poll with timeout - wait up to 10 seconds for new messages
+        if poll_consume_complete "$CONSUMED_FILE" "$expected_count" 10; then
+          info "  Consumed enough messages from latest (early exit)"
         fi
-        kill $CONSUME_PID 2>/dev/null || true
-        wait $CONSUME_PID 2>/dev/null || true
+        kill $LATEST_CONSUME_PID 2>/dev/null || true
+        wait $LATEST_CONSUME_PID 2>/dev/null || true
         
-        # If no messages found from beginning, try reading from latest offset as fallback
+        # If no messages found from latest, try reading from beginning as fallback
+        # (but only if we really need to - this is slow with many messages)
         if [ ! -s "$CONSUMED_FILE" ] || [ "$(wc -l < "$CONSUMED_FILE" 2>/dev/null | tr -d ' ')" -eq 0 ]; then
-            warn "  No messages found from beginning, trying latest offset..."
-            LATEST_FILTERED_GROUP="validation-filtered-latest-${topic}-$(date +%s)"
+            warn "  No recent messages found, trying from beginning (this may take longer)..."
             (confluent kafka topic consume "$topic" \
-                --group "$LATEST_FILTERED_GROUP" 2>&1 | \
+                --from-beginning \
+                --group "$FILTERED_CONSUMER_GROUP" 2>&1 | \
                 grep -v "^Consumer group" | \
                 grep -v "^Starting consumer" | \
                 grep -v "^No messages" | \
                 grep -v "^Waiting" | \
                 grep -E '^\{|^\[|"id"' | \
                 head -$((expected_count + 10)) > "$CONSUMED_FILE" 2>&1 &)
-            LATEST_CONSUME_PID=$!
-            # Poll instead of fixed wait
-            if poll_consume_complete "$CONSUMED_FILE" "$expected_count" 10; then
-              info "  Consumed enough messages from latest (early exit)"
+            CONSUME_PID=$!
+            # Poll with shorter timeout for from-beginning (it's slow)
+            if poll_consume_complete "$CONSUMED_FILE" "$expected_count" 5; then
+              info "  Consumed enough messages from beginning (early exit)"
             fi
-            kill $LATEST_CONSUME_PID 2>/dev/null || true
-            wait $LATEST_CONSUME_PID 2>/dev/null || true
+            kill $CONSUME_PID 2>/dev/null || true
+            wait $CONSUME_PID 2>/dev/null || true
         fi
         
         # Extract UUIDs from consumed messages

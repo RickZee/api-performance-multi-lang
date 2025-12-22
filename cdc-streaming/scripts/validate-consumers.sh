@@ -246,10 +246,27 @@ info "Collecting logs to: $LOG_FILE"
 echo ""
 
 # Start log collection in background (all 8 consumers)
+# Use --tail=0 to start from current position, then follow new logs
+# This prevents reading all historical logs which can be slow
 if docker-compose version &> /dev/null; then
-    timeout $LOG_DURATION docker-compose logs -f $ALL_CONSUMERS > "$LOG_FILE" 2>&1 &
+    # Use timeout if available, otherwise use background process with kill
+    if command -v timeout &> /dev/null; then
+        timeout $LOG_DURATION docker-compose logs --tail=0 -f $ALL_CONSUMERS > "$LOG_FILE" 2>&1 &
+    else
+        # Fallback: start process and kill after duration
+        docker-compose logs --tail=0 -f $ALL_CONSUMERS > "$LOG_FILE" 2>&1 &
+        LOG_PID=$!
+        (sleep $LOG_DURATION && kill $LOG_PID 2>/dev/null) &
+    fi
 else
-    timeout $LOG_DURATION docker compose logs -f $ALL_CONSUMERS > "$LOG_FILE" 2>&1 &
+    if command -v timeout &> /dev/null; then
+        timeout $LOG_DURATION docker compose logs --tail=0 -f $ALL_CONSUMERS > "$LOG_FILE" 2>&1 &
+    else
+        # Fallback: start process and kill after duration
+        docker compose logs --tail=0 -f $ALL_CONSUMERS > "$LOG_FILE" 2>&1 &
+        LOG_PID=$!
+        (sleep $LOG_DURATION && kill $LOG_PID 2>/dev/null) &
+    fi
 fi
 
 LOG_PID=$!
@@ -292,11 +309,15 @@ for event_type in CarCreated LoanCreated LoanPaymentSubmitted CarServiceDone; do
     # Validate each consumer (Spring and Flink)
     for consumer in $consumers; do
         consumer_type=""
-        if echo "$consumer" | grep -qE "-flink$"; then
-            consumer_type="Flink"
-        else
-            consumer_type="Spring"
-        fi
+        # Check if consumer name ends with -flink using string comparison (more reliable)
+        case "$consumer" in
+            *-flink)
+                consumer_type="Flink"
+                ;;
+            *)
+                consumer_type="Spring"
+                ;;
+        esac
         
         info "  Checking $consumer_type consumer: $consumer"
         
@@ -326,15 +347,32 @@ for event_type in CarCreated LoanCreated LoanPaymentSubmitted CarServiceDone; do
                 fi
             fi
             
-            # If not found in log file, check Docker logs directly
+            # If not found in log file, check Docker logs directly (with timeout and tail limit)
             if [ "$FOUND" = "false" ]; then
                 if docker-compose version &> /dev/null; then
-                    if docker-compose logs "$consumer" 2>&1 | grep -qi "Event ID.*$uuid\|event.*id.*$uuid"; then
-                        FOUND=true
+                    # Use --tail to limit output and prevent hanging
+                    # Use timeout if available, otherwise just use --tail
+                    if command -v timeout &> /dev/null; then
+                        if timeout 5 docker-compose logs --tail=100 "$consumer" 2>&1 | grep -qi "Event ID.*$uuid\|event.*id.*$uuid"; then
+                            FOUND=true
+                        fi
+                    else
+                        # Fallback: use --tail without timeout (should be fast with --tail)
+                        if docker-compose logs --tail=100 "$consumer" 2>&1 | grep -qi "Event ID.*$uuid\|event.*id.*$uuid"; then
+                            FOUND=true
+                        fi
                     fi
                 else
-                    if docker compose logs "$consumer" 2>&1 | grep -qi "Event ID.*$uuid\|event.*id.*$uuid"; then
-                        FOUND=true
+                    # Use --tail to limit output and prevent hanging
+                    if command -v timeout &> /dev/null; then
+                        if timeout 5 docker compose logs --tail=100 "$consumer" 2>&1 | grep -qi "Event ID.*$uuid\|event.*id.*$uuid"; then
+                            FOUND=true
+                        fi
+                    else
+                        # Fallback: use --tail without timeout (should be fast with --tail)
+                        if docker compose logs --tail=100 "$consumer" 2>&1 | grep -qi "Event ID.*$uuid\|event.*id.*$uuid"; then
+                            FOUND=true
+                        fi
                     fi
                 fi
             fi
@@ -360,9 +398,17 @@ for event_type in CarCreated LoanCreated LoanPaymentSubmitted CarServiceDone; do
             fail "    No $event_type events found in $consumer ($consumer_type) logs"
             info "    Checking recent logs for $consumer:"
             if docker-compose version &> /dev/null; then
-                docker-compose logs --tail=20 "$consumer" 2>&1 | head -10
+                if command -v timeout &> /dev/null; then
+                    timeout 5 docker-compose logs --tail=20 "$consumer" 2>&1 | head -10 || echo "    (Could not retrieve logs - container may not be running)"
+                else
+                    docker-compose logs --tail=20 "$consumer" 2>&1 | head -10 || echo "    (Could not retrieve logs - container may not be running)"
+                fi
             else
-                docker compose logs --tail=20 "$consumer" 2>&1 | head -10
+                if command -v timeout &> /dev/null; then
+                    timeout 5 docker compose logs --tail=20 "$consumer" 2>&1 | head -10 || echo "    (Could not retrieve logs - container may not be running)"
+                else
+                    docker compose logs --tail=20 "$consumer" 2>&1 | head -10 || echo "    (Could not retrieve logs - container may not be running)"
+                fi
             fi
             VALIDATION_FAILED=true
         fi
