@@ -414,7 +414,7 @@ module "aurora_auto_stop" {
   aurora_cluster_arn             = module.aurora[0].cluster_arn
   api_gateway_id                 = module.python_rest_lambda_pg[0].api_id
   aws_region                     = var.aws_region
-  inactivity_hours               = 3
+  inactivity_hours               = 1
   cloudwatch_logs_retention_days = local.cloudwatch_logs_retention
   admin_email                    = var.aurora_auto_stop_admin_email
 
@@ -476,7 +476,7 @@ module "dsql_auto_pause" {
   dsql_cluster_resource_id       = module.aurora_dsql[0].cluster_resource_id
   dsql_cluster_arn               = module.aurora_dsql[0].cluster_arn
   api_gateway_id                 = module.python_rest_lambda_dsql[0].api_id
-  inactivity_hours               = 3
+  inactivity_hours               = 1
   dsql_min_capacity              = 0  # Scale down to 0 ACU (pause) when inactive
   cloudwatch_logs_retention_days = local.cloudwatch_logs_retention
   admin_email                    = var.aurora_auto_stop_admin_email  # Reuse same email config

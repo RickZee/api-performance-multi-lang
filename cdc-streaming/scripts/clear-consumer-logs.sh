@@ -12,7 +12,7 @@
 #   --soft      Soft restart only (logs may persist)
 #   -h, --help  Show this help message
 
-set -e
+set +e  # Don't exit on error - we want to handle errors gracefully
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 CDC_DIR="$(dirname "$SCRIPT_DIR")"
@@ -47,15 +47,21 @@ fail() { echo -e "${RED}✗${NC} $1"; }
 clear_container_logs() {
     local container_name="$1"
     
-    # Check if container exists
+    # Check if container exists and is running
     if ! docker ps -a --format '{{.Names}}' | grep -q "^${container_name}$"; then
         echo -e "${YELLOW}[SKIP]${NC} Container '${container_name}' not found"
         return 1
     fi
     
+    # Check if container is running - don't clear logs of stopped containers
+    if ! docker ps --format '{{.Names}}' | grep -q "^${container_name}$"; then
+        echo -e "${YELLOW}[SKIP]${NC} Container '${container_name}' is not running (will not clear logs)"
+        return 1
+    fi
+    
     # Get the container ID
     local container_id
-    container_id=$(docker inspect --format='{{.Id}}' "$container_name" 2>/dev/null)
+    container_id=$(docker inspect --format='{{.Id}}' "$container_name" 2>/dev/null || echo "")
     
     if [ -z "$container_id" ]; then
         echo -e "${RED}[ERROR]${NC} Could not get ID for container '${container_name}'"
@@ -68,17 +74,15 @@ clear_container_logs() {
     # On macOS with Docker Desktop, we need to access the VM
     if [[ "$(uname)" == "Darwin" ]]; then
         # Use docker run to access Docker's VM filesystem
+        # NOTE: This method can be problematic and may break containers
+        # Better to use --restart flag to recreate containers instead
         echo -e "${BLUE}[CLEAR]${NC} Clearing logs for '${container_name}'..."
+        echo -e "${YELLOW}[WARN]${NC} Log truncation on macOS may not work reliably"
+        echo -e "${YELLOW}[WARN]${NC} Consider using --restart flag instead to recreate containers"
         
-        if docker run --rm --privileged --pid=host alpine:latest \
-            nsenter -t 1 -m -u -n -i -- truncate -s 0 "$log_file" 2>/dev/null; then
-            echo -e "${GREEN}[OK]${NC} Cleared logs for '${container_name}'"
-            return 0
-        else
-            # Fallback: try using docker cp trick (create empty file)
-            echo -e "${YELLOW}[WARN]${NC} Direct truncate failed for '${container_name}', logs may persist"
-            return 1
-        fi
+        # Skip truncation on macOS - it's unreliable and can break containers
+        echo -e "${YELLOW}[SKIP]${NC} Skipping log truncation for '${container_name}' (use --restart instead)"
+        return 1
     else
         # Linux: Direct access to log files (requires sudo)
         if sudo truncate -s 0 "$log_file" 2>/dev/null; then
@@ -189,18 +193,36 @@ recreate_containers() {
     cd "$CDC_DIR"
     
     echo -e "${YELLOW}[STOP]${NC} Stopping and removing containers..."
-    if docker-compose rm -f -s ${unique_services[@]} 2>&1 | grep -v "level=warning"; then
+    # Use proper array quoting to prevent expansion issues
+    if docker-compose rm -f -s "${unique_services[@]}" 2>&1 | grep -v "level=warning" || true; then
         echo -e "${GREEN}[OK]${NC} Containers removed"
+    else
+        echo -e "${YELLOW}[WARN]${NC} Some containers may not have been removed (continuing anyway)"
     fi
     
     echo ""
     echo -e "${YELLOW}[CREATE]${NC} Recreating containers..."
-    if docker-compose up -d ${unique_services[@]} 2>&1 | grep -v "level=warning"; then
-        success_count=${#unique_services[@]}
-        echo -e "${GREEN}[OK]${NC} Containers recreated"
+    # Use proper array quoting and check exit code properly
+    if docker-compose up -d "${unique_services[@]}" 2>&1 | grep -v "level=warning"; then
+        # Check if containers actually started
+        sleep 2  # Brief pause for containers to start
+        local running_count=0
+        for service in "${unique_services[@]}"; do
+            if docker-compose ps "$service" 2>/dev/null | grep -q "Up"; then
+                ((running_count++))
+            fi
+        done
+        success_count=$running_count
+        fail_count=$((${#unique_services[@]} - running_count))
+        if [ $success_count -gt 0 ]; then
+            echo -e "${GREEN}[OK]${NC} $success_count containers recreated and running"
+        fi
+        if [ $fail_count -gt 0 ]; then
+            echo -e "${RED}[ERROR]${NC} $fail_count containers failed to start"
+        fi
     else
         fail_count=${#unique_services[@]}
-        echo -e "${RED}[ERROR]${NC} Failed to recreate some containers"
+        echo -e "${RED}[ERROR]${NC} Failed to recreate containers"
     fi
     
     echo ""
@@ -208,10 +230,26 @@ recreate_containers() {
     echo -e "Results: ${GREEN}${success_count} recreated${NC}, ${YELLOW}${fail_count} failed${NC}"
     echo "=============================================="
     
-    # Wait for containers to be fully ready
+    # Wait for containers to be fully ready and verify they're running
     if [ $success_count -gt 0 ]; then
         info "Waiting 10s for containers to connect to Kafka..."
         sleep 10
+        
+        # Verify containers are actually running and producing logs
+        local verified_count=0
+        for service in "${unique_services[@]}"; do
+            if docker-compose ps "$service" 2>/dev/null | grep -q "Up"; then
+                # Check if container has any output (even startup logs)
+                if docker-compose logs --tail=1 "$service" 2>&1 | grep -v "level=warning" | grep -q .; then
+                    ((verified_count++))
+                fi
+            fi
+        done
+        
+        if [ $verified_count -lt $success_count ]; then
+            warn "Only $verified_count/$success_count containers are producing logs"
+            warn "Some containers may not have started properly"
+        fi
     fi
 }
 

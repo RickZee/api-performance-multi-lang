@@ -601,9 +601,10 @@ if [ "$SKIP_TO_STEP" -le 5 ] && [ "$SKIP_CLEAR_LOGS" = false ]; then
   echo ""
   
   # Clear consumer logs (consumers already started in Step 3)
-  info "Clearing consumer logs..."
-  if "$SCRIPT_DIR/clear-consumer-logs.sh" 2>&1 | tail -10; then
-    pass "Consumer logs cleared"
+  # Use --restart to recreate containers (safer than log truncation which can break containers)
+  info "Clearing consumer logs and recreating consumers..."
+  if "$SCRIPT_DIR/clear-consumer-logs.sh" --restart 2>&1 | tail -10; then
+    pass "Consumer logs cleared and consumers recreated"
   else
     warn "Some consumer logs could not be cleared (continuing anyway)"
   fi
@@ -759,15 +760,17 @@ if [ "$SKIP_TO_STEP" -le 9 ]; then
   # Check if Confluent is logged in before attempting Kafka validation
   if confluent environment list &> /dev/null; then
     # Determine which processor to validate based on which is running
-    # Check if Spring Boot stream processor is running
-    PROCESSOR_TO_VALIDATE="both"  # Default to both for comprehensive testing
+    # NOTE: Each processor writes only to its own topics:
+    #   - Flink SQL writes to -flink topics only
+    #   - Spring Boot writes to -spring topics only
+    #   - We validate the topics for whichever processor is actually running
+    PROCESSOR_TO_VALIDATE="both"  # Default to both for comprehensive testing (if both processors are running)
     if docker-compose ps stream-processor 2>/dev/null | grep -q "Up"; then
-      # Spring Boot is running, validate spring topics
-      # Also check for Flink (both might be running in test scenarios)
+      # Spring Boot is running, validate spring topics (written by Spring Boot processor)
       info "Spring Boot processor detected, validating spring topics"
       PROCESSOR_TO_VALIDATE="spring"
     else
-      # Only Flink is likely running
+      # Only Flink is likely running, validate flink topics (written by Flink SQL processor)
       info "Validating Flink topics (Spring Boot not running)"
       PROCESSOR_TO_VALIDATE="flink"
     fi

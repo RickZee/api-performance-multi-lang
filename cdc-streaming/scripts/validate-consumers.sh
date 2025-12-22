@@ -241,24 +241,29 @@ info "Collecting logs to: $LOG_FILE"
 echo ""
 
 # Start log collection in background (all 8 consumers)
-# Use --tail=0 to start from current position, then follow new logs
-# This prevents reading all historical logs which can be slow
+# Use --tail=200 to capture recent logs (events already processed) plus follow new logs
+# This ensures we capture events that were processed before log collection started
 if docker-compose version &> /dev/null; then
-    # Use timeout if available, otherwise use background process with kill
+    # First, get recent logs (without -f to get existing logs)
+    docker-compose logs --tail=200 $ALL_CONSUMERS > "$LOG_FILE" 2>&1 || true
+    # Then follow new logs (with timeout to prevent hanging)
     if command -v timeout &> /dev/null; then
-        timeout $LOG_DURATION docker-compose logs --tail=0 -f $ALL_CONSUMERS > "$LOG_FILE" 2>&1 &
+        timeout $LOG_DURATION docker-compose logs --tail=0 -f $ALL_CONSUMERS >> "$LOG_FILE" 2>&1 &
     else
         # Fallback: start process and kill after duration
-        docker-compose logs --tail=0 -f $ALL_CONSUMERS > "$LOG_FILE" 2>&1 &
+        docker-compose logs --tail=0 -f $ALL_CONSUMERS >> "$LOG_FILE" 2>&1 &
         LOG_PID=$!
         (sleep $LOG_DURATION && kill $LOG_PID 2>/dev/null) &
     fi
 else
+    # First, get recent logs (without -f to get existing logs)
+    docker compose logs --tail=200 $ALL_CONSUMERS > "$LOG_FILE" 2>&1 || true
+    # Then follow new logs (with timeout to prevent hanging)
     if command -v timeout &> /dev/null; then
-        timeout $LOG_DURATION docker compose logs --tail=0 -f $ALL_CONSUMERS > "$LOG_FILE" 2>&1 &
+        timeout $LOG_DURATION docker compose logs --tail=0 -f $ALL_CONSUMERS >> "$LOG_FILE" 2>&1 &
     else
         # Fallback: start process and kill after duration
-        docker compose logs --tail=0 -f $ALL_CONSUMERS > "$LOG_FILE" 2>&1 &
+        docker compose logs --tail=0 -f $ALL_CONSUMERS >> "$LOG_FILE" 2>&1 &
         LOG_PID=$!
         (sleep $LOG_DURATION && kill $LOG_PID 2>/dev/null) &
     fi
@@ -338,75 +343,95 @@ for event_type in CarCreated LoanCreated LoanPaymentSubmitted CarServiceDone; do
             CONTAINER_PATTERN="cdc-${consumer}-spring"
         fi
         
-        FOUND_UUIDS=""
-        
-        if [ -f "$LOG_FILE" ]; then
-            # Look for UUIDs in logs - consumers may log event IDs in various formats
-            # Support both standard UUID format and timestamp-hash format (e.g., 1765998679-28a1dcfd)
-            # Match container name pattern in log file (docker-compose logs prefix lines with container name)
-            FOUND_UUIDS=$(grep -i "$CONTAINER_PATTERN" "$LOG_FILE" 2>/dev/null | \
-                grep -oE '([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}|[0-9]+-[0-9a-f]+)' | \
-                sort -u || echo "")
+        # Cache Docker logs once per consumer (instead of calling for each UUID)
+        # This prevents hanging and improves performance
+        DOCKER_LOGS_CACHE=""
+        if [ -f "$LOG_FILE" ] && [ -s "$LOG_FILE" ]; then
+            # Extract logs for this specific container from the log file (with timeout)
+            # Use timeout to prevent hanging on large log files
+            if command -v timeout &> /dev/null; then
+                DOCKER_LOGS_CACHE=$(timeout 5 grep -i "$CONTAINER_PATTERN" "$LOG_FILE" 2>/dev/null || echo "")
+            else
+                DOCKER_LOGS_CACHE=$(grep -i "$CONTAINER_PATTERN" "$LOG_FILE" 2>/dev/null | head -1000 || echo "")
+            fi
         fi
         
-        # Check for each expected UUID
+        # If log file doesn't have this container's logs, fetch from Docker once (with timeout)
+        if [ -z "$DOCKER_LOGS_CACHE" ] || [ ${#DOCKER_LOGS_CACHE} -lt 10 ]; then
+            DOCKER_LOGS_TMP="/tmp/docker-logs-${consumer}-$(date +%s).txt"
+            if docker-compose version &> /dev/null; then
+                if command -v timeout &> /dev/null; then
+                    timeout 3 docker-compose logs --tail=200 "$consumer" 2>&1 > "$DOCKER_LOGS_TMP" || true
+                else
+                    # Fallback: use head to limit output and prevent hanging
+                    docker-compose logs --tail=200 "$consumer" 2>&1 | head -500 > "$DOCKER_LOGS_TMP" 2>/dev/null || true
+                fi
+            else
+                if command -v timeout &> /dev/null; then
+                    timeout 3 docker compose logs --tail=200 "$consumer" 2>&1 > "$DOCKER_LOGS_TMP" || true
+                else
+                    # Fallback: use head to limit output and prevent hanging
+                    docker compose logs --tail=200 "$consumer" 2>&1 | head -500 > "$DOCKER_LOGS_TMP" 2>/dev/null || true
+                fi
+            fi
+            if [ -f "$DOCKER_LOGS_TMP" ] && [ -s "$DOCKER_LOGS_TMP" ]; then
+                DOCKER_LOGS_CACHE=$(cat "$DOCKER_LOGS_TMP" 2>/dev/null || echo "")
+                rm -f "$DOCKER_LOGS_TMP"
+            fi
+        fi
+        
+        # Extract all UUIDs from cached logs once (with timeout to prevent hanging)
+        FOUND_UUIDS=""
+        if [ -n "$DOCKER_LOGS_CACHE" ]; then
+            # Look for UUIDs in logs - consumers may log event IDs in various formats
+            # Support both standard UUID format and timestamp-hash format (e.g., 1765998679-28a1dcfd)
+            # Use timeout to prevent hanging on large log content
+            if command -v timeout &> /dev/null; then
+                FOUND_UUIDS=$(echo "$DOCKER_LOGS_CACHE" | timeout 3 grep -oE '([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}|[0-9]+-[0-9a-f]+)' | sort -u || echo "")
+            else
+                # Fallback: limit input size to prevent hanging
+                FOUND_UUIDS=$(echo "$DOCKER_LOGS_CACHE" | head -2000 | grep -oE '([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}|[0-9]+-[0-9a-f]+)' | sort -u || echo "")
+            fi
+        fi
+        
+        # Create a simple lookup file for fast UUID checking (avoid repeated grep operations)
+        FOUND_UUIDS_FILE="/tmp/found-uuids-${consumer}-$(date +%s).txt"
+        echo "$FOUND_UUIDS" > "$FOUND_UUIDS_FILE"
+        
+        # Check for each expected UUID (fast lookup using file)
         FOUND_COUNT=0
         MISSING_UUIDS=()
         
         for uuid in $expected_uuids; do
-            # Check if UUID appears in logs (may be in different formats)
-            # Consumers log "Event ID: {uuid}" so we need to search for that pattern
-            FOUND=false
-            if [ -f "$LOG_FILE" ]; then
-                # First check if UUID is in the extracted FOUND_UUIDS list
-                if echo "$FOUND_UUIDS" | grep -q "$uuid"; then
-                    FOUND=true
-                # Then check for "Event ID: {uuid}" pattern in logs for this specific container
-                elif grep -i "$CONTAINER_PATTERN" "$LOG_FILE" 2>/dev/null | grep -qi "Event ID.*$uuid\|event.*id.*$uuid\|UUID.*$uuid\|uuid.*$uuid"; then
-                    FOUND=true
-                # Also check for UUID anywhere in the log file (fallback)
-                elif grep -q "$uuid" "$LOG_FILE" 2>/dev/null; then
-                    FOUND=true
-                fi
-            fi
-            
-            # If not found in log file, check Docker logs directly (with timeout and tail limit)
-            # Use service name for docker-compose logs (not container name)
-            if [ "$FOUND" = "false" ]; then
-                if docker-compose version &> /dev/null; then
-                    # Use --tail to limit output and prevent hanging
-                    # Use timeout if available, otherwise just use --tail
-                    if command -v timeout &> /dev/null; then
-                        if timeout 5 docker-compose logs --tail=100 "$consumer" 2>&1 | grep -qi "Event ID.*$uuid\|event.*id.*$uuid\|UUID.*$uuid\|uuid.*$uuid"; then
-                            FOUND=true
-                        fi
-                    else
-                        # Fallback: use --tail without timeout (should be fast with --tail)
-                        if docker-compose logs --tail=100 "$consumer" 2>&1 | grep -qi "Event ID.*$uuid\|event.*id.*$uuid\|UUID.*$uuid\|uuid.*$uuid"; then
-                            FOUND=true
-                        fi
-                    fi
-                else
-                    # Use --tail to limit output and prevent hanging
-                    if command -v timeout &> /dev/null; then
-                        if timeout 5 docker compose logs --tail=100 "$consumer" 2>&1 | grep -qi "Event ID.*$uuid\|event.*id.*$uuid\|UUID.*$uuid\|uuid.*$uuid"; then
-                            FOUND=true
-                        fi
-                    else
-                        # Fallback: use --tail without timeout (should be fast with --tail)
-                        if docker compose logs --tail=100 "$consumer" 2>&1 | grep -qi "Event ID.*$uuid\|event.*id.*$uuid\|UUID.*$uuid\|uuid.*$uuid"; then
-                            FOUND=true
-                        fi
-                    fi
-                fi
-            fi
-            
-            if [ "$FOUND" = "true" ]; then
+            # Fast check: use grep on the UUID file (much faster than repeated string operations)
+            if grep -q "^${uuid}$" "$FOUND_UUIDS_FILE" 2>/dev/null; then
                 FOUND_COUNT=$((FOUND_COUNT + 1))
             else
-                MISSING_UUIDS+=("$uuid")
+                # Also check for UUID in various log formats (with timeout)
+                FOUND=false
+                if [ -n "$DOCKER_LOGS_CACHE" ]; then
+                    if command -v timeout &> /dev/null; then
+                        if echo "$DOCKER_LOGS_CACHE" | timeout 1 grep -qi "Event ID.*$uuid\|event.*id.*$uuid\|UUID.*$uuid\|uuid.*$uuid"; then
+                            FOUND=true
+                        fi
+                    else
+                        # Fallback: limit search to prevent hanging
+                        if echo "$DOCKER_LOGS_CACHE" | head -1000 | grep -qi "Event ID.*$uuid\|event.*id.*$uuid\|UUID.*$uuid\|uuid.*$uuid"; then
+                            FOUND=true
+                        fi
+                    fi
+                fi
+                
+                if [ "$FOUND" = "true" ]; then
+                    FOUND_COUNT=$((FOUND_COUNT + 1))
+                else
+                    MISSING_UUIDS+=("$uuid")
+                fi
             fi
         done
+        
+        # Cleanup temporary file
+        rm -f "$FOUND_UUIDS_FILE"
         
         if [ "$FOUND_COUNT" -eq "$expected_count" ]; then
             pass "    All $expected_count $event_type events found in $consumer ($consumer_type) logs"

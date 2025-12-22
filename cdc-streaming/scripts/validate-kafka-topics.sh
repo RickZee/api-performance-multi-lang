@@ -10,9 +10,11 @@
 #   ./cdc-streaming/scripts/validate-kafka-topics.sh /tmp/events.json spring
 #
 # PROCESSOR can be: flink, spring, or both (default: both)
-#   - flink: Validates only -flink suffixed topics
-#   - spring: Validates only -spring suffixed topics
-#   - both: Validates both (for testing/validation)
+#   - flink: Validates only -flink suffixed topics (written by Flink SQL processor)
+#   - spring: Validates only -spring suffixed topics (written by Spring Boot processor)
+#   - both: Validates both sets of topics (for comprehensive e2e testing when both processors are running)
+#           NOTE: No processor writes to both - each writes only to its own topics.
+#           "both" is only for validation/testing purposes.
 
 set -e
 
@@ -149,8 +151,8 @@ echo ""
 
 # Extract event UUIDs by type (already done above, this is a duplicate - removing)
 
-# Step 1: Validate raw-event-headers topic
-echo -e "${CYAN}Step 1: Validate raw-event-headers Topic${NC}"
+# Step 9.1: Validate raw-event-headers topic
+echo -e "${CYAN}Step 9.1: Validate raw-event-headers Topic${NC}"
 echo ""
 
 if ! confluent kafka topic describe "$RAW_TOPIC" &>/dev/null; then
@@ -267,8 +269,8 @@ else
 fi
 echo ""
 
-# Step 2: Validate filtered topics for each event type
-echo -e "${CYAN}Step 2: Validate Filtered Topics${NC}"
+# Step 9.2: Validate filtered topics for each event type
+echo -e "${CYAN}Step 9.2: Validate Filtered Topics${NC}"
 echo ""
 
 TOTAL_VALIDATED=0
@@ -286,11 +288,15 @@ for event_type in CarCreated LoanCreated LoanPaymentSubmitted CarServiceDone; do
     fi
     
     # Determine which topics to validate based on processor setting
+    # NOTE: Each processor writes only to its own topics:
+    #   - Flink SQL writes to -flink topics only
+    #   - Spring Boot writes to -spring topics only
+    #   - "both" option is for validation/testing when you want to check both sets of topics
     if [ "$PROCESSOR" = "both" ]; then
-        # Validate both Flink and Spring Boot topics
+        # Validate both Flink and Spring Boot topics (for comprehensive e2e testing)
         topics=("$(get_topic_for_event_type "$event_type" flink)" "$(get_topic_for_event_type "$event_type" spring)")
     else
-        # Validate single processor topic
+        # Validate single processor topic (the one that actually wrote the events)
         topics=("$(get_topic_for_event_type "$event_type" "$PROCESSOR")")
     fi
     
@@ -414,6 +420,14 @@ done
 # Summary
 echo -e "${CYAN}Validation Summary${NC}"
 echo ""
+if [ "$PROCESSOR" = "both" ]; then
+    info "Validated both Flink (-flink) and Spring Boot (-spring) topics (for comprehensive testing)"
+    info "Note: Each processor writes only to its own topics - no processor writes to both"
+elif [ "$PROCESSOR" = "flink" ]; then
+    info "Validated Flink topics (-flink suffix, written by Flink SQL processor)"
+elif [ "$PROCESSOR" = "spring" ]; then
+    info "Validated Spring Boot topics (-spring suffix, written by Spring Boot processor)"
+fi
 echo "Total events expected: $TOTAL_EXPECTED"
 echo "Total events validated: $TOTAL_VALIDATED"
 echo ""
@@ -429,5 +443,5 @@ if [ "$VALIDATION_FAILED" = true ]; then
     exit 1
 fi
 
-pass "All events validated in Kafka topics"
+pass "All events validated in Kafka topics ($PROCESSOR)"
 exit 0
