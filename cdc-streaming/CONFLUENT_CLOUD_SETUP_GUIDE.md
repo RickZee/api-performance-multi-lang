@@ -2635,30 +2635,6 @@ pipeline {
 }
 ```
 
-### GitHub Actions Multi-Region Workflow
-
-```yaml
-# .github/workflows/confluent-multi-region-deploy.yml
-name: Deploy Confluent Multi-Region
-on:
-  push:
-    branches: [main]
-    paths: ['terraform/confluent/**', 'cdc-streaming/**']
-
-jobs:
-  deploy:
-    strategy:
-      matrix:
-        region: [us-east-1, us-west-2]
-    steps:
-      - uses: actions/checkout@v3
-      - name: Deploy Infrastructure
-        working-directory: terraform/confluent
-        run: |
-          terraform init
-          terraform apply -target=module.${replace(matrix.region, "-", "_")} -auto-approve
-```
-
 ## Enterprise Features and Best Practices
 
 ### Security Considerations

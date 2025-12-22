@@ -621,18 +621,25 @@ Enable debug mode for detailed timing information:
 
 ## Integration with CI/CD
 
-The script can be integrated into CI/CD pipelines:
+The script can be integrated into Jenkins CI/CD pipelines:
 
-```yaml
-# Example GitHub Actions workflow
-- name: Run E2E Test Pipeline
-  run: |
-    ./cdc-streaming/scripts/test-e2e-pipeline.sh 60
-  env:
-    KAFKA_BOOTSTRAP_SERVERS: ${{ secrets.KAFKA_BOOTSTRAP_SERVERS }}
-    KAFKA_API_KEY: ${{ secrets.KAFKA_API_KEY }}
-    KAFKA_API_SECRET: ${{ secrets.KAFKA_API_SECRET }}
-    AURORA_PASSWORD: ${{ secrets.AURORA_PASSWORD }}
+```groovy
+pipeline {
+    agent any
+    environment {
+        KAFKA_BOOTSTRAP_SERVERS = credentials('kafka-bootstrap-servers')
+        KAFKA_API_KEY = credentials('kafka-api-key')
+        KAFKA_API_SECRET = credentials('kafka-api-secret')
+        AURORA_PASSWORD = credentials('aurora-password')
+    }
+    stages {
+        stage('Run E2E Test Pipeline') {
+            steps {
+                sh './cdc-streaming/scripts/test-e2e-pipeline.sh 60'
+            }
+        }
+    }
+}
 ```
 
 ## Database Management Scripts

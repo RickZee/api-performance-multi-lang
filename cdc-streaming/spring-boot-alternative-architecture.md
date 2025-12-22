@@ -415,125 +415,115 @@ Both implementations use the same approval workflow via the `status` field in `f
 
 #### 4.9 CI/CD Pipeline Examples
 
-**Flink CI/CD Pipeline (GitHub Actions):**
+**Flink CI/CD Pipeline (Jenkins):**
 
-```yaml
-name: Deploy Flink Filters
-
-on:
-  push:
-    branches: [main]
-    paths:
-      - 'cdc-streaming/config/filters.json'
-
-jobs:
-  validate:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v3
-      - name: Validate filters
-        run: ./cdc-streaming/scripts/filters/validate-filters.sh
-  
-  deploy:
-    needs: validate
-    runs-on: ubuntu-latest
-    if: github.ref == 'refs/heads/main'
-    steps:
-      - uses: actions/checkout@v3
-      - name: Setup Confluent CLI
-        run: |
-          brew install confluentinc/tap/cli
-          confluent login --api-key ${{ secrets.CONFLUENT_API_KEY }} --api-secret ${{ secrets.CONFLUENT_API_SECRET }}
-      - name: Generate filters
-        run: ./cdc-streaming/scripts/filters/generate-filters.sh --flink-only
-      - name: Deploy Flink filters
-        env:
-          FLINK_COMPUTE_POOL_ID: ${{ secrets.FLINK_COMPUTE_POOL_ID }}
-          KAFKA_CLUSTER_ID: ${{ secrets.KAFKA_CLUSTER_ID }}
-        run: ./cdc-streaming/scripts/filters/deploy-flink-filters.sh
+```groovy
+pipeline {
+    agent any
+    environment {
+        CONFLUENT_API_KEY = credentials('confluent-api-key')
+        CONFLUENT_API_SECRET = credentials('confluent-api-secret')
+        FLINK_COMPUTE_POOL_ID = credentials('flink-compute-pool-id')
+        KAFKA_CLUSTER_ID = credentials('kafka-cluster-id')
+    }
+    stages {
+        stage('Validate') {
+            steps {
+                sh './cdc-streaming/scripts/filters/validate-filters.sh'
+            }
+        }
+        stage('Setup Confluent CLI') {
+            steps {
+                sh '''
+                    brew install confluentinc/tap/cli || true
+                    confluent login --api-key ${CONFLUENT_API_KEY} --api-secret ${CONFLUENT_API_SECRET}
+                '''
+            }
+        }
+        stage('Generate') {
+            steps {
+                sh './cdc-streaming/scripts/filters/generate-filters.sh --flink-only'
+            }
+        }
+        stage('Deploy Flink Filters') {
+            steps {
+                sh './cdc-streaming/scripts/filters/deploy-flink-filters.sh'
+            }
+        }
+    }
+}
 ```
 
-**Spring Boot CI/CD Pipeline (GitHub Actions):**
+**Spring Boot CI/CD Pipeline (Jenkins):**
 
-```yaml
-name: Deploy Spring Boot Filters
-
-on:
-  push:
-    branches: [main]
-    paths:
-      - 'cdc-streaming/config/filters.json'
-      - 'cdc-streaming/stream-processor-spring/**'
-
-jobs:
-  validate:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v3
-      - name: Validate filters
-        run: ./cdc-streaming/scripts/filters/validate-filters.sh
-  
-  build-and-test:
-    needs: validate
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v3
-      - name: Set up JDK 17
-        uses: actions/setup-java@v3
-        with:
-          java-version: '17'
-          distribution: 'temurin'
-      - name: Generate filters
-        run: ./cdc-streaming/scripts/filters/generate-filters.sh --spring-only
-      - name: Build with Gradle
-        working-directory: cdc-streaming/stream-processor-spring
-        run: ./gradlew build
-      - name: Run tests
-        working-directory: cdc-streaming/stream-processor-spring
-        run: ./gradlew test integrationTest
-  
-  build-image:
-    needs: build-and-test
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v3
-      - name: Configure AWS credentials
-        uses: aws-actions/configure-aws-credentials@v2
-        with:
-          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
-          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-          aws-region: us-east-1
-      - name: Login to Amazon ECR
-        id: login-ecr
-        uses: aws-actions/amazon-ecr-login@v1
-      - name: Build and push Docker image
-        working-directory: cdc-streaming/stream-processor-spring
-        run: |
-          docker build -t ${{ secrets.ECR_REGISTRY }}/stream-processor-spring:${{ github.sha }} .
-          docker push ${{ secrets.ECR_REGISTRY }}/stream-processor-spring:${{ github.sha }}
-  
-  deploy:
-    needs: build-image
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v3
-      - name: Configure AWS credentials
-        uses: aws-actions/configure-aws-credentials@v2
-        with:
-          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
-          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-          aws-region: us-east-1
-      - name: Install Helm
-        run: |
-          curl https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 | bash
-      - name: Deploy to Kubernetes
-        working-directory: cdc-streaming/stream-processor-spring/helm
-        run: |
-          helm upgrade --install stream-processor ./stream-processor \
-            --set image.tag=${{ github.sha }} \
-            --set kafka.bootstrapServers=${{ secrets.KAFKA_BOOTSTRAP_SERVERS }} \
-            --set kafka.apiKey=${{ secrets.KAFKA_API_KEY }} \
-            --set kafka.apiSecret=${{ secrets.KAFKA_API_SECRET }}
+```groovy
+pipeline {
+    agent any
+    environment {
+        AWS_ACCESS_KEY_ID = credentials('aws-access-key-id')
+        AWS_SECRET_ACCESS_KEY = credentials('aws-secret-access-key')
+        AWS_REGION = 'us-east-1'
+        ECR_REGISTRY = credentials('ecr-registry')
+        KAFKA_BOOTSTRAP_SERVERS = credentials('kafka-bootstrap-servers')
+        KAFKA_API_KEY = credentials('kafka-api-key')
+        KAFKA_API_SECRET = credentials('kafka-api-secret')
+        IMAGE_TAG = "${env.BUILD_NUMBER}"
+    }
+    stages {
+        stage('Validate') {
+            steps {
+                sh './cdc-streaming/scripts/filters/validate-filters.sh'
+            }
+        }
+        stage('Generate Filters') {
+            steps {
+                sh './cdc-streaming/scripts/filters/generate-filters.sh --spring-only'
+            }
+        }
+        stage('Build and Test') {
+            steps {
+                dir('cdc-streaming/stream-processor-spring') {
+                    sh './gradlew build'
+                    sh './gradlew test integrationTest'
+                }
+            }
+        }
+        stage('Build Docker Image') {
+            steps {
+                script {
+                    sh '''
+                        aws ecr get-login-password --region ${AWS_REGION} | \
+                        docker login --username AWS --password-stdin ${ECR_REGISTRY}
+                    '''
+                    dir('cdc-streaming/stream-processor-spring') {
+                        sh """
+                            docker build -t ${ECR_REGISTRY}/stream-processor-spring:${IMAGE_TAG} .
+                            docker push ${ECR_REGISTRY}/stream-processor-spring:${IMAGE_TAG}
+                        """
+                    }
+                }
+            }
+        }
+        stage('Deploy to Kubernetes') {
+            steps {
+                script {
+                    sh '''
+                        curl https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 | bash || true
+                    '''
+                    dir('cdc-streaming/stream-processor-spring/helm') {
+                        sh """
+                            helm upgrade --install stream-processor ./stream-processor \
+                                --set image.tag=${IMAGE_TAG} \
+                                --set kafka.bootstrapServers=${KAFKA_BOOTSTRAP_SERVERS} \
+                                --set kafka.apiKey=${KAFKA_API_KEY} \
+                                --set kafka.apiSecret=${KAFKA_API_SECRET}
+                        """
+                    }
+                }
+            }
+        }
+    }
+}
 ```
 
 #### 4.10 Summary

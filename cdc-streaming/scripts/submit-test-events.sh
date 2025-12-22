@@ -88,9 +88,34 @@ submit_event() {
     # Generate unique entity ID suffix for this event (to ensure each event creates a new entity)
     local entity_suffix=$(openssl rand -hex 4 | tr '[:lower:]' '[:upper:]')
     
-    # Load event and update UUID and entity IDs
-    # First, update event header UUID
-    local event_json=$(jq --arg uuid "$unique_id" '.eventHeader.uuid = $uuid' "$event_file")
+    # Generate realistic dates: createdDate = now, savedDate = now + 2-5 seconds
+    local created_date=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+    local saved_delay=$((2 + RANDOM % 4))  # Random delay between 2-5 seconds
+    
+    # Calculate saved_date (works on both macOS and Linux)
+    if [[ "$(uname)" == "Darwin" ]]; then
+        # macOS date command
+        local saved_date=$(date -u -v+${saved_delay}S +"%Y-%m-%dT%H:%M:%SZ" 2>/dev/null)
+    else
+        # Linux date command
+        local saved_date=$(date -u -d "+${saved_delay} seconds" +"%Y-%m-%dT%H:%M:%SZ" 2>/dev/null)
+    fi
+    
+    # Fallback to created_date + 3 seconds if date calculation fails
+    if [ -z "$saved_date" ]; then
+        local created_timestamp=$(date -u +%s)
+        local saved_timestamp=$((created_timestamp + 3))
+        saved_date=$(date -u -r "$saved_timestamp" +"%Y-%m-%dT%H:%M:%SZ" 2>/dev/null || date -u -d "@$saved_timestamp" +"%Y-%m-%dT%H:%M:%SZ" 2>/dev/null || echo "$created_date")
+    fi
+    
+    # Load event and update UUID, dates, and entity IDs
+    # First, update event header UUID and dates
+    local event_json=$(jq --arg uuid "$unique_id" \
+        --arg created "$created_date" \
+        --arg saved "$saved_date" \
+        '.eventHeader.uuid = $uuid | 
+         .eventHeader.createdDate = $created | 
+         .eventHeader.savedDate = $saved' "$event_file")
     
     # Update entity IDs in all entities (both entityHeader.entityId and id field)
     # Extract entity type from first entity to determine prefix
@@ -109,11 +134,16 @@ submit_event() {
         # Generate new entity ID with unique suffix
         local new_entity_id="${entity_prefix}-2025-${entity_suffix}"
         
-        # Update entityHeader.entityId and id field for all entities
-        event_json=$(echo "$event_json" | jq --arg new_id "$new_entity_id" '
+        # Update entityHeader.entityId, id field, and entity dates for all entities
+        # Entity dates should match event createdDate (entities are created when event is created)
+        event_json=$(echo "$event_json" | jq --arg new_id "$new_entity_id" \
+            --arg created "$created_date" \
+            --arg updated "$created_date" '
             .entities = (.entities | map(
                 .entityHeader.entityId = $new_id |
-                .id = $new_id
+                .id = $new_id |
+                .entityHeader.createdAt = $created |
+                .entityHeader.updatedAt = $updated
             ))
         ')
     fi

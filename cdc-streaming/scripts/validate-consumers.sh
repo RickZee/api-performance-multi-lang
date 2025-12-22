@@ -134,8 +134,8 @@ get_uuids_for_event_type() {
 section "Consumer Validation"
 echo ""
 
-# Step 1: Start consumers
-section "Step 1: Start Dockerized Consumers"
+# Step 10.1: Verify consumers are running (they should already be started in Step 3)
+section "Step 10.1: Verify Consumers Are Running"
 echo ""
 
 # Check if docker-compose file exists
@@ -151,13 +151,14 @@ ALL_CONSUMERS="car-consumer loan-consumer loan-payment-consumer service-consumer
 RUNNING_CONSUMERS=0
 
 for consumer in $ALL_CONSUMERS; do
-    if docker ps --format '{{.Names}}' | grep -q "${consumer}"; then
+    if docker ps --format '{{.Names}}' | grep -q "cdc-${consumer}"; then
         RUNNING_CONSUMERS=$((RUNNING_CONSUMERS + 1))
     fi
 done
 
 if [ $RUNNING_CONSUMERS -lt 8 ]; then
-    info "Starting all 8 consumers (4 Spring + 4 Flink)..."
+    warn "Only $RUNNING_CONSUMERS/8 consumers are running (expected to be started in Step 3)"
+    info "Attempting to start missing consumers..."
     
     # Source environment files if they exist
     if [ -f "$PROJECT_ROOT/cdc-streaming/.env" ]; then
@@ -176,17 +177,16 @@ if [ $RUNNING_CONSUMERS -lt 8 ]; then
     fi
     
     if docker-compose version &> /dev/null; then
-        docker-compose up -d $ALL_CONSUMERS
+        docker-compose up -d $ALL_CONSUMERS 2>&1 | grep -v "level=warning" | tail -5
     else
-        docker compose up -d $ALL_CONSUMERS
+        docker compose up -d $ALL_CONSUMERS 2>&1 | grep -v "level=warning" | tail -5
     fi
     
     info "Waiting for consumers to start (checking every 2s, max 20s)..."
-    # Poll consumer status instead of fixed wait
     max_startup_wait=20
     startup_elapsed=0
     while [ $startup_elapsed -lt $max_startup_wait ]; do
-        RUNNING_COUNT=$(docker ps --format '{{.Names}}' | grep -E "(car-consumer|loan-consumer|loan-payment-consumer|service-consumer)" | wc -l | tr -d ' ')
+        RUNNING_COUNT=$(docker ps --format '{{.Names}}' | grep -E "cdc-(car-consumer|loan-consumer|loan-payment-consumer|service-consumer)" | wc -l | tr -d ' ')
         if [ "$RUNNING_COUNT" -ge 8 ]; then
             pass "All 8 consumers started (after ${startup_elapsed}s)"
             break
@@ -199,27 +199,22 @@ if [ $RUNNING_CONSUMERS -lt 8 ]; then
         warn "Only $RUNNING_COUNT/8 consumers started after ${startup_elapsed}s"
     fi
 else
-    info "All 8 consumers already running"
+    pass "All 8 consumers are running (started in Step 3)"
 fi
 
 # Verify consumers are running
 CONSUMER_CHECK_FAILED=0
-for event_type in CarCreated LoanCreated LoanPaymentSubmitted CarServiceDone; do
-    consumers=$(get_consumers_for_event_type "$event_type")
-    for consumer in $consumers; do
-        # Check if container exists and is running (container name might have prefix)
-        if docker ps --format '{{.Names}}' | grep -q "${consumer}"; then
-            pass "$consumer is running"
-        elif docker ps -a --format '{{.Names}}' | grep -q "${consumer}"; then
-            # Container exists but not running
-            CONTAINER_STATUS=$(docker ps -a --format '{{.Names}} {{.Status}}' | grep "${consumer}" | awk '{print $2}')
-            warn "$consumer exists but status is: $CONTAINER_STATUS"
-            CONSUMER_CHECK_FAILED=1
-        else
-            fail "$consumer container not found"
-            CONSUMER_CHECK_FAILED=1
-        fi
-    done
+for consumer in $ALL_CONSUMERS; do
+    if docker ps --format '{{.Names}}' | grep -q "cdc-${consumer}"; then
+        pass "cdc-${consumer} is running"
+    elif docker ps -a --format '{{.Names}}' | grep -q "cdc-${consumer}"; then
+        CONTAINER_STATUS=$(docker ps -a --format '{{.Names}} {{.Status}}' | grep "cdc-${consumer}" | awk '{print $2}')
+        warn "cdc-${consumer} exists but status is: $CONTAINER_STATUS"
+        CONSUMER_CHECK_FAILED=1
+    else
+        fail "cdc-${consumer} container not found"
+        CONSUMER_CHECK_FAILED=1
+    fi
 done
 
 if [ $CONSUMER_CHECK_FAILED -eq 1 ]; then
@@ -234,8 +229,8 @@ if [ $CONSUMER_CHECK_FAILED -eq 1 ]; then
 fi
 echo ""
 
-# Step 2: Monitor consumer logs
-section "Step 2: Monitor Consumer Logs"
+# Step 10.2: Monitor consumer logs
+section "Step 10.2: Monitor Consumer Logs"
 echo ""
 
 LOG_DURATION=${LOG_DURATION:-15}  # Monitor logs for 15 seconds (reduced from 30s for faster execution)
@@ -278,11 +273,22 @@ sleep $LOG_DURATION
 kill $LOG_PID 2>/dev/null || true
 wait $LOG_PID 2>/dev/null || true
 
+# Verify log file was created and has content
+if [ ! -f "$LOG_FILE" ]; then
+    warn "Log file was not created: $LOG_FILE"
+elif [ ! -s "$LOG_FILE" ]; then
+    warn "Log file is empty: $LOG_FILE"
+    info "This may indicate consumers are not producing logs or log collection failed"
+else
+    LOG_LINES=$(wc -l < "$LOG_FILE" 2>/dev/null | tr -d ' ' || echo "0")
+    info "Collected $LOG_LINES lines of log data"
+fi
+
 pass "Log collection complete"
 echo ""
 
-# Step 3: Extract and validate events from logs
-section "Step 3: Validate Events in Consumer Logs"
+# Step 10.3: Extract and validate events from logs
+section "Step 10.3: Validate Events in Consumer Logs"
 echo ""
 
 TOTAL_VALIDATED=0
@@ -322,12 +328,23 @@ for event_type in CarCreated LoanCreated LoanPaymentSubmitted CarServiceDone; do
         info "  Checking $consumer_type consumer: $consumer"
         
         # Extract event IDs from consumer logs
+        # Container names in docker-compose logs are prefixed with "cdc-" and suffixed with "-spring" or "-flink"
+        # Service name is just the base name (e.g., "car-consumer")
+        # Container name pattern: cdc-{service}-{spring|flink}
+        CONTAINER_PATTERN="cdc-${consumer}"
+        if [ "$consumer_type" = "Flink" ]; then
+            CONTAINER_PATTERN="cdc-${consumer}-flink"
+        else
+            CONTAINER_PATTERN="cdc-${consumer}-spring"
+        fi
+        
         FOUND_UUIDS=""
         
         if [ -f "$LOG_FILE" ]; then
             # Look for UUIDs in logs - consumers may log event IDs in various formats
             # Support both standard UUID format and timestamp-hash format (e.g., 1765998679-28a1dcfd)
-            FOUND_UUIDS=$(grep -i "$consumer" "$LOG_FILE" 2>/dev/null | \
+            # Match container name pattern in log file (docker-compose logs prefix lines with container name)
+            FOUND_UUIDS=$(grep -i "$CONTAINER_PATTERN" "$LOG_FILE" 2>/dev/null | \
                 grep -oE '([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}|[0-9]+-[0-9a-f]+)' | \
                 sort -u || echo "")
         fi
@@ -338,39 +355,46 @@ for event_type in CarCreated LoanCreated LoanPaymentSubmitted CarServiceDone; do
         
         for uuid in $expected_uuids; do
             # Check if UUID appears in logs (may be in different formats)
+            # Consumers log "Event ID: {uuid}" so we need to search for that pattern
             FOUND=false
             if [ -f "$LOG_FILE" ]; then
-                if echo "$FOUND_UUIDS" | grep -q "$uuid" || \
-                   grep -q "$uuid" "$LOG_FILE" 2>/dev/null || \
-                   grep -qi "Event ID.*$uuid\|event.*id.*$uuid" "$LOG_FILE" 2>/dev/null; then
+                # First check if UUID is in the extracted FOUND_UUIDS list
+                if echo "$FOUND_UUIDS" | grep -q "$uuid"; then
+                    FOUND=true
+                # Then check for "Event ID: {uuid}" pattern in logs for this specific container
+                elif grep -i "$CONTAINER_PATTERN" "$LOG_FILE" 2>/dev/null | grep -qi "Event ID.*$uuid\|event.*id.*$uuid\|UUID.*$uuid\|uuid.*$uuid"; then
+                    FOUND=true
+                # Also check for UUID anywhere in the log file (fallback)
+                elif grep -q "$uuid" "$LOG_FILE" 2>/dev/null; then
                     FOUND=true
                 fi
             fi
             
             # If not found in log file, check Docker logs directly (with timeout and tail limit)
+            # Use service name for docker-compose logs (not container name)
             if [ "$FOUND" = "false" ]; then
                 if docker-compose version &> /dev/null; then
                     # Use --tail to limit output and prevent hanging
                     # Use timeout if available, otherwise just use --tail
                     if command -v timeout &> /dev/null; then
-                        if timeout 5 docker-compose logs --tail=100 "$consumer" 2>&1 | grep -qi "Event ID.*$uuid\|event.*id.*$uuid"; then
+                        if timeout 5 docker-compose logs --tail=100 "$consumer" 2>&1 | grep -qi "Event ID.*$uuid\|event.*id.*$uuid\|UUID.*$uuid\|uuid.*$uuid"; then
                             FOUND=true
                         fi
                     else
                         # Fallback: use --tail without timeout (should be fast with --tail)
-                        if docker-compose logs --tail=100 "$consumer" 2>&1 | grep -qi "Event ID.*$uuid\|event.*id.*$uuid"; then
+                        if docker-compose logs --tail=100 "$consumer" 2>&1 | grep -qi "Event ID.*$uuid\|event.*id.*$uuid\|UUID.*$uuid\|uuid.*$uuid"; then
                             FOUND=true
                         fi
                     fi
                 else
                     # Use --tail to limit output and prevent hanging
                     if command -v timeout &> /dev/null; then
-                        if timeout 5 docker compose logs --tail=100 "$consumer" 2>&1 | grep -qi "Event ID.*$uuid\|event.*id.*$uuid"; then
+                        if timeout 5 docker compose logs --tail=100 "$consumer" 2>&1 | grep -qi "Event ID.*$uuid\|event.*id.*$uuid\|UUID.*$uuid\|uuid.*$uuid"; then
                             FOUND=true
                         fi
                     else
                         # Fallback: use --tail without timeout (should be fast with --tail)
-                        if docker compose logs --tail=100 "$consumer" 2>&1 | grep -qi "Event ID.*$uuid\|event.*id.*$uuid"; then
+                        if docker compose logs --tail=100 "$consumer" 2>&1 | grep -qi "Event ID.*$uuid\|event.*id.*$uuid\|UUID.*$uuid\|uuid.*$uuid"; then
                             FOUND=true
                         fi
                     fi

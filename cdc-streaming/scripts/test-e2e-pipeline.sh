@@ -19,7 +19,7 @@
 #   --skip-aurora       Skip Aurora cluster status check
 #   --skip-build        Skip Docker image builds
 #   --skip-clear-logs   Skip clearing consumer logs before validation
-#   --skip-to-step N    Resume from step N (1-10)
+#   --skip-to-step N    Resume from step N (1-11)
 #   --debug             Enable verbose output with timing
 #
 # Requirements:
@@ -445,10 +445,107 @@ elif [ "$SKIP_AURORA_CHECK" = true ]; then
   fi
 fi
 
-# Step 3: Get Lambda API URL
+# Step 3: Start Dockerized Consumers
 if [ "$SKIP_TO_STEP" -le 3 ]; then
+  step_start "Start Dockerized Consumers"
+  section "Step 3: Start Dockerized Consumers"
+  echo ""
+  
+  cd "$PROJECT_ROOT/cdc-streaming"
+  
+  # Check if docker-compose file exists
+  if [ ! -f "docker-compose.yml" ]; then
+    fail "docker-compose.yml not found in cdc-streaming directory"
+    exit 1
+  fi
+  
+  # Check if consumers are already running
+  info "Checking consumer status..."
+  # All 8 consumers: 4 Spring + 4 Flink
+  ALL_CONSUMERS="car-consumer loan-consumer loan-payment-consumer service-consumer car-consumer-flink loan-consumer-flink loan-payment-consumer-flink service-consumer-flink"
+  RUNNING_CONSUMERS=0
+  
+  for consumer in $ALL_CONSUMERS; do
+    if docker ps --format '{{.Names}}' | grep -q "cdc-${consumer}"; then
+      RUNNING_CONSUMERS=$((RUNNING_CONSUMERS + 1))
+    fi
+  done
+  
+  if [ $RUNNING_CONSUMERS -lt 8 ]; then
+    info "Starting all 8 consumers (4 Spring + 4 Flink)..."
+    
+    # Source environment files if they exist
+    if [ -f "$PROJECT_ROOT/cdc-streaming/.env" ]; then
+      source "$PROJECT_ROOT/cdc-streaming/.env"
+    fi
+    
+    # Check if KAFKA environment variables are set
+    if [ -z "$KAFKA_BOOTSTRAP_SERVERS" ] && [ -z "$CONFLUENT_BOOTSTRAP_SERVERS" ]; then
+      fail "KAFKA_BOOTSTRAP_SERVERS or CONFLUENT_BOOTSTRAP_SERVERS environment variable not set"
+      exit 1
+    fi
+    
+    # Use CONFLUENT_BOOTSTRAP_SERVERS if KAFKA_BOOTSTRAP_SERVERS is not set
+    if [ -z "$KAFKA_BOOTSTRAP_SERVERS" ] && [ -n "$CONFLUENT_BOOTSTRAP_SERVERS" ]; then
+      export KAFKA_BOOTSTRAP_SERVERS="$CONFLUENT_BOOTSTRAP_SERVERS"
+    fi
+    
+    if docker-compose version &> /dev/null; then
+      docker-compose up -d $ALL_CONSUMERS 2>&1 | grep -v "level=warning" | tail -5
+    else
+      docker compose up -d $ALL_CONSUMERS 2>&1 | grep -v "level=warning" | tail -5
+    fi
+    
+    info "Waiting for consumers to start (checking every 2s, max 20s)..."
+    # Poll consumer status instead of fixed wait
+    max_startup_wait=20
+    startup_elapsed=0
+    while [ $startup_elapsed -lt $max_startup_wait ]; do
+      RUNNING_COUNT=$(docker ps --format '{{.Names}}' | grep -E "cdc-(car-consumer|loan-consumer|loan-payment-consumer|service-consumer)" | wc -l | tr -d ' ')
+      if [ "$RUNNING_COUNT" -ge 8 ]; then
+        pass "All 8 consumers started (after ${startup_elapsed}s)"
+        break
+      fi
+      sleep 2
+      startup_elapsed=$((startup_elapsed + 2))
+    done
+    
+    if [ "$RUNNING_COUNT" -lt 8 ]; then
+      warn "Only $RUNNING_COUNT/8 consumers started after ${startup_elapsed}s"
+    fi
+  else
+    pass "All 8 consumers already running"
+  fi
+  
+  # Verify consumers are running
+  CONSUMER_CHECK_FAILED=0
+  for consumer in $ALL_CONSUMERS; do
+    if docker ps --format '{{.Names}}' | grep -q "cdc-${consumer}"; then
+      pass "cdc-${consumer} is running"
+    elif docker ps -a --format '{{.Names}}' | grep -q "cdc-${consumer}"; then
+      CONTAINER_STATUS=$(docker ps -a --format '{{.Names}} {{.Status}}' | grep "cdc-${consumer}" | awk '{print $2}')
+      warn "cdc-${consumer} exists but status is: $CONTAINER_STATUS"
+      CONSUMER_CHECK_FAILED=1
+    else
+      fail "cdc-${consumer} container not found"
+      CONSUMER_CHECK_FAILED=1
+    fi
+  done
+  
+  if [ $CONSUMER_CHECK_FAILED -eq 1 ]; then
+    warn "Some consumers are not running properly"
+  fi
+  
+  cd "$PROJECT_ROOT"
+  step_end
+  save_checkpoint "3"
+  echo ""
+fi
+
+# Step 4: Get Lambda API URL
+if [ "$SKIP_TO_STEP" -le 4 ]; then
   step_start "Get Lambda API URL"
-  section "Step 3: Get Lambda API URL"
+  section "Step 4: Get Lambda API URL"
   echo ""
 
 cd "$PROJECT_ROOT/terraform"
@@ -476,12 +573,12 @@ cd "$PROJECT_ROOT"
   pass "Lambda API URL: $LAMBDA_API_URL"
   jq ".lambda_api_url = \"$LAMBDA_API_URL\"" "$RESULTS_FILE" > "$RESULTS_FILE.tmp" && mv "$RESULTS_FILE.tmp" "$RESULTS_FILE"
   step_end
-  save_checkpoint "3"
+  save_checkpoint "4"
   echo ""
 fi
 
 # Clear database and consumer logs BEFORE submitting events for accurate timing measurement
-if [ "$SKIP_TO_STEP" -le 4 ] && [ "$SKIP_CLEAR_LOGS" = false ]; then
+if [ "$SKIP_TO_STEP" -le 5 ] && [ "$SKIP_CLEAR_LOGS" = false ]; then
   section "Pre-Test Cleanup"
   echo ""
   
@@ -503,25 +600,25 @@ if [ "$SKIP_TO_STEP" -le 4 ] && [ "$SKIP_CLEAR_LOGS" = false ]; then
   fi
   echo ""
   
-  # Clear consumer logs
-  info "Clearing consumer logs and recreating consumers..."
-  if "$SCRIPT_DIR/clear-consumer-logs.sh" --restart 2>&1 | tail -10; then
-    pass "Consumer logs cleared and consumers recreated"
+  # Clear consumer logs (consumers already started in Step 3)
+  info "Clearing consumer logs..."
+  if "$SCRIPT_DIR/clear-consumer-logs.sh" 2>&1 | tail -10; then
+    pass "Consumer logs cleared"
   else
     warn "Some consumer logs could not be cleared (continuing anyway)"
   fi
   
   # Wait for consumers to warm up (based on our delay analysis)
-  info "Waiting 15s for consumers to warm up and connect to Kafka..."
-  sleep 15
+  info "Waiting 10s for consumers to reconnect to Kafka..."
+  sleep 10
   pass "Consumer warm-up complete"
   echo ""
 fi
 
-# Step 4: Submit Events
-if [ "$SKIP_TO_STEP" -le 4 ]; then
+# Step 5: Submit Events
+if [ "$SKIP_TO_STEP" -le 5 ]; then
   step_start "Submit Events"
-  section "Step 4: Submit Events to Lambda API"
+  section "Step 5: Submit Events to Lambda API"
   echo ""
   info "Submitting 10 events of each type (40 total: CarCreated, LoanCreated, LoanPaymentSubmitted, CarServiceDone)"
   echo ""
@@ -538,14 +635,14 @@ if [ "$SKIP_TO_STEP" -le 4 ]; then
   SUBMITTED_EVENTS=$(jq 'length' "$EVENTS_FILE" 2>/dev/null || echo "0")
   info "Submitted $SUBMITTED_EVENTS events (expected: 40 events - 10 of each type)"
   step_end
-  save_checkpoint "4"
+  save_checkpoint "5"
   echo ""
 fi
 
-# Step 5: Validate Database
-if [ "$SKIP_TO_STEP" -le 5 ]; then
+# Step 6: Validate Database
+if [ "$SKIP_TO_STEP" -le 6 ]; then
   step_start "Validate Database"
-  section "Step 5: Validate Events in Database"
+  section "Step 6: Validate Events in Database"
   echo ""
 
 # Run database validation and capture output
@@ -565,17 +662,14 @@ else
     # Don't exit - continue with other validations
   fi
   step_end
-  save_checkpoint "5"
+  save_checkpoint "6"
   echo ""
 fi
 
-# Note: Consumer logs are now cleared BEFORE Step 4 (Submit Events) for accurate timing
-# This section removed - log clearing moved to before event submission
-
-# Step 6: Start Stream Processor
-if [ "$SKIP_TO_STEP" -le 6 ]; then
+# Step 7: Start Stream Processor
+if [ "$SKIP_TO_STEP" -le 7 ]; then
   step_start "Start Stream Processor"
-  section "Step 6: Start Stream Processor"
+  section "Step 7: Start Stream Processor"
   echo ""
 
   info "Starting Spring Boot stream processor..."
@@ -636,14 +730,14 @@ if [ "$SKIP_TO_STEP" -le 6 ]; then
   fi
   cd "$PROJECT_ROOT"
   step_end
-  save_checkpoint "6"
+  save_checkpoint "7"
   echo ""
 fi
 
-# Step 7: Wait for CDC Propagation
-if [ "$SKIP_TO_STEP" -le 7 ]; then
+# Step 8: Wait for CDC Propagation
+if [ "$SKIP_TO_STEP" -le 8 ]; then
   step_start "Wait for CDC Propagation"
-  section "Step 7: Wait for CDC Propagation"
+  section "Step 8: Wait for CDC Propagation"
   echo ""
 
   info "Waiting up to ${WAIT_TIME}s for CDC to propagate events..."
@@ -652,14 +746,14 @@ if [ "$SKIP_TO_STEP" -le 7 ]; then
   sleep $WAIT_TIME
   pass "Wait complete"
   step_end
-  save_checkpoint "7"
+  save_checkpoint "8"
   echo ""
 fi
 
-# Step 8: Validate Kafka Topics
-if [ "$SKIP_TO_STEP" -le 8 ]; then
+# Step 9: Validate Kafka Topics
+if [ "$SKIP_TO_STEP" -le 9 ]; then
   step_start "Validate Kafka Topics"
-  section "Step 8: Validate Kafka Topics"
+  section "Step 9: Validate Kafka Topics"
   echo ""
 
   # Check if Confluent is logged in before attempting Kafka validation
@@ -688,17 +782,17 @@ if [ "$SKIP_TO_STEP" -le 8 ]; then
   else
     warn "Skipping Kafka validation - Confluent Cloud not logged in"
     info "To enable Kafka validation, run: confluent login"
-    jq '.kafka_validated = "skipped"' "$RESULTS_FILE" > "$RESULTS_FILE.tmp" && mv "$RESULTS_FILE.tmp" "$RESULTS_FILE"
+      jq '.kafka_validated = "skipped"' "$RESULTS_FILE" > "$RESULTS_FILE.tmp" && mv "$RESULTS_FILE.tmp" "$RESULTS_FILE"
   fi
   step_end
-  save_checkpoint "8"
+  save_checkpoint "9"
   echo ""
 fi
 
-# Step 9: Start and Validate Consumers
-if [ "$SKIP_TO_STEP" -le 9 ]; then
+# Step 10: Validate Consumers
+if [ "$SKIP_TO_STEP" -le 10 ]; then
   step_start "Validate Consumers"
-  section "Step 9: Start and Validate All 8 Consumers (4 Spring + 4 Flink)"
+  section "Step 10: Validate All 8 Consumers (4 Spring + 4 Flink)"
   echo ""
   info "Validating all 8 consumers:"
   info "  - 4 Spring consumers (from filtered-*-events-spring topics)"
@@ -713,13 +807,13 @@ if [ "$SKIP_TO_STEP" -le 9 ]; then
     jq '.consumers_validated = false' "$RESULTS_FILE" > "$RESULTS_FILE.tmp" && mv "$RESULTS_FILE.tmp" "$RESULTS_FILE"
   fi
   step_end
-  save_checkpoint "9"
+  save_checkpoint "10"
   echo ""
 fi
 
-# Step 10: Generate Report
+# Step 11: Generate Report
 step_start "Generate Report"
-section "Step 10: Test Report"
+section "Step 11: Test Report"
 echo ""
 
 DB_VALIDATED=$(jq -r '.database_validated // false' "$RESULTS_FILE")
@@ -761,9 +855,9 @@ else
         echo "  - Verify consumers are running: docker-compose -f cdc-streaming/docker-compose.yml ps"
     fi
   step_end
-  save_checkpoint "10"
+  save_checkpoint "11"
   exit 1
 fi
 
 step_end
-save_checkpoint "10"
+save_checkpoint "11"
