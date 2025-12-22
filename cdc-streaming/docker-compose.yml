@@ -82,6 +82,9 @@ services:
       KAFKA_SASL_MECHANISM: ${KAFKA_SASL_MECHANISM:-PLAIN}
       # Spring Kafka Streams configuration
       SPRING_KAFKA_STREAMS_SOURCE_TOPIC: raw-event-headers
+    volumes:
+      # Mount filters.yml so Spring Boot can load it at runtime
+      - ./stream-processor-spring/src/main/resources/filters.yml:/app/filters.yml:ro
     ports:
       - "8083:8080"  # Actuator health endpoint
     networks:

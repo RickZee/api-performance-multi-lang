@@ -240,6 +240,33 @@ info "Monitoring consumer logs for ${LOG_DURATION} seconds..."
 info "Collecting logs to: $LOG_FILE"
 echo ""
 
+# Debug: Check if stream processor is running and routing events
+info "Debug: Checking stream processor status..."
+if docker ps --format '{{.Names}}' | grep -q "cdc-stream-processor"; then
+    pass "Stream processor container is running"
+    # Check if filters are loaded
+    if docker-compose logs stream-processor --tail=50 2>&1 | grep -q "Loading.*filter"; then
+        FILTER_COUNT=$(docker-compose logs stream-processor --tail=50 2>&1 | grep -c "Configuring filter" || echo "0")
+        if [ "$FILTER_COUNT" -gt 0 ]; then
+            pass "Stream processor has $FILTER_COUNT filter(s) configured"
+        else
+            warn "Stream processor running but no filters configured"
+        fi
+    else
+        warn "Stream processor may not have filters loaded"
+    fi
+    # Check if events are being routed
+    ROUTED_COUNT=$(docker-compose logs stream-processor --tail=200 2>&1 | grep -c "Event sent to" || echo "0")
+    if [ "$ROUTED_COUNT" -gt 0 ]; then
+        info "Stream processor has routed $ROUTED_COUNT events to filtered topics"
+    else
+        warn "Stream processor has not routed any events yet (may need new events or reprocessing)"
+    fi
+else
+    warn "Stream processor container is not running - Spring consumers won't receive events"
+fi
+echo ""
+
 # Start log collection in background (all 8 consumers)
 # Use --tail=200 to capture recent logs (events already processed) plus follow new logs
 # This ensures we capture events that were processed before log collection started
@@ -292,6 +319,79 @@ fi
 pass "Log collection complete"
 echo ""
 
+# Step 10.2.5: Debug - Check topic message counts and consumer offsets
+section "Step 10.2.5: Debug - Topic and Consumer Status"
+echo ""
+
+# Check if Confluent CLI is available
+if command -v confluent &> /dev/null && confluent environment list &> /dev/null 2>&1; then
+    info "Checking filtered topic message counts..."
+    
+    # Check each filtered topic
+    for event_type in CarCreated LoanCreated LoanPaymentSubmitted CarServiceDone; do
+        consumers=$(get_consumers_for_event_type "$event_type")
+        for consumer in $consumers; do
+            # Determine topic based on consumer type
+            case "$consumer" in
+                *-flink)
+                    case "$event_type" in
+                        CarCreated) topic="filtered-car-created-events-flink" ;;
+                        LoanCreated) topic="filtered-loan-created-events-flink" ;;
+                        LoanPaymentSubmitted) topic="filtered-loan-payment-submitted-events-flink" ;;
+                        CarServiceDone) topic="filtered-service-events-flink" ;;
+                        *) continue ;;
+                    esac
+                    consumer_group="${consumer}-group"
+                    ;;
+                *)
+                    case "$event_type" in
+                        CarCreated) topic="filtered-car-created-events-spring" ;;
+                        LoanCreated) topic="filtered-loan-created-events-spring" ;;
+                        LoanPaymentSubmitted) topic="filtered-loan-payment-submitted-events-spring" ;;
+                        CarServiceDone) topic="filtered-service-events-spring" ;;
+                        *) continue ;;
+                    esac
+                    consumer_group="${consumer}-spring-group"
+                    ;;
+            esac
+            
+            # Check topic message count
+            if confluent kafka topic describe "$topic" &>/dev/null; then
+                LATEST_OFFSET=$(confluent kafka topic describe "$topic" --output json 2>/dev/null | jq -r '.partitions[0].latest_offset // "0"' 2>/dev/null || echo "0")
+                EARLIEST_OFFSET=$(confluent kafka topic describe "$topic" --output json 2>/dev/null | jq -r '.partitions[0].earliest_offset // "0"' 2>/dev/null || echo "0")
+                MESSAGE_COUNT=$((LATEST_OFFSET - EARLIEST_OFFSET)) 2>/dev/null || MESSAGE_COUNT=0
+                
+                if [ "$MESSAGE_COUNT" -gt 0 ] 2>/dev/null; then
+                    info "  Topic $topic: $MESSAGE_COUNT messages (offsets: $EARLIEST_OFFSET to $LATEST_OFFSET)"
+                else
+                    warn "  Topic $topic: No messages found (offsets: $EARLIEST_OFFSET to $LATEST_OFFSET)"
+                fi
+                
+                # Check consumer group offset
+                GROUP_INFO=$(confluent kafka consumer-group describe "$consumer_group" --output json 2>/dev/null || echo "")
+                if [ -n "$GROUP_INFO" ] && echo "$GROUP_INFO" | jq -e '.partitions' &>/dev/null; then
+                    CURRENT_OFFSET=$(echo "$GROUP_INFO" | jq -r '[.partitions[]?.current_offset // 0] | max // 0' 2>/dev/null || echo "0")
+                    LAG=$(echo "$GROUP_INFO" | jq -r '[.partitions[]?.lag // 0] | max // 0' 2>/dev/null || echo "0")
+                    if [ "$CURRENT_OFFSET" != "0" ] || [ "$LAG" != "0" ]; then
+                        info "  Consumer group $consumer_group: offset=$CURRENT_OFFSET, lag=$LAG"
+                    else
+                        info "  Consumer group $consumer_group: No offset committed yet (consumer may not have started consuming)"
+                    fi
+                else
+                    info "  Consumer group $consumer_group: Not found or no offsets committed"
+                fi
+            else
+                warn "  Topic $topic: Does not exist"
+            fi
+        done
+    done
+    echo ""
+else
+    warn "Confluent CLI not available - skipping topic/offset checks"
+    info "To enable: confluent login"
+    echo ""
+fi
+
 # Step 10.3: Extract and validate events from logs
 section "Step 10.3: Validate Events in Consumer Logs"
 echo ""
@@ -333,13 +433,15 @@ for event_type in CarCreated LoanCreated LoanPaymentSubmitted CarServiceDone; do
         info "  Checking $consumer_type consumer: $consumer"
         
         # Extract event IDs from consumer logs
-        # Container names in docker-compose logs are prefixed with "cdc-" and suffixed with "-spring" or "-flink"
-        # Service name is just the base name (e.g., "car-consumer")
-        # Container name pattern: cdc-{service}-{spring|flink}
-        CONTAINER_PATTERN="cdc-${consumer}"
+        # Container names in docker-compose logs are prefixed with "cdc-"
+        # Spring service names: "car-consumer" → container: "cdc-car-consumer-spring"
+        # Flink service names: "car-consumer-flink" → container: "cdc-car-consumer-flink"
+        # Container name pattern: cdc-{service}-{spring|flink} for Spring, cdc-{service} for Flink
         if [ "$consumer_type" = "Flink" ]; then
-            CONTAINER_PATTERN="cdc-${consumer}-flink"
+            # Flink service name already includes "-flink", so container is just "cdc-{service}"
+            CONTAINER_PATTERN="cdc-${consumer}"
         else
+            # Spring service name needs "-spring" suffix
             CONTAINER_PATTERN="cdc-${consumer}-spring"
         fi
         
@@ -408,15 +510,16 @@ for event_type in CarCreated LoanCreated LoanPaymentSubmitted CarServiceDone; do
                 FOUND_COUNT=$((FOUND_COUNT + 1))
             else
                 # Also check for UUID in various log formats (with timeout)
+                # Look for patterns like "Event ID: uuid", "UUID: uuid", "id=uuid", etc.
                 FOUND=false
                 if [ -n "$DOCKER_LOGS_CACHE" ]; then
                     if command -v timeout &> /dev/null; then
-                        if echo "$DOCKER_LOGS_CACHE" | timeout 1 grep -qi "Event ID.*$uuid\|event.*id.*$uuid\|UUID.*$uuid\|uuid.*$uuid"; then
+                        if echo "$DOCKER_LOGS_CACHE" | timeout 1 grep -qiE "(Event ID|event.*id|UUID|uuid|id=).*${uuid}"; then
                             FOUND=true
                         fi
                     else
                         # Fallback: limit search to prevent hanging
-                        if echo "$DOCKER_LOGS_CACHE" | head -1000 | grep -qi "Event ID.*$uuid\|event.*id.*$uuid\|UUID.*$uuid\|uuid.*$uuid"; then
+                        if echo "$DOCKER_LOGS_CACHE" | head -1000 | grep -qiE "(Event ID|event.*id|UUID|uuid|id=).*${uuid}"; then
                             FOUND=true
                         fi
                     fi
@@ -483,11 +586,22 @@ if [ "$VALIDATION_FAILED" = true ]; then
     echo "Troubleshooting:"
     echo "  - Check consumer logs: docker-compose -f cdc-streaming/docker-compose.yml logs <consumer-name>"
     echo "  - Verify consumers are connected to Kafka"
-    echo "  - Check consumer group offsets"
+    echo "  - Check consumer group offsets (see debug output above)"
     echo "  - Verify filtered topics have messages (both -spring and -flink topics)"
     echo "  - Check if Spring Boot processor is running (for -spring topics)"
     echo "  - Check if Flink INSERT statements are RUNNING (for -flink topics)"
     echo "  - Increase log monitoring duration"
+    echo ""
+    echo "Common Issues:"
+    echo "  1. Stream processor started AFTER events were already in raw-event-headers topic"
+    echo "     → Kafka Streams only processes NEW events, not historical ones"
+    echo "     → Solution: Submit new events OR reset consumer group: confluent kafka consumer-group delete event-stream-processor"
+    echo "  2. Consumers reading from wrong offset"
+    echo "     → Check: confluent kafka consumer-group describe <group-name>"
+    echo "     → Solution: Reset consumer group or ensure auto.offset.reset=earliest"
+    echo "  3. Filters not loaded in stream processor"
+    echo "     → Check: docker-compose logs stream-processor | grep 'Loading.*filter'"
+    echo "     → Solution: Ensure filters.yml is mounted (see docker-compose.yml volumes)"
     exit 1
 fi
 
