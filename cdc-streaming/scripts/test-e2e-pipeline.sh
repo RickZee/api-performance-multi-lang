@@ -480,6 +480,44 @@ cd "$PROJECT_ROOT"
   echo ""
 fi
 
+# Clear database and consumer logs BEFORE submitting events for accurate timing measurement
+if [ "$SKIP_TO_STEP" -le 4 ] && [ "$SKIP_CLEAR_LOGS" = false ]; then
+  section "Pre-Test Cleanup"
+  echo ""
+  
+  # Clear database test events
+  info "Clearing previous test events from database..."
+  if [ -n "$DB_PASSWORD" ] && [ -n "$AURORA_ENDPOINT" ]; then
+    # Count events before clearing
+    BEFORE_COUNT=$(PGPASSWORD="$DB_PASSWORD" psql -h "$AURORA_ENDPOINT" -U "$DB_USER" -d "$DB_NAME" -t -c "SELECT COUNT(*) FROM business_events" 2>/dev/null | tr -d ' \n' || echo "0")
+    
+    # Delete all events (for clean test)
+    if PGPASSWORD="$DB_PASSWORD" psql -h "$AURORA_ENDPOINT" -U "$DB_USER" -d "$DB_NAME" -c "DELETE FROM business_events" 2>/dev/null; then
+      AFTER_COUNT=$(PGPASSWORD="$DB_PASSWORD" psql -h "$AURORA_ENDPOINT" -U "$DB_USER" -d "$DB_NAME" -t -c "SELECT COUNT(*) FROM business_events" 2>/dev/null | tr -d ' \n' || echo "0")
+      pass "Database cleared: $BEFORE_COUNT events deleted, $AFTER_COUNT remaining"
+    else
+      warn "Could not clear database (continuing anyway)"
+    fi
+  else
+    warn "Database credentials not available, skipping database clear"
+  fi
+  echo ""
+  
+  # Clear consumer logs
+  info "Clearing consumer logs and restarting consumers..."
+  if "$SCRIPT_DIR/clear-consumer-logs.sh" --restart 2>&1 | tail -10; then
+    pass "Consumer logs cleared and consumers restarted"
+  else
+    warn "Some consumer logs could not be cleared (continuing anyway)"
+  fi
+  
+  # Wait for consumers to warm up (based on our delay analysis)
+  info "Waiting 15s for consumers to warm up and connect to Kafka..."
+  sleep 15
+  pass "Consumer warm-up complete"
+  echo ""
+fi
+
 # Step 4: Submit Events
 if [ "$SKIP_TO_STEP" -le 4 ]; then
   step_start "Submit Events"
@@ -531,21 +569,8 @@ else
   echo ""
 fi
 
-# Clear consumer logs for clean validation (default: enabled)
-# Done early so logs are fresh when we start processing events
-if [ "$SKIP_CLEAR_LOGS" = false ]; then
-  section "Clearing Consumer Logs"
-  echo ""
-  info "Clearing consumer logs for clean validation..."
-  if "$SCRIPT_DIR/clear-consumer-logs.sh" --restart 2>&1 | tail -10; then
-    pass "Consumer logs cleared"
-  else
-    warn "Some consumer logs could not be cleared (continuing anyway)"
-  fi
-  echo ""
-else
-  info "Skipping log clearing (--skip-clear-logs flag)"
-fi
+# Note: Consumer logs are now cleared BEFORE Step 4 (Submit Events) for accurate timing
+# This section removed - log clearing moved to before event submission
 
 # Step 6: Start Stream Processor
 if [ "$SKIP_TO_STEP" -le 6 ]; then
