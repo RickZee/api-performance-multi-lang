@@ -1,13 +1,15 @@
 #!/bin/bash
 
 # Clear Docker logs for CDC streaming consumers
-# Usage: ./clear-consumer-logs.sh [--all | --spring | --flink | --restart]
+# Usage: ./clear-consumer-logs.sh [--all | --spring | --flink | --restart | --recreate]
 #
 # Options:
 #   --all       Clear logs for all CDC consumers (default)
 #   --spring    Clear logs for Spring consumers only
 #   --flink     Clear logs for Flink consumers only
-#   --restart   Restart containers to clear logs (most reliable)
+#   --restart   Recreate containers to fully clear logs (recommended)
+#   --recreate  Same as --restart (explicit recreate)
+#   --soft      Soft restart only (logs may persist)
 #   -h, --help  Show this help message
 
 set -e
@@ -113,13 +115,13 @@ clear_logs_via_truncate() {
     echo "=============================================="
 }
 
-restart_containers() {
+restart_containers_soft() {
     local containers=("$@")
     local success_count=0
     local fail_count=0
     
     echo "=============================================="
-    echo "Restarting CDC Consumers to Clear Logs"
+    echo "Soft Restart CDC Consumers (logs may persist)"
     echo "=============================================="
     echo ""
     
@@ -151,6 +153,68 @@ restart_containers() {
     fi
 }
 
+recreate_containers() {
+    local containers=("$@")
+    local success_count=0
+    local fail_count=0
+    
+    echo "=============================================="
+    echo "Recreating CDC Consumers (fully clears logs)"
+    echo "=============================================="
+    echo ""
+    
+    # Convert container names to service names for docker-compose
+    # Container names are like "cdc-car-consumer-spring" -> service is "car-consumer"
+    local services=()
+    for container in "${containers[@]}"; do
+        # Extract service name: cdc-X-consumer-Y -> X-consumer or X-consumer-Y
+        local service="${container#cdc-}"  # Remove "cdc-" prefix
+        # Map to docker-compose service names
+        case "$service" in
+            car-consumer-spring) services+=("car-consumer") ;;
+            car-consumer-flink) services+=("car-consumer-flink") ;;
+            loan-consumer-spring) services+=("loan-consumer") ;;
+            loan-consumer-flink) services+=("loan-consumer-flink") ;;
+            loan-payment-consumer-spring) services+=("loan-payment-consumer") ;;
+            loan-payment-consumer-flink) services+=("loan-payment-consumer-flink") ;;
+            service-consumer-spring) services+=("service-consumer") ;;
+            service-consumer-flink) services+=("service-consumer-flink") ;;
+            *) services+=("$service") ;;
+        esac
+    done
+    
+    # Remove duplicates
+    local unique_services=($(echo "${services[@]}" | tr ' ' '\n' | sort -u | tr '\n' ' '))
+    
+    cd "$CDC_DIR"
+    
+    echo -e "${YELLOW}[STOP]${NC} Stopping and removing containers..."
+    if docker-compose rm -f -s ${unique_services[@]} 2>&1 | grep -v "level=warning"; then
+        echo -e "${GREEN}[OK]${NC} Containers removed"
+    fi
+    
+    echo ""
+    echo -e "${YELLOW}[CREATE]${NC} Recreating containers..."
+    if docker-compose up -d ${unique_services[@]} 2>&1 | grep -v "level=warning"; then
+        success_count=${#unique_services[@]}
+        echo -e "${GREEN}[OK]${NC} Containers recreated"
+    else
+        fail_count=${#unique_services[@]}
+        echo -e "${RED}[ERROR]${NC} Failed to recreate some containers"
+    fi
+    
+    echo ""
+    echo "=============================================="
+    echo -e "Results: ${GREEN}${success_count} recreated${NC}, ${YELLOW}${fail_count} failed${NC}"
+    echo "=============================================="
+    
+    # Wait for containers to be fully ready
+    if [ $success_count -gt 0 ]; then
+        info "Waiting 10s for containers to connect to Kafka..."
+        sleep 10
+    fi
+}
+
 show_usage() {
     echo "Usage: $0 [OPTIONS]"
     echo ""
@@ -160,15 +224,18 @@ show_usage() {
     echo "  --all       Clear logs for all CDC consumers (default)"
     echo "  --spring    Clear logs for Spring consumers only"
     echo "  --flink     Clear logs for Flink consumers only"
-    echo "  --restart   Restart containers to clear logs (most reliable)"
+    echo "  --restart   Recreate containers to fully clear logs (recommended)"
+    echo "  --recreate  Same as --restart"
+    echo "  --soft      Soft restart only (logs may persist in Docker)"
     echo "  --quiet     Suppress detailed output"
     echo "  -h, --help  Show this help message"
     echo ""
     echo "Examples:"
-    echo "  $0                    # Clear all consumer logs"
+    echo "  $0                    # Clear all consumer logs (truncate method)"
     echo "  $0 --spring           # Clear only Spring consumer logs"
-    echo "  $0 --restart          # Restart all consumers to clear logs"
-    echo "  $0 --restart --flink  # Restart only Flink consumers"
+    echo "  $0 --restart          # Recreate all consumers (fully clears logs)"
+    echo "  $0 --restart --flink  # Recreate only Flink consumers"
+    echo "  $0 --soft             # Soft restart (logs may persist)"
 }
 
 # Main
@@ -186,8 +253,12 @@ while [[ $# -gt 0 ]]; do
             TARGET="flink"
             shift
             ;;
-        --restart)
-            MODE="restart"
+        --restart|--recreate)
+            MODE="recreate"
+            shift
+            ;;
+        --soft)
+            MODE="soft"
             shift
             ;;
         --all)
@@ -225,8 +296,11 @@ esac
 
 # Execute the appropriate action
 case "$MODE" in
-    restart)
-        restart_containers "${CONTAINERS[@]}"
+    recreate)
+        recreate_containers "${CONTAINERS[@]}"
+        ;;
+    soft)
+        restart_containers_soft "${CONTAINERS[@]}"
         ;;
     truncate|*)
         clear_logs_via_truncate "${CONTAINERS[@]}"
