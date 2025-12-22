@@ -85,8 +85,38 @@ submit_event() {
     local timestamp=$(date +%s)
     local unique_id="${timestamp}-$(openssl rand -hex 4)"
     
-    # Load event and update UUID
+    # Generate unique entity ID suffix for this event (to ensure each event creates a new entity)
+    local entity_suffix=$(openssl rand -hex 4 | tr '[:lower:]' '[:upper:]')
+    
+    # Load event and update UUID and entity IDs
+    # First, update event header UUID
     local event_json=$(jq --arg uuid "$unique_id" '.eventHeader.uuid = $uuid' "$event_file")
+    
+    # Update entity IDs in all entities (both entityHeader.entityId and id field)
+    # Extract entity type from first entity to determine prefix
+    local entity_type=$(echo "$event_json" | jq -r '.entities[0].entityHeader.entityType // ""')
+    if [ -n "$entity_type" ] && [ "$entity_type" != "null" ]; then
+        # Determine entity ID prefix based on entity type
+        local entity_prefix=""
+        case "$entity_type" in
+            "Car") entity_prefix="CAR" ;;
+            "Loan") entity_prefix="LOAN" ;;
+            "LoanPayment") entity_prefix="PAYMENT" ;;
+            "ServiceRecord") entity_prefix="SERVICE" ;;
+            *) entity_prefix="ENTITY" ;;
+        esac
+        
+        # Generate new entity ID with unique suffix
+        local new_entity_id="${entity_prefix}-2025-${entity_suffix}"
+        
+        # Update entityHeader.entityId and id field for all entities
+        event_json=$(echo "$event_json" | jq --arg new_id "$new_entity_id" '
+            .entities = (.entities | map(
+                .entityHeader.entityId = $new_id |
+                .id = $new_id
+            ))
+        ')
+    fi
     
     # Submit to API
     local response=$(curl -s -w "\n%{http_code}" -X POST \

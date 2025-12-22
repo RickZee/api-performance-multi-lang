@@ -504,9 +504,9 @@ if [ "$SKIP_TO_STEP" -le 4 ] && [ "$SKIP_CLEAR_LOGS" = false ]; then
   echo ""
   
   # Clear consumer logs
-  info "Clearing consumer logs and restarting consumers..."
+  info "Clearing consumer logs and recreating consumers..."
   if "$SCRIPT_DIR/clear-consumer-logs.sh" --restart 2>&1 | tail -10; then
-    pass "Consumer logs cleared and consumers restarted"
+    pass "Consumer logs cleared and consumers recreated"
   else
     warn "Some consumer logs could not be cleared (continuing anyway)"
   fi
