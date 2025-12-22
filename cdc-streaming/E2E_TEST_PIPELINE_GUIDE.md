@@ -74,14 +74,39 @@ The pipeline validates:
 
 ```bash
 # Run full pipeline with default wait time (15 seconds)
+# Wait time allows CDC to propagate events: Database → CDC Connector → Kafka → Stream Processors
 ./cdc-streaming/scripts/test-e2e-pipeline.sh
 
 # Run with custom wait time (in seconds)
+# Use longer wait times if CDC connector has slower polling or high latency
 ./cdc-streaming/scripts/test-e2e-pipeline.sh 90
 
 # Fast mode (skip prerequisites and builds)
 ./cdc-streaming/scripts/test-e2e-pipeline.sh --fast
 ```
+
+**Wait Time Explanation**:
+
+The wait time (default: 15 seconds) is used in **Step 7: Wait for CDC Propagation**. It allows time for the complete event flow to occur:
+
+1. **Database → CDC Connector**: Debezium connector polls database and captures changes
+2. **CDC Connector → Kafka**: Connector publishes events to `raw-event-headers` topic
+3. **Kafka → Stream Processors**: Flink/Spring Boot processors consume and filter events
+4. **Stream Processors → Filtered Topics**: Processors route filtered events to output topics
+
+**When to Increase Wait Time**:
+
+- CDC connector has slow polling interval (e.g., > 10 seconds)
+- High network latency between components
+- Large number of events to process
+- Stream processors are slow to start or process events
+- Events not appearing in filtered topics (increase wait time and retry)
+
+**Typical Wait Times**:
+
+- **15 seconds** (default): Sufficient for most scenarios with normal latency
+- **30-60 seconds**: Recommended for first-time setup or when troubleshooting
+- **90+ seconds**: Use when CDC connector polling is slow or processing large batches
 
 ### Command-Line Flags
 
@@ -788,6 +813,143 @@ The E2E pipeline automatically clears the `business_events` table before submitt
 # Run E2E pipeline
 ./cdc-streaming/scripts/test-e2e-pipeline.sh 30
 ```
+
+## Consumer Management Scripts
+
+The E2E test pipeline includes utility scripts for managing Docker consumer containers and their logs.
+
+### Clear Consumer Logs
+
+**Script**: `clear-consumer-logs.sh`
+
+Clears Docker logs for CDC streaming consumers. Essential for accurate event validation timing in E2E tests, as it ensures only new events appear in consumer logs after event submission.
+
+**Usage**:
+
+```bash
+# Clear all consumer logs (truncate method - default)
+./cdc-streaming/scripts/clear-consumer-logs.sh
+
+# Clear only Spring consumer logs
+./cdc-streaming/scripts/clear-consumer-logs.sh --spring
+
+# Clear only Flink consumer logs
+./cdc-streaming/scripts/clear-consumer-logs.sh --flink
+
+# Recreate all consumers (fully clears logs - recommended)
+./cdc-streaming/scripts/clear-consumer-logs.sh --restart
+
+# Recreate only Flink consumers
+./cdc-streaming/scripts/clear-consumer-logs.sh --restart --flink
+
+# Soft restart (logs may persist in Docker)
+./cdc-streaming/scripts/clear-consumer-logs.sh --soft
+```
+
+**Options**:
+
+- `--all`: Clear logs for all CDC consumers (default)
+- `--spring`: Clear logs for Spring consumers only
+- `--flink`: Clear logs for Flink consumers only
+- `--restart` or `--recreate`: Recreate containers to fully clear logs (recommended)
+- `--soft`: Soft restart only (logs may persist in Docker)
+- `--quiet`: Suppress detailed output
+
+**Consumers Managed**:
+
+- **Spring Consumers** (4):
+  - `cdc-car-consumer-spring`
+  - `cdc-loan-consumer-spring`
+  - `cdc-loan-payment-consumer-spring`
+  - `cdc-service-consumer-spring`
+
+- **Flink Consumers** (4):
+  - `cdc-car-consumer-flink`
+  - `cdc-loan-consumer-flink`
+  - `cdc-loan-payment-consumer-flink`
+  - `cdc-service-consumer-flink`
+
+**Methods**:
+
+1. **Truncate Method** (default): Attempts to truncate Docker log files directly
+   - Works on Linux with sudo access
+   - On macOS, uses Docker VM access via `nsenter`
+   - May not fully clear logs if Docker Desktop has log rotation enabled
+
+2. **Recreate Method** (`--restart`): Stops and recreates containers
+   - **Recommended**: Fully clears logs by creating new containers
+   - Waits 10 seconds for containers to reconnect to Kafka
+   - Most reliable method for complete log clearing
+
+3. **Soft Restart** (`--soft`): Restarts containers without recreating
+   - Faster than recreate
+   - Logs may persist in Docker's log files
+   - Use when you just need to reset consumer state
+
+**Example Output**:
+
+```text
+==============================================
+Recreating CDC Consumers (fully clears logs)
+==============================================
+
+[STOP] Stopping and removing containers...
+[OK] Containers removed
+
+[CREATE] Recreating containers...
+[OK] Containers recreated
+
+==============================================
+Results: 8 recreated, 0 failed
+==============================================
+
+ℹ Waiting 10s for containers to connect to Kafka...
+```
+
+**Platform-Specific Behavior**:
+
+- **Linux**: Direct access to `/var/lib/docker/containers/` log files (requires sudo)
+- **macOS (Docker Desktop)**: Uses `nsenter` to access Docker VM filesystem
+- **Both**: Recreate method works reliably on all platforms
+
+**Use Cases**:
+
+- **Before E2E Tests**: Clear logs before submitting events for accurate timing
+- **After Test Runs**: Clean up logs to reduce disk usage
+- **Troubleshooting**: Reset consumer state when debugging issues
+- **Performance Testing**: Start with clean logs for accurate measurements
+
+**Best Practices**:
+
+1. **Use `--restart` for E2E Tests**: Most reliable method for complete log clearing
+2. **Clear Before Event Submission**: Ensures only new events appear in logs
+3. **Wait After Recreate**: Allow 10-15 seconds for consumers to reconnect to Kafka
+4. **Check Consumer Status**: Verify consumers are running after clearing: `docker-compose ps`
+
+**Integration with E2E Pipeline**:
+
+The E2E pipeline automatically calls `clear-consumer-logs.sh --restart` before submitting events (Step 4, Pre-Test Cleanup). This ensures:
+
+- Clean consumer logs for accurate event validation
+- Fresh consumer state for each test run
+- No interference from previous test events
+
+You can also manually clear logs before running the pipeline:
+
+```bash
+# Clear all consumer logs and restart
+./cdc-streaming/scripts/clear-consumer-logs.sh --restart
+
+# Run E2E pipeline
+./cdc-streaming/scripts/test-e2e-pipeline.sh 30
+```
+
+**Troubleshooting**:
+
+- **Logs Not Clearing**: Use `--restart` instead of truncate method
+- **Consumers Not Starting**: Check Docker Compose configuration and Kafka connectivity
+- **Permission Errors**: On Linux, ensure sudo access for truncate method
+- **macOS Issues**: Recreate method works more reliably than truncate on macOS
 
 ## Related Scripts
 
