@@ -140,8 +140,7 @@ def main():
         'max.poll.interval.ms': 300000,
         'socket.keepalive.enable': True,
         'heartbeat.interval.ms': 10000,
-        'request.timeout.ms': 40000,
-        'socket.timeout.ms': 60000,
+        'socket.timeout.ms': 60000,  # Network socket timeout (consumer property)
         'connections.max.idle.ms': 300000,
         'reconnect.backoff.ms': 100,
         'reconnect.backoff.max.ms': 10000
