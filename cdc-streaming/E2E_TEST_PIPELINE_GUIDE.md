@@ -9,16 +9,19 @@ The `test-e2e-pipeline.sh` script is a comprehensive end-to-end functional test 
 ## Pipeline Flow
 
 ```mermaid
-flowchart LR
-    A[Lambda API] -->|POST Events| B[PostgreSQL Database]
-    B -->|CDC Capture| C[Debezium Connector]
-    C -->|Publish| D[raw-event-headers Topic]
-    D -->|Consume| E1[Flink SQL Processor]
-    D -->|Consume| E2[Spring Boot Processor]
-    E1 -->|Route| F1[filtered-*-events-flink Topics]
-    E2 -->|Route| F2[filtered-*-events-spring Topics]
-    F1 -->|Consume| G1[Flink Consumers]
-    F2 -->|Consume| G2[Spring Consumers]
+flowchart TD
+    A[Lambda API] -->|POST| B[PostgreSQL]
+    B -->|CDC| C[Debezium]
+    C -->|Publish| D[raw-event-headers]
+    
+    D --> E1[Flink SQL]
+    D --> E2[Spring Boot]
+    
+    E1 --> F1[filtered-*-flink]
+    E2 --> F2[filtered-*-spring]
+    
+    F1 --> G1[Flink Consumers]
+    F2 --> G2[Spring Consumers]
     
     style A fill:#e1f5ff
     style B fill:#fff9c4
