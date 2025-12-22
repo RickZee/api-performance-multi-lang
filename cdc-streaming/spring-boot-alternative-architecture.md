@@ -287,18 +287,21 @@ flowchart LR
 Both implementations share the same filter configuration system and use identical scripts for validation and generation:
 
 **Shared Scripts (Both Implementations):**
+
 - `cdc-streaming/scripts/filters/validate-filters.sh` - Validates `filters.json` against JSON schema, performs dry-run generation
 - `cdc-streaming/scripts/filters/generate-filters.sh` - Generates Flink SQL and Spring Boot YAML from `filters.json`
 - `cdc-streaming/scripts/filters/rollback-filters.sh` - Rollback support for both implementations
 - `cdc-streaming/scripts/filters/cleanup-filters.sh` - Cleanup orphaned resources (topics, statements)
 
 **Flink-Specific Scripts:**
+
 - `cdc-streaming/scripts/filters/deploy-flink-filters.sh` - Deploys generated SQL to Confluent Cloud via CLI
   - Extracts source table, sink tables, and INSERT statements from generated SQL
   - Uses `confluent flink statement create` to deploy each component
   - Validates schema registry requirements before deployment
 
 **Spring Boot-Specific Scripts:**
+
 - `cdc-streaming/scripts/filters/deploy-spring-filters.sh` - Builds and deploys Spring Boot application
   - Runs Gradle build (`./gradlew clean build`)
   - Supports multiple deployment methods: Docker, Kubernetes/Helm, or local
@@ -307,12 +310,14 @@ Both implementations share the same filter configuration system and use identica
 #### 4.4 Testing Comparison
 
 **Flink Testing:**
+
 - **Schema Validation**: JSON schema validation against `filter-schema.json`
 - **SQL Syntax Validation**: Basic SQL syntax checking via dry-run
 - **Dry-Run Generation**: Preview of generated SQL without deployment
 - **Limitations**: No unit tests, no integration tests, no runtime validation
 
 **Spring Boot Testing:**
+
 - **Schema Validation**: Same JSON schema validation as Flink
 - **SQL Syntax Validation**: Same dry-run generation as Flink
 - **Unit Tests**: Comprehensive unit tests for `FilterConditionEvaluator`, `FilterConfig`, filter status handling
@@ -320,6 +325,7 @@ Both implementations share the same filter configuration system and use identica
 - **Test Coverage**: Validates all operators (`equals`, `in`, `greaterThan`, `lessThan`, `between`, `matches`, etc.), status handling, disabled/deleted filters, deprecated filter warnings
 
 **Test Execution:**
+
 ```bash
 # Flink: Validation only (~30 seconds)
 ./cdc-streaming/scripts/filters/validate-filters.sh
@@ -332,6 +338,7 @@ cd cdc-streaming/stream-processor-spring
 #### 4.5 Rollback Procedures
 
 **Flink Rollback:**
+
 1. Identify previous SQL version (manual extraction from git history or backup)
 2. Delete current Flink statement: `confluent flink statement delete <statement-name> --force`
 3. Redeploy previous SQL version: `confluent flink statement create <statement-name> --sql "<previous-sql>"`
@@ -339,6 +346,7 @@ cd cdc-streaming/stream-processor-spring
 5. **Limitations**: Requires manual SQL extraction, no automated versioning
 
 **Spring Boot Rollback:**
+
 1. **Helm Rollback**: `helm rollback stream-processor <revision-number>` (~10 seconds)
 2. **Kubernetes Rollout Undo**: `kubectl rollout undo deployment/stream-processor` (~10 seconds)
 3. **Container Image Versioning**: Deploy previous image tag from container registry
@@ -348,12 +356,14 @@ cd cdc-streaming/stream-processor-spring
 #### 4.6 Deployment Time Estimates
 
 **Flink Deployment:**
+
 - Validation: ~10 seconds
 - Generation: ~5 seconds
 - SQL Deployment: ~1-3 minutes (depends on statement count and Confluent Cloud API latency)
 - **Total**: ~2-5 minutes
 
 **Spring Boot Deployment:**
+
 - Validation: ~10 seconds
 - Generation: ~5 seconds
 - Gradle Build: ~2-3 minutes
@@ -366,6 +376,7 @@ cd cdc-streaming/stream-processor-spring
 #### 4.7 Operational Complexity
 
 **Flink Operational Overhead:**
+
 - **Low Complexity**: 3 script steps, direct CLI deployment
 - **Infrastructure**: Confluent CLI, Confluent Cloud access
 - **Monitoring**: Confluent Cloud UI for statement status
@@ -373,6 +384,7 @@ cd cdc-streaming/stream-processor-spring
 - **Scaling**: Automatic (managed by Confluent Cloud)
 
 **Spring Boot Operational Overhead:**
+
 - **Medium-High Complexity**: 6+ pipeline stages
 - **Infrastructure**: Gradle build system, Docker, container registry (ECR), Kubernetes cluster, Helm
 - **Monitoring**: Kubernetes metrics, Prometheus, application logs
@@ -394,6 +406,7 @@ Both implementations use the same approval workflow via the `status` field in `f
 9. **deleted** - Filter is deleted (not generated)
 
 **Workflow Process:**
+
 - Developer creates/modifies filter with `status: "pending_approval"`
 - PR review and approval
 - Update status to `approved` in PR
@@ -526,18 +539,21 @@ jobs:
 #### 4.10 Summary
 
 **Flink CI/CD Advantages:**
+
 - Simpler deployment process (3 steps vs 6+)
 - Faster deployment time (~2-5 minutes vs ~10-20 minutes)
 - Lower operational overhead (CLI-based, no build infrastructure)
 - Direct SQL deployment (no container builds)
 
 **Flink CI/CD Disadvantages:**
+
 - Limited testing (validation only, no runtime tests)
 - Manual rollback (requires SQL extraction)
 - No automated versioning
 - Less robust failure recovery
 
 **Spring Boot CI/CD Advantages:**
+
 - Comprehensive testing (unit, integration, TopologyTestDriver)
 - Automated rollback (Helm/K8s native)
 - Container image versioning
@@ -545,6 +561,7 @@ jobs:
 - Full CI/CD pipeline visibility
 
 **Spring Boot CI/CD Disadvantages:**
+
 - More complex deployment (6+ stages)
 - Longer deployment time (~10-20 minutes)
 - Higher operational overhead (build infrastructure, container registry, K8s)
@@ -641,6 +658,30 @@ jobs:
 - Kafka Streams performs well for filtering workloads
 - Flink excels at complex windowing/aggregations
 - For simple event routing (current use case), Kafka Streams is sufficient
+
+### 9. Flink vs Kafka Streams Direct Comparison
+
+This section provides a focused comparison between Apache Flink (underlying Confluent Flink) and Kafka Streams (underlying the Spring Boot processor), highlighting key technical differences to inform architecture decisions in our AWS EKS-based platform for active-active multi-region operations.
+
+| Aspect | Apache Flink | Kafka Streams |
+|--------|--------------|---------------|
+| **Architecture** | Cluster-based framework with master (JobManager) and worker nodes; supports deployment on Kubernetes; independent of Kafka but often integrated. | Embeddable library within Java/Spring applications; no dedicated cluster; relies on Kafka brokers for coordination and fault tolerance. |
+| **Programming Model** | Flexible APIs: DataStream (streams), DataSet (batch), Table API, SQL; supports CEP, ML, graph processing; handles both bounded and unbounded streams. | DSL with KStream/KTable abstractions; focused on reactive, stateful apps; limited to unbounded streams; simpler for Kafka-centric development. |
+| **State Management** | Lightweight checkpointing for exactly-once; savepoints for upgrades/re-processing; global state coordination via master node; RocksDB backend. | Stores state locally in app instances; uses Kafka consumer groups for recovery; automatic fault tolerance without additional APIs; RocksDB backend. |
+| **Scaling** | Managed by master node; dynamic scaling with fault tolerance; supports thousands of nodes; auto-scaling in managed environments like Confluent. | Elastic and automatic via Kafka partitions; app instances handle scaling independently; integrates with container orchestration like EKS. |
+| **Performance** | High throughput (tens of millions events/sec); low latency (sub-second, ~10-50ms); excels in large-scale, complex processing with event-time semantics. | Efficient for moderate workloads; lower latency for simple ops (~5-20ms); scales with Kafka but may lag in very high-volume scenarios. |
+| **Fault Tolerance** | Advanced checkpointing/savepoints; ZooKeeper HA for master; exactly-once internal/end-to-end with select integrations (at-least-once for Kafka sinks). | Leverages Kafka protocols; exactly-once end-to-end with Kafka; automatic recovery via brokers; simpler but tied to Kafka reliability. |
+| **Handling Late Events** | Watermarks for event-time processing; bounded out-of-orderness strategies; robust for out-of-order data. | Windowing with grace periods; handles late events but less advanced than Flink's watermarking. |
+| **Integrations** | Broad connectors (Kafka, Kinesis, JDBC, Elasticsearch, etc.); supports diverse sources/sinks via Table/SQL API. | Tightly coupled to Kafka; uses Kafka Connect for external sources; limited beyond Kafka ecosystem. |
+| **Use Cases** | Complex, large-scale apps: fraud detection, real-time analytics, ML on streams; suited for infrastructure teams managing clusters. | Lightweight, event-driven microservices: real-time monitoring, simple filtering/routing; ideal for product teams embedding in apps. |
+| **Operational Complexity** | Steeper learning curve; requires cluster management; overkill for simple tasks but powerful for advanced needs. | Easier setup for Kafka users; minimal overhead; unified with existing app deployment but limited features. |
+| **Ecosystem & Language Support** | Broad community; supports Java, Scala, Python (PyFlink); rich tools/documentation. | Kafka ecosystem focus; primarily Java; limited non-JVM support. |
+
+**Assessment:**  
+
+- **Choose Flink** for complex stream processing, high-scale analytics, or when advanced features like event-time processing and batch unification are needed in our mortgage platform's data lake integration (e.g., EMR shredding, Iceberg tables). It aligns with managed services for compliance and reduces ops burden in multi-region setups.  
+- **Choose Kafka Streams** for simple, Kafka-centric filtering (as in our current event routing), embedding in Spring Boot microservices on EKS, and when team Java expertise can leverage full control with lower vendor lock-in. Both integrate well with Confluent Kafka and our Aurora CDC via Qlik Replicate, but Flink offers better future-proofing for evolving workloads like GraphQL consumer queries or gRPC integrations.  
+- In our context, Kafka Streams provides cost savings and CI/CD advantages for testing, while Flink excels in performance and maintainability for potential expansions.
 
 ---
 
@@ -788,7 +829,6 @@ The following tests validate the claims made in this architecture document:
 | Latency P50 | TBD ms | TBD ms | < 50ms |
 | Latency P95 | TBD ms | TBD ms | < 200ms |
 | Latency P99 | TBD ms | TBD ms | < 500ms |
-| Infrastructure Cost | $2,300-5,500/mo | $1,700-4,000/mo | 25-30% reduction |
 
 ### Test Execution
 

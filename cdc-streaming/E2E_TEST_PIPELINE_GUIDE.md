@@ -607,6 +607,188 @@ The script can be integrated into CI/CD pipelines:
     AURORA_PASSWORD: ${{ secrets.AURORA_PASSWORD }}
 ```
 
+## Database Management Scripts
+
+The E2E test pipeline includes utility scripts for managing the Aurora PostgreSQL database during testing and troubleshooting.
+
+### Show Table Counts
+
+**Script**: `show-table-counts.sh`
+
+Displays row counts for all tables or a specific table in the database. Useful for verifying data state before and after tests.
+
+**Usage**:
+
+```bash
+# Show counts for all tables
+./cdc-streaming/scripts/show-table-counts.sh
+
+# Show count for a specific table
+./cdc-streaming/scripts/show-table-counts.sh event_headers
+```
+
+**Example Output**:
+
+```text
+========================================
+Database Table Row Counts
+========================================
+
+ℹ Database: car_entities
+ℹ Endpoint: cluster.xxxxx.us-east-1.rds.amazonaws.com
+ℹ User: postgres
+
+✓ Database connection successful
+
+ℹ Showing row counts for all tables
+
+TABLE_NAME                               ROW_COUNT
+---------------------------------------- ----------
+business_events                              1250
+car_entities                                  450
+event_headers                                 1250
+loan_entities                                 320
+loan_payment_entities                         180
+service_record_entities                        90
+---------------------------------------- ----------
+TOTAL                                        3540
+
+✓ Query completed
+```
+
+**Features**:
+
+- Lists all tables with row counts
+- Shows total row count across all tables
+- Supports querying a single table
+- Uses same password resolution logic as E2E pipeline
+- Tests database connection before querying
+
+**Use Cases**:
+
+- Verify database state before running tests
+- Check if events were persisted correctly
+- Monitor table growth over time
+- Troubleshoot data inconsistencies
+
+### Clear Database
+
+**Script**: `clear-database.sh`
+
+Clears specified tables or all tables with safety checks and confirmations. Useful for resetting database state between test runs.
+
+**Usage**:
+
+```bash
+# Clear all tables (with confirmation)
+./cdc-streaming/scripts/clear-database.sh --all
+
+# Clear specific tables
+./cdc-streaming/scripts/clear-database.sh event_headers business_events
+
+# Clear all tables without confirmation (use with caution)
+./cdc-streaming/scripts/clear-database.sh --all --confirm
+
+# Dry run (see what would be cleared)
+./cdc-streaming/scripts/clear-database.sh --all --dry-run
+
+# Clear specific tables with counts shown
+./cdc-streaming/scripts/clear-database.sh --tables event_headers business_events --show-counts
+```
+
+**Options**:
+
+- `--all`: Clear all tables
+- `--tables TABLE...`: Clear specific tables (space-separated)
+- `--confirm`: Skip confirmation prompt (use with caution)
+- `--dry-run`: Show what would be cleared without actually clearing
+- `--show-counts`: Show row counts before/after (default)
+- `--no-counts`: Don't show row counts
+
+**Example Output**:
+
+```text
+========================================
+Database Table Clearing
+========================================
+
+ℹ Database: car_entities
+ℹ Endpoint: cluster.xxxxx.us-east-1.rds.amazonaws.com
+ℹ User: postgres
+
+ℹ Tables to clear (2):
+  - event_headers
+  - business_events
+
+ℹ Row counts before clearing:
+
+TABLE_NAME                               ROW_COUNT
+---------------------------------------- ----------
+event_headers                                1250
+business_events                              1250
+
+⚠ WARNING: This will DELETE ALL DATA from the specified tables!
+
+Are you sure you want to continue? (type 'yes' to confirm): yes
+
+========================================
+Clearing Tables
+========================================
+
+ℹ Clearing table: event_headers
+✓ Cleared: event_headers
+ℹ Clearing table: business_events
+✓ Cleared: business_events
+
+ℹ Row counts after clearing:
+
+TABLE_NAME                               ROW_COUNT
+---------------------------------------- ----------
+event_headers                                   0 (was 1250)
+business_events                                 0 (was 1250)
+
+========================================
+Summary
+========================================
+
+✓ Successfully cleared 2 table(s)
+```
+
+**Safety Features**:
+
+- **Confirmation Required**: Prompts for confirmation unless `--confirm` is used
+- **Dry Run Mode**: Preview changes without actually clearing
+- **Row Count Display**: Shows before/after counts by default
+- **Table Listing**: Lists all tables that will be cleared
+- **Error Handling**: Reports failures for individual tables
+
+**Use Cases**:
+
+- Reset database state between test runs
+- Clear test data after E2E pipeline execution
+- Prepare clean database for new test scenarios
+- Troubleshoot data issues by starting fresh
+
+**Best Practices**:
+
+1. **Always Use Dry Run First**: Run with `--dry-run` to preview changes
+2. **Show Counts**: Use `--show-counts` (default) to verify what's being cleared
+3. **Specific Tables**: Clear only necessary tables rather than `--all` when possible
+4. **Backup First**: Consider backing up important data before clearing
+5. **Use in CI/CD**: Combine with `--confirm` for automated test cleanup
+
+**Integration with E2E Pipeline**:
+
+The E2E pipeline automatically clears the `business_events` table before submitting new events (Step 4). You can manually clear additional tables before running the pipeline:
+
+```bash
+# Clear all event-related tables before E2E test
+./cdc-streaming/scripts/clear-database.sh event_headers business_events --confirm
+
+# Run E2E pipeline
+./cdc-streaming/scripts/test-e2e-pipeline.sh 30
+```
+
 ## Related Scripts
 
 - **`submit-test-events.sh`**: Submits test events to Lambda API
@@ -614,6 +796,8 @@ The script can be integrated into CI/CD pipelines:
 - **`validate-kafka-topics.sh`**: Validates events in Kafka topics
 - **`validate-consumers.sh`**: Validates consumer consumption
 - **`clear-consumer-logs.sh`**: Clears consumer logs before testing
+- **`show-table-counts.sh`**: Shows row counts for database tables
+- **`clear-database.sh`**: Clears database tables (with safety checks)
 
 ## Summary
 
