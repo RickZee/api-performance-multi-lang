@@ -44,7 +44,7 @@ python3 scripts/analyze_results.py
              ▼
 ┌─────────────────────────────────────────┐
 │      Test Suite Package (test_suite/)   │
-│  config.py │ executor.py │ runner.py   │
+│  config.py │ executor.py │ runner.py    │
 │  monitor.py │ resource_metrics.py       │
 └────────────┬────────────────────────────┘
              │
@@ -59,7 +59,8 @@ python3 scripts/analyze_results.py
 - `config.py` - Environment-based configuration
 - `executor.py` - AWS operations (SSM, S3, EC2)
 - `runner.py` - Test orchestration and execution
-- `monitor.py` - Progress monitoring
+- `monitor.py` - Progress monitoring (local file-based)
+- `s3_monitor.py` - S3-based progress monitoring (recommended)
 - `resource_metrics.py` - CloudWatch metrics collection
 
 ## Test Scenarios
@@ -123,8 +124,11 @@ python3 scripts/monitor_tests.py
 # Custom interval
 python3 scripts/monitor_tests.py --interval 5
 
-# Specific results directory
-python3 scripts/monitor_tests.py --results-dir results/2025-12-22_14-37-03
+# Specify total tests manually
+python3 scripts/monitor_tests.py --total-tests 32
+
+# Use specific config file
+python3 scripts/monitor_tests.py --config test-config.json
 ```
 
 ### Analysis
@@ -179,11 +183,12 @@ Edit `test-config.json` to modify test parameters:
 
 ### Infrastructure Discovery
 
-The test suite automatically discovers infrastructure:
+The test suite loads configuration from:
 
-1. **Environment variables** (highest priority)
-2. **AWS API queries** (boto3) - finds instances by tags, buckets by name
-3. **Terraform outputs** (fallback) - reads from `../../terraform/`
+1. **Environment variables** (required) - must be set explicitly
+2. **Terraform outputs** (fallback in some scripts) - reads from `../../terraform/` when env vars are missing
+
+**Note:** The main configuration (`test_suite/config.py`) requires environment variables. Some monitoring scripts may attempt Terraform fallback, but the test runner itself requires explicit environment variables.
 
 ## Results
 
@@ -228,12 +233,17 @@ results/
 
 ### Connection Pool Sizing
 
-**Default:** `min(max(threads/2, 10), 1000)`
-- 100 threads → 50 connections
-- 1000 threads → 500 connections
-- 5000 threads → 1000 connections (max)
+**Default:** Auto-calculated based on thread count:
+- Threads < 500: `min(max(threads, 10), 200)`
+- Threads 500-1999: `min(threads / 2, 2000)`
+- Threads ≥ 2000: `min(threads / 3, 2000)`
 
-**Manual Override:** Set `MAX_POOL_SIZE` environment variable
+**Examples:**
+- 100 threads → 100 connections
+- 1000 threads → 500 connections
+- 5000 threads → 1666 connections (capped at 2000 max)
+
+**Manual Override:** Set `MAX_POOL_SIZE` environment variable (max: 2000)
 
 ### Batch Size Limits
 
@@ -268,41 +278,6 @@ Each test result includes:
 - **Error Categorization:** Connection, query, authentication errors
 - **Connection Pool:** Active, idle, waiting, total connections
 
-## Troubleshooting
-
-### EC2 Instance Not Found
-
-```bash
-# Check instance exists
-aws ec2 describe-instances --filters "Name=tag:Name,Values=*test-runner*"
-
-# Set explicitly
-export TEST_RUNNER_INSTANCE_ID=i-xxxxxxxxxxxxx
-```
-
-### DSQL Host Not Found
-
-```bash
-# Set explicitly
-export DSQL_HOST=your-endpoint.dsql-fnh4.us-east-1.on.aws
-
-# Or use Terraform
-cd ../../terraform && terraform output aurora_dsql_host
-```
-
-### Test Execution Fails
-
-1. Check SSM agent is online: `aws ssm describe-instance-information`
-2. Verify instance has DSQL permissions (IAM role)
-3. Check S3 bucket permissions
-4. Review test output in SSM command history
-
-### High Connection Pool Wait Times
-
-- Increase `MAX_POOL_SIZE` environment variable
-- Reduce thread count
-- Check DSQL connection limits
-
 ## Project Structure
 
 ```
@@ -321,19 +296,4 @@ dsql-load-test-java/
 ├── src/main/java/        # Java load test application
 ├── test-config.json      # Test matrix configuration
 ├── results/              # Test results
-└── archive/              # Archived outdated files
 ```
-
-## Additional Resources
-
-- **Infrastructure & Costs:** `../INFRASTRUCTURE_AND_COSTS.md`
-- **Java Application Details:** See `src/main/java/` for implementation
-- **Test Configuration:** See `test-config.json` for test matrix
-
-## Migration Notes
-
-The test suite was migrated from bash scripts to Python:
-- Old bash scripts moved to `archive/legacy/`
-- Old nested package structure in `archive/archive_old/`
-- Current structure uses flat `test_suite/` package
-
