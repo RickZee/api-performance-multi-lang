@@ -1,0 +1,72 @@
+{
+  "baseline": {
+    "threads": 2000,
+    "iterations": 2,
+    "batch_size": 100,
+    "payload_size": null,
+    "event_type": "CarCreated"
+  },
+  "thresholds": {
+    "min_throughput": 10000,
+    "max_p99_latency_ms": 500,
+    "max_error_rate": 0.01
+  },
+  "test_groups": {
+    "thread_count_fine_tuning": {
+      "scenario": 2,
+      "threads": [2000, 2500],
+      "iterations": 2,
+      "count": 100,
+      "payload_size": null,
+      "tags": ["max-throughput", "thread-optimization", "minimal"],
+      "description": "Minimal: Fine-tune thread count around the optimal 2000 range. Note: batch_size is automatically set to count (100) for scenario 2."
+    },
+    "connection_pool_impact": {
+      "scenario": 2,
+      "threads": 2000,
+      "iterations": 2,
+      "count": 100,
+      "payload_size": null,
+      "tags": ["max-throughput", "pool-tuning", "minimal"],
+      "description": "Minimal: Test with different connection pool sizes. Note: batch_size is automatically set to count (100) for scenario 2.",
+      "note": "Requires MAX_POOL_SIZE environment variable override per test"
+    },
+    "optimal_combination_validation": {
+      "scenario": 2,
+      "threads": [2000],
+      "iterations": [2],
+      "count": 100,
+      "payload_size": null,
+      "tags": ["max-throughput", "validation", "minimal"],
+      "description": "Minimal: Validate optimal combination. Note: batch_size is automatically set to count (100) for scenario 2."
+    },
+    "high_thread_exploration": {
+      "scenario": 2,
+      "threads": [3000],
+      "iterations": 2,
+      "count": 100,
+      "payload_size": null,
+      "tags": ["max-throughput", "high-concurrency", "minimal"],
+      "description": "Minimal: Explore higher thread counts. Note: batch_size is automatically set to count (100) for scenario 2."
+    },
+    "payload_size_impact": {
+      "scenario": 2,
+      "threads": 2000,
+      "iterations": 2,
+      "count": 100,
+      "payload_size": [null, "1k", "100k"],
+      "tags": ["max-throughput", "payload-impact", "minimal"],
+      "description": "Minimal: Test impact of different payload sizes (default, 1K, 100K) on throughput. Note: batch_size is automatically set to count (100) for scenario 2."
+    },
+    "scenario1_individual_inserts": {
+      "scenario": 1,
+      "threads": [500, 1000],
+      "iterations": 2,
+      "count": 10,
+      "payload_size": [null, "1k", "100k"],
+      "tags": ["max-throughput", "scenario1", "individual-inserts", "minimal"],
+      "description": "Minimal: Test Scenario 1 (individual inserts) with selected payload sizes and thread counts. Note: Scenario 1 does not use batch_size."
+    }
+  }
+}
+

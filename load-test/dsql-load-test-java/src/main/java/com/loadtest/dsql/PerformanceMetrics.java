@@ -24,8 +24,14 @@ public class PerformanceMetrics {
     @JsonProperty("results")
     private TestResults results;
     
-    @JsonProperty("database_validation")
-    private DatabaseValidation databaseValidation;
+        @JsonProperty("database_validation")
+        private DatabaseValidation databaseValidation;
+        
+    @JsonProperty("pool_metrics")
+    private PoolMetrics poolMetrics;
+    
+    @JsonProperty("system_metrics")
+    private SystemMetrics systemMetrics;
     
     public PerformanceMetrics() {
         this.timestamp = Instant.now().toString();
@@ -69,6 +75,14 @@ public class PerformanceMetrics {
     
     public void setDatabaseValidation(DatabaseValidation databaseValidation) {
         this.databaseValidation = databaseValidation;
+    }
+    
+    public PoolMetrics getPoolMetrics() {
+        return poolMetrics;
+    }
+    
+    public void setPoolMetrics(PoolMetrics poolMetrics) {
+        this.poolMetrics = poolMetrics;
     }
     
     @JsonInclude(JsonInclude.Include.NON_NULL)
@@ -164,6 +178,9 @@ public class PerformanceMetrics {
         @JsonProperty("total_errors")
         private Integer totalErrors;
         
+        @JsonProperty("errors_by_category")
+        private Map<String, Integer> errorsByCategory;
+        
         @JsonProperty("duration_ms")
         private Long durationMs;
         
@@ -182,12 +199,18 @@ public class PerformanceMetrics {
         @JsonProperty("thread_results")
         private Map<Integer, ThreadResult> threadResults;
         
+        @JsonProperty("latency_stats")
+        private LatencyStats latencyStats;
+        
         // Getters and setters
         public Integer getTotalSuccess() { return totalSuccess; }
         public void setTotalSuccess(Integer totalSuccess) { this.totalSuccess = totalSuccess; }
         
         public Integer getTotalErrors() { return totalErrors; }
         public void setTotalErrors(Integer totalErrors) { this.totalErrors = totalErrors; }
+        
+        public Map<String, Integer> getErrorsByCategory() { return errorsByCategory; }
+        public void setErrorsByCategory(Map<String, Integer> errorsByCategory) { this.errorsByCategory = errorsByCategory; }
         
         public Long getDurationMs() { return durationMs; }
         public void setDurationMs(Long durationMs) { this.durationMs = durationMs; }
@@ -206,6 +229,9 @@ public class PerformanceMetrics {
         
         public Map<Integer, ThreadResult> getThreadResults() { return threadResults; }
         public void setThreadResults(Map<Integer, ThreadResult> threadResults) { this.threadResults = threadResults; }
+        
+        public LatencyStats getLatencyStats() { return latencyStats; }
+        public void setLatencyStats(LatencyStats latencyStats) { this.latencyStats = latencyStats; }
     }
     
     @JsonInclude(JsonInclude.Include.NON_NULL)
@@ -225,6 +251,21 @@ public class PerformanceMetrics {
         @JsonProperty("inserts_per_sec")
         private Double insertsPerSec;
         
+        @JsonProperty("min_latency_ms")
+        private Long minLatencyMs;
+        
+        @JsonProperty("max_latency_ms")
+        private Long maxLatencyMs;
+        
+        @JsonProperty("p50_latency_ms")
+        private Long p50LatencyMs;
+        
+        @JsonProperty("p95_latency_ms")
+        private Long p95LatencyMs;
+        
+        @JsonProperty("p99_latency_ms")
+        private Long p99LatencyMs;
+        
         // Getters and setters
         public Integer getThreadIndex() { return threadIndex; }
         public void setThreadIndex(Integer threadIndex) { this.threadIndex = threadIndex; }
@@ -240,6 +281,55 @@ public class PerformanceMetrics {
         
         public Double getInsertsPerSec() { return insertsPerSec; }
         public void setInsertsPerSec(Double insertsPerSec) { this.insertsPerSec = insertsPerSec; }
+        
+        public Long getMinLatencyMs() { return minLatencyMs; }
+        public void setMinLatencyMs(Long minLatencyMs) { this.minLatencyMs = minLatencyMs; }
+        
+        public Long getMaxLatencyMs() { return maxLatencyMs; }
+        public void setMaxLatencyMs(Long maxLatencyMs) { this.maxLatencyMs = maxLatencyMs; }
+        
+        public Long getP50LatencyMs() { return p50LatencyMs; }
+        public void setP50LatencyMs(Long p50LatencyMs) { this.p50LatencyMs = p50LatencyMs; }
+        
+        public Long getP95LatencyMs() { return p95LatencyMs; }
+        public void setP95LatencyMs(Long p95LatencyMs) { this.p95LatencyMs = p95LatencyMs; }
+        
+        public Long getP99LatencyMs() { return p99LatencyMs; }
+        public void setP99LatencyMs(Long p99LatencyMs) { this.p99LatencyMs = p99LatencyMs; }
+    }
+    
+    @JsonInclude(JsonInclude.Include.NON_NULL)
+    public static class LatencyStats {
+        @JsonProperty("min_latency_ms")
+        private Long minLatencyMs;
+        
+        @JsonProperty("max_latency_ms")
+        private Long maxLatencyMs;
+        
+        @JsonProperty("p50_latency_ms")
+        private Long p50LatencyMs;
+        
+        @JsonProperty("p95_latency_ms")
+        private Long p95LatencyMs;
+        
+        @JsonProperty("p99_latency_ms")
+        private Long p99LatencyMs;
+        
+        // Getters and setters
+        public Long getMinLatencyMs() { return minLatencyMs; }
+        public void setMinLatencyMs(Long minLatencyMs) { this.minLatencyMs = minLatencyMs; }
+        
+        public Long getMaxLatencyMs() { return maxLatencyMs; }
+        public void setMaxLatencyMs(Long maxLatencyMs) { this.maxLatencyMs = maxLatencyMs; }
+        
+        public Long getP50LatencyMs() { return p50LatencyMs; }
+        public void setP50LatencyMs(Long p50LatencyMs) { this.p50LatencyMs = p50LatencyMs; }
+        
+        public Long getP95LatencyMs() { return p95LatencyMs; }
+        public void setP95LatencyMs(Long p95LatencyMs) { this.p95LatencyMs = p95LatencyMs; }
+        
+        public Long getP99LatencyMs() { return p99LatencyMs; }
+        public void setP99LatencyMs(Long p99LatencyMs) { this.p99LatencyMs = p99LatencyMs; }
     }
     
     @JsonInclude(JsonInclude.Include.NON_NULL)
@@ -263,5 +353,42 @@ public class PerformanceMetrics {
         public String getStatus() { return status; }
         public void setStatus(String status) { this.status = status; }
     }
+    
+    @JsonInclude(JsonInclude.Include.NON_NULL)
+    public static class PoolMetrics {
+        @JsonProperty("active_connections")
+        private Integer activeConnections;
+        
+        @JsonProperty("idle_connections")
+        private Integer idleConnections;
+        
+        @JsonProperty("waiting_threads")
+        private Integer waitingThreads;
+        
+        @JsonProperty("total_connections")
+        private Integer totalConnections;
+        
+        @JsonProperty("max_pool_size")
+        private Integer maxPoolSize;
+        
+        // Getters and setters
+        public Integer getActiveConnections() { return activeConnections; }
+        public void setActiveConnections(Integer activeConnections) { this.activeConnections = activeConnections; }
+        
+        public Integer getIdleConnections() { return idleConnections; }
+        public void setIdleConnections(Integer idleConnections) { this.idleConnections = idleConnections; }
+        
+        public Integer getWaitingThreads() { return waitingThreads; }
+        public void setWaitingThreads(Integer waitingThreads) { this.waitingThreads = waitingThreads; }
+        
+        public Integer getTotalConnections() { return totalConnections; }
+        public void setTotalConnections(Integer totalConnections) { this.totalConnections = totalConnections; }
+        
+        public Integer getMaxPoolSize() { return maxPoolSize; }
+        public void setMaxPoolSize(Integer maxPoolSize) { this.maxPoolSize = maxPoolSize; }
+    }
+    
+    public SystemMetrics getSystemMetrics() { return systemMetrics; }
+    public void setSystemMetrics(SystemMetrics systemMetrics) { this.systemMetrics = systemMetrics; }
 }
 

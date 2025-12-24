@@ -33,7 +33,7 @@ variable "inactivity_hours" {
 variable "cloudwatch_logs_retention_days" {
   description = "CloudWatch Logs retention period in days"
   type        = number
-  default     = 2
+  default     = 1
 }
 
 variable "tags" {

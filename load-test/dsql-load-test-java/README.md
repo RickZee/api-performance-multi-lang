@@ -1,383 +1,339 @@
-# DSQL Load Test - Java Implementation
+# DSQL Performance Test Suite
 
-A Java-based load testing tool for measuring DSQL (Aurora Data API) insert performance using parallel threads. This implementation provides the same functionality as the Python Lambda-based load test, but runs directly on a bastion host or local machine.
+A comprehensive Python-based test orchestration system for evaluating DSQL (Aurora Data API) performance. Executes Java-based load tests on remote EC2 instances and collects performance metrics.
 
-## Status
-
-✅ **Completed:**
-- Java project structure with Maven
-- DSQL connection manager using AWS DSQL JDBC Connector
-- Event generators supporting all event types and configurable payload sizes
-- Both scenarios implemented (Individual and Batch inserts)
-- Dockerfile and deployment script
-- Full configuration parity with Lambda load test
-
-## Overview
-
-This project implements two test scenarios to measure inserts into the `business_events` table in DSQL:
-
-1. **Scenario 1: Individual Inserts** - Parallel threads, each looping N times and performing M individual INSERT statements per iteration
-2. **Scenario 2: Batch Inserts** - Parallel threads, each looping N times and performing 1 batch INSERT statement with configurable rows per iteration
-
-Both scenarios use configurable loop iterations to simulate sustained high-load scenarios.
-
-### Data Model
-
-The load test inserts events into the `car_entities_schema.business_events` table with the following schema:
-
-```sql
-CREATE TABLE car_entities_schema.business_events (
-    id VARCHAR(255) PRIMARY KEY,
-    event_name VARCHAR(255) NOT NULL,
-    event_type VARCHAR(255),
-    created_date TIMESTAMP WITH TIME ZONE,
-    saved_date TIMESTAMP WITH TIME ZONE,
-    event_data TEXT NOT NULL  -- entire event JSON as TEXT (DSQL doesn't support JSONB)
-);
-```
-
-**Note**: DSQL (Aurora Data API) has significant limitations compared to regular PostgreSQL:
-- **Does not support JSONB** - Uses `TEXT` instead for JSON storage
-- Does not support FOREIGN KEY constraints
-- Does not support CREATE INDEX (indexes must be created separately via ASYNC syntax or not at all)
-- Limited PostgreSQL feature set
-
-The `event_data` column stores the complete event as TEXT (JSON string), which means:
-- JSON is stored as plain text (not binary format)
-- No native JSON indexing support (unlike JSONB in regular PostgreSQL)
-- JSON operations require parsing the TEXT value
-
-## Configuration
-
-The Java load test supports the same configuration parameters as the Lambda load test, configured via environment variables.
-
-### Environment Variables
-
-| Variable | Description | Default | Example |
-|----------|-------------|---------|---------|
-| `DSQL_HOST` | DSQL endpoint hostname | `vftmkydwxvxys6asbsc6ih2the.dsql-fnh4.us-east-1.on.aws` | `your-cluster.dsql-fnh4.us-east-1.on.aws` |
-| `DSQL_PORT` | DSQL port | `5432` | `5432` |
-| `DATABASE_NAME` | Database name | `postgres` | `postgres` |
-| `IAM_USERNAME` | IAM database user | `lambda_dsql_user` | `lambda_dsql_user` |
-| `AWS_REGION` | AWS region | `us-east-1` | `us-east-1` |
-| `SCENARIO` | Scenario to run: `1`, `2`, `both`, `individual`, or `batch` | `both` | `1` |
-| `THREADS` | Number of parallel threads | `5` | `10` |
-| `ITERATIONS` | Number of loop iterations per thread | `2` | `100` |
-| `COUNT` | For Scenario 1: inserts per iteration<br>For Scenario 2: rows per batch | `1` | `10` |
-| `EVENT_TYPE` | Event type to generate | `CarCreated` | `LoanCreated` |
-| `PAYLOAD_SIZE` | Event payload size | `null` (default ~0.5-0.7 KB) | `4k` |
-
-### Event Types
-
-The load test supports four event types, matching the Lambda implementation:
-
-- **CarCreated** - Car creation events with vehicle details
-- **LoanCreated** - Loan creation events (requires carId)
-- **LoanPaymentSubmitted** - Loan payment events (requires loanId)
-- **CarServiceDone** - Car service events (requires carId)
-- **random** - Randomly selects from all event types
-
-### Payload Size Configuration
-
-Event sizes are configurable via the `PAYLOAD_SIZE` environment variable. Size control is achieved by expanding `description` fields in the JSON schema, matching the approach used in the Python Lambda implementation.
-
-**Supported Values:**
-- **Default (null)**: ~0.5-0.7 KB per event - basic event data only
-  - CarCreated: ~0.67 KB (687 bytes)
-  - LoanCreated: ~0.69 KB (711 bytes)
-  - LoanPaymentSubmitted: ~0.53 KB (539 bytes)
-  - CarServiceDone: ~0.68 KB (698 bytes)
-
-- **4k** (4,096 bytes): ~4 KB per event - adds nested structures (owner, insurance, maintenance, features, serviceHistory) with expanded descriptions
-- **8k** (8,192 bytes): ~8 KB per event - expands all nested structures with more description text
-- **32k** (32,768 bytes): ~32 KB per event - large events with extensive description fields
-- **64k** (65,536 bytes): ~64 KB per event - very large events for testing TEXT storage performance
-- **200k** (204,800 bytes): ~200 KB per event - extra-large events for stress testing
-- **500k** (512,000 bytes): ~500 KB per event - maximum size events for extreme testing
-
-**Description-Based Size Control**: The generator uses the `description` attribute from the JSON schema to control payload size. Description fields are expanded with realistic text across:
-- Main entity `description` field
-- Nested object descriptions (`owner.description`, `insurance.description`, `maintenance.description`, etc.)
-- Array item descriptions (service history, payment history, parts, etc.)
-
-For batch inserts (Scenario 2) with default size, a single INSERT statement with 100 rows contains approximately **50-70 KB** of TEXT data (JSON stored as text). With 4k payload size, it would be approximately **400 KB** per batch insert. With 200k payload size, it would be approximately **20 MB** per batch insert.
-
-**Note**: Events are stored as TEXT in DSQL (DSQL doesn't support JSONB).
-
-### Scenario Naming
-
-The `SCENARIO` environment variable supports both numeric and named formats for compatibility:
-
-- **Numeric**: `1` (individual), `2` (batch), `both` (runs both)
-- **Named**: `individual` (same as `1`), `batch` (same as `2`), `both` (runs both)
-
-## Configuration Comparison
-
-| Parameter | Lambda Load Test | Java Load Test | Notes |
-|-----------|------------------|----------------|-------|
-| Connection | Environment variables | Environment variables | Same |
-| Scenario | `scenario` in payload | `SCENARIO` env var | Java uses env vars |
-| Threads/Concurrency | `num_lambdas` in config | `THREADS` env var | Java uses threads instead of Lambdas |
-| Iterations | `iterations` in payload | `ITERATIONS` env var | Same concept |
-| Count/Batch Size | `count`/`rows_per_batch` in payload | `COUNT` env var | Same concept |
-| Event Type | `event_type` in payload | `EVENT_TYPE` env var | Same values |
-| Payload Size | `payload_size` in payload | `PAYLOAD_SIZE` env var | Same values |
-
-## Usage Examples
-
-### Basic Test (Default Configuration)
+## Quick Start
 
 ```bash
+# 1. Install dependencies
 cd load-test/dsql-load-test-java
-./deploy-to-bastion.sh
-```
+pip install -r requirements.txt
 
-This runs both scenarios with default settings:
-- 5 threads
-- 2 iterations per thread
-- 1 insert per iteration (Scenario 1) or 1 row per batch (Scenario 2)
-- CarCreated events
-- Default payload size (~0.5-0.7 KB)
+# 2. Verify setup
+python3 scripts/run_minimal_test.py
 
-### Custom Configuration
+# 3. Run full test suite
+python3 scripts/run_test_suite.py
 
-```bash
-export SCENARIO=1
-export THREADS=10
-export ITERATIONS=100
-export COUNT=10
-export EVENT_TYPE=CarCreated
-export PAYLOAD_SIZE=4k
+# 4. Monitor progress (separate terminal)
+python3 scripts/monitor_tests.py
 
-cd load-test/dsql-load-test-java
-./deploy-to-bastion.sh
-```
-
-### Run Scenario 2 with Large Payloads
-
-```bash
-export SCENARIO=2
-export THREADS=5
-export ITERATIONS=10
-export COUNT=100
-export EVENT_TYPE=LoanCreated
-export PAYLOAD_SIZE=32k
-
-cd load-test/dsql-load-test-java
-./deploy-to-bastion.sh
-```
-
-### Test All Event Types
-
-```bash
-# Test CarCreated
-export EVENT_TYPE=CarCreated
-./deploy-to-bastion.sh
-
-# Test LoanCreated
-export EVENT_TYPE=LoanCreated
-./deploy-to-bastion.sh
-
-# Test LoanPaymentSubmitted
-export EVENT_TYPE=LoanPaymentSubmitted
-./deploy-to-bastion.sh
-
-# Test CarServiceDone
-export EVENT_TYPE=CarServiceDone
-./deploy-to-bastion.sh
-
-# Test random event types
-export EVENT_TYPE=random
-./deploy-to-bastion.sh
-```
-
-### Test Different Payload Sizes
-
-```bash
-# Small events (default)
-export PAYLOAD_SIZE=
-./deploy-to-bastion.sh
-
-# 4KB events
-export PAYLOAD_SIZE=4k
-./deploy-to-bastion.sh
-
-# 32KB events
-export PAYLOAD_SIZE=32k
-./deploy-to-bastion.sh
-
-# 200KB events
-export PAYLOAD_SIZE=200k
-./deploy-to-bastion.sh
-```
-
-## Event Structure
-
-Events follow a standardized structure with `eventHeader` and `entities`, matching the Lambda implementation:
-
-```json
-{
-  "eventHeader": {
-    "uuid": "d75a9b47-66d4-435b-956e-3184db68555b",
-    "eventName": "Car Created",
-    "eventType": "CarCreated",
-    "createdDate": "2025-12-19T20:39:17.937238Z",
-    "savedDate": "2025-12-19T20:39:17.937238Z"
-  },
-  "entities": [{
-    "entityHeader": {
-      "entityId": "CAR-20251219-79",
-      "entityType": "Car",
-      "createdAt": "2025-12-19T20:39:17.937238Z",
-      "updatedAt": "2025-12-19T20:39:17.937238Z"
-    },
-    "id": "CAR-20251219-79",
-    "vin": "BENYFPPYPV9T7AH9A",
-    "make": "BMW",
-    "model": "X5",
-    "year": 2025,
-    "color": "Deep Blue",
-    "mileage": 30105
-    // ... additional entity-specific fields
-  }]
-}
-```
-
-### Insert Examples
-
-**Individual Insert (Scenario 1):**
-
-```sql
-INSERT INTO car_entities_schema.business_events (id, event_name, event_type, created_date, saved_date, event_data)
-VALUES ($1, $2, $3, $4, $5, $6)
-ON CONFLICT (id) DO NOTHING;
-```
-
-**Batch Insert (Scenario 2):**
-
-```sql
-INSERT INTO car_entities_schema.business_events (id, event_name, event_type, created_date, saved_date, event_data)
-VALUES ($1, $2, $3, $4, $5, $6), ($7, $8, $9, $10, $11, $12), ... (100 rows)
-ON CONFLICT (id) DO NOTHING;
-```
-
-## Project Structure
-
-```
-load-test/dsql-load-test-java/
-├── src/main/java/com/loadtest/dsql/
-│   ├── DSQLLoadTest.java          # Main test class
-│   ├── DSQLConnection.java        # Connection manager (uses AWS DSQL JDBC Connector)
-│   ├── EventGenerator.java        # Event generators (all event types + payload size support)
-│   └── EventRepository.java       # Database repository
-├── pom.xml                        # Maven configuration
-├── Dockerfile                     # Container build
-├── deploy-to-bastion.sh          # Deployment script
-└── README.md                      # This file
+# 5. Analyze results
+python3 scripts/analyze_results.py
 ```
 
 ## Prerequisites
 
-- Java 17+
-- Maven 3.8+
-- AWS CLI configured with appropriate credentials
-- Access to Aurora DSQL cluster
-- IAM permissions for DSQL connection (via EC2 instance profile or IAM role)
-- Docker (for containerized deployment)
+- **Python 3.8+** with dependencies (`pip install -r requirements.txt`)
+- **Java 17+** and **Maven 3.8+** (on EC2 instance)
+- **AWS credentials** configured (boto3)
+- **Environment variables** or Terraform outputs:
+  - `DSQL_HOST` - DSQL endpoint
+  - `TEST_RUNNER_INSTANCE_ID` - EC2 instance ID
+  - `S3_BUCKET` - S3 bucket for artifacts
+  - `AWS_REGION` - AWS region (default: us-east-1)
 
-## Deployment
+## Architecture
 
-### Deploy to Bastion Host
-
-The `deploy-to-bastion.sh` script builds the Java application, packages it, and deploys it to the bastion host via AWS SSM:
-
-```bash
-cd load-test/dsql-load-test-java
-./deploy-to-bastion.sh
+```
+┌─────────────────────────────────────────┐
+│         CLI Scripts (scripts/)          │
+│  run_test_suite.py │ monitor_tests.py   │
+└────────────┬────────────────────────────┘
+             │
+             ▼
+┌─────────────────────────────────────────┐
+│      Test Suite Package (test_suite/)   │
+│  config.py │ executor.py │ runner.py   │
+│  monitor.py │ resource_metrics.py       │
+└────────────┬────────────────────────────┘
+             │
+             ▼
+┌─────────────────────────────────────────┐
+│         AWS Infrastructure              │
+│  EC2 │ SSM │ S3 │ DSQL (Aurora)         │
+└─────────────────────────────────────────┘
 ```
 
-The script:
-1. Builds the Maven project
-2. Creates a deployment package
-3. Uploads to S3 (if configured) or builds directly on bastion
-4. Executes via AWS SSM on the bastion host
-5. Verifies IAM grants before running
+**Key Modules:**
+- `config.py` - Environment-based configuration
+- `executor.py` - AWS operations (SSM, S3, EC2)
+- `runner.py` - Test orchestration and execution
+- `monitor.py` - Progress monitoring
+- `resource_metrics.py` - CloudWatch metrics collection
 
-### Local Execution
+## Test Scenarios
 
-To run locally (requires DSQL access and IAM credentials):
+**Scenario 1: Individual Inserts** - One row per INSERT statement
+- Measures single-row insert performance
+- Lower throughput, simpler transaction model
+
+**Scenario 2: Batch Inserts** - Multiple rows per INSERT statement
+- Configurable batch size (1-1000 rows)
+- Higher throughput potential
+- More efficient for bulk operations
+
+## Test Matrix
+
+The suite runs **32 focused tests** (24 standard + 8 extreme) using one-factor-at-a-time approach:
+
+### Standard Tests (24 tests)
+
+**Scenario 1:**
+- Thread Scaling: [1, 10, 25, 50, 100] threads (5 tests)
+- Loop Impact: [10, 20, 50, 100] iterations (4 tests)
+- Payload Impact: [default, 4k, 32k] payloads (3 tests)
+
+**Scenario 2:**
+- Thread Scaling: [1, 10, 25, 50, 100] threads (5 tests)
+- Batch Impact: [1, 10, 25, 50] batch sizes (4 tests)
+- Payload Impact: [default, 4k, 32k] payloads (3 tests)
+
+### Extreme Tests (8 tests)
+
+- Super Heavy: 500-1000 threads, high iteration counts (4 tests)
+- Extreme Scaling: 2000-5000 threads, large batch sizes (4 tests)
+
+**Expected Duration:** 2-4 hours for full suite
+
+## Usage
+
+### Running Tests
 
 ```bash
-export DSQL_HOST=your-cluster.dsql-fnh4.us-east-1.on.aws
-export DATABASE_NAME=postgres
-export IAM_USERNAME=your_iam_user
-export AWS_REGION=us-east-1
-export SCENARIO=1
-export THREADS=5
-export ITERATIONS=10
-export COUNT=1
-export EVENT_TYPE=CarCreated
-export PAYLOAD_SIZE=4k
+# Full test suite
+python3 scripts/run_test_suite.py
 
-mvn clean package -DskipTests
-java -jar target/dsql-load-test-1.0.0.jar
+# Specific test groups
+python3 scripts/run_test_suite.py --groups scenario1_thread_scaling
+
+# Resume interrupted run
+python3 scripts/run_test_suite.py --resume
+
+# Custom options
+python3 scripts/run_test_suite.py --max-pool-size 2000 --connection-rate-limit 100
 ```
 
-## Implementation Details
+### Monitoring
 
-### AWS DSQL JDBC Connector
+```bash
+# Real-time monitoring (auto-refresh every 10s)
+python3 scripts/monitor_tests.py
 
-The implementation uses the official AWS DSQL JDBC Connector (`software.amazon.dsql:aurora-dsql-jdbc-connector`) which:
-- Automatically handles IAM token generation
-- Manages token refresh and expiration
-- Simplifies connection management
-- Uses `jdbc:aws-dsql:postgresql://` URL prefix
+# Custom interval
+python3 scripts/monitor_tests.py --interval 5
 
-### Connection Pooling
+# Specific results directory
+python3 scripts/monitor_tests.py --results-dir results/2025-12-22_14-37-03
+```
 
-Uses HikariCP for connection pooling:
-- Maximum pool size: 5 connections per thread
-- Connection timeout: 30 seconds
-- Idle timeout: 10 minutes
-- Max lifetime: 30 minutes
+### Analysis
 
-### Event Generation
+```bash
+# Analyze latest results
+python3 scripts/analyze_results.py
 
-The `EventGenerator` class:
-- Supports all 4 event types (CarCreated, LoanCreated, LoanPaymentSubmitted, CarServiceDone)
-- Implements payload size expansion via description field expansion
-- Matches Python Lambda implementation behavior
-- Generates realistic random data
+# Wait for completion then analyze
+python3 scripts/analyze_results.py --wait
+
+# Specific directory
+python3 scripts/analyze_results.py results/2025-12-22_14-37-03
+```
+
+## Configuration
+
+### Test Configuration (`test-config.json`)
+
+Edit `test-config.json` to modify test parameters:
+
+```json
+{
+  "baseline": {
+    "threads": 10,
+    "iterations": 20,
+    "batch_size": 10,
+    "payload_size": null
+  },
+  "test_groups": {
+    "scenario1_thread_scaling": {
+      "scenario": 1,
+      "threads": [1, 10, 25, 50, 100],
+      "iterations": 20,
+      "count": 1
+    }
+  }
+}
+```
+
+### Environment Variables
+
+| Variable | Description | Default |
+|----------|-------------|---------|
+| `DSQL_HOST` | DSQL endpoint hostname | Required |
+| `TEST_RUNNER_INSTANCE_ID` | EC2 instance ID | Required |
+| `S3_BUCKET` | S3 bucket name | Required |
+| `AWS_REGION` | AWS region | us-east-1 |
+| `IAM_DATABASE_USERNAME` | IAM database user | lambda_dsql_user |
+| `MAX_POOL_SIZE` | Connection pool size | 2000 (auto-calculated) |
+| `DSQL_CONNECTION_RATE_LIMIT` | Connection startup rate | 100 threads/sec |
+
+### Infrastructure Discovery
+
+The test suite automatically discovers infrastructure:
+
+1. **Environment variables** (highest priority)
+2. **AWS API queries** (boto3) - finds instances by tags, buckets by name
+3. **Terraform outputs** (fallback) - reads from `../../terraform/`
+
+## Results
+
+Results are stored in `results/{timestamp}/`:
+
+```
+results/
+├── 2025-12-22_14-37-03/
+│   ├── manifest.json           # Test run metadata
+│   ├── completed.json          # Completed test tracking
+│   ├── test-001-*.json         # Individual test results
+│   ├── summary.csv             # Summary statistics
+│   ├── charts/                 # Performance charts (PNG)
+│   └── report.html             # HTML report
+└── latest -> 2025-12-22_14-37-03
+```
+
+**Result JSON Structure:**
+- `configuration` - Test parameters
+- `system_metrics` - Hardware, CPU, memory, disk metrics
+- `cloudwatch_metrics` - EC2 instance metrics
+- `results` - Performance metrics (throughput, latency, errors)
+- `pool_metrics` - Connection pool statistics
+
+## EC2 Instance Requirements
+
+**Recommended:** `m5a.2xlarge` (8 vCPU, 32 GB RAM)
+- Cost: $0.344/hour (~$1.03 per 3-hour test run)
+- Supports 1000-2000 thread tests
+
+**Requirements by Scale:**
+- 500-1000 threads: `m5a.xlarge` (4 vCPU, 16 GB RAM) - $0.17/hour
+- 1000-2000 threads: `m5a.2xlarge` (8 vCPU, 32 GB RAM) - $0.34/hour
+- 2000-5000 threads: `m5a.4xlarge` (16 vCPU, 64 GB RAM) - $0.69/hour
+
+**Cost Optimization:**
+- Instance auto-starts before tests
+- Instance auto-stops after completion
+- Typical cost: ~$1-5/month (only during test runs)
+
+## Performance Tuning
+
+### Connection Pool Sizing
+
+**Default:** `min(max(threads/2, 10), 1000)`
+- 100 threads → 50 connections
+- 1000 threads → 500 connections
+- 5000 threads → 1000 connections (max)
+
+**Manual Override:** Set `MAX_POOL_SIZE` environment variable
+
+### Batch Size Limits
+
+- **Maximum:** 10,000 rows per batch (PostgreSQL limit: 65,535 parameters)
+- **Recommended:** 500-1000 rows for extreme scaling
+- Automatically validated before execution
+
+## Monitoring & Metrics
+
+### System Metrics (Java Application)
+
+Collected at test initialization:
+- Hardware configuration (CPU, memory, architecture, OS, Java version)
+- CPU metrics (process load, system load, CPU time)
+- Memory metrics (heap, non-heap, system memory)
+- Disk metrics (total, free, usable, used)
+- Network metrics (active interfaces)
+
+### CloudWatch Metrics (Python Orchestration)
+
+Collected during test execution:
+- EC2 instance metadata (type, AZ, VPC, subnet)
+- CPU utilization (average, max, min)
+- Network I/O (bytes, packets in/out)
+- Disk I/O (read/write ops, bytes)
+
+### Performance Metrics
+
+Each test result includes:
+- **Throughput:** Inserts per second
+- **Latency:** p50, p95, p99 percentiles
+- **Error Categorization:** Connection, query, authentication errors
+- **Connection Pool:** Active, idle, waiting, total connections
 
 ## Troubleshooting
 
-### Connection Issues
+### EC2 Instance Not Found
 
-If you encounter connection errors:
-1. Verify IAM grants are configured: `scripts/grant-bastion-dsql-access.sh`
-2. Check EC2 instance profile has DSQL permissions
-3. Verify DSQL endpoint and region are correct
-4. Ensure network connectivity to DSQL endpoint
+```bash
+# Check instance exists
+aws ec2 describe-instances --filters "Name=tag:Name,Values=*test-runner*"
 
-### Performance Issues
+# Set explicitly
+export TEST_RUNNER_INSTANCE_ID=i-xxxxxxxxxxxxx
+```
 
-For better performance:
-- Increase `THREADS` for more parallelism
-- Adjust `ITERATIONS` and `COUNT` based on test duration needs
-- Monitor connection pool usage
-- Consider batch size vs. individual inserts for your use case
+### DSQL Host Not Found
 
-## Comparison with Lambda Load Test
+```bash
+# Set explicitly
+export DSQL_HOST=your-endpoint.dsql-fnh4.us-east-1.on.aws
 
-The Java implementation provides the same functionality as the Lambda load test but runs on a single host:
+# Or use Terraform
+cd ../../terraform && terraform output aurora_dsql_host
+```
 
-| Aspect | Lambda Load Test | Java Load Test |
-|--------|------------------|----------------|
-| **Execution Model** | Distributed (1000+ Lambdas) | Single host (multiple threads) |
-| **Scalability** | Very high (thousands of parallel executions) | Limited by host resources |
-| **Setup Complexity** | Requires Lambda deployment | Simpler (single host) |
-| **Cost** | Pay per invocation | Fixed host cost |
-| **Use Case** | Maximum scale testing | Development, debugging, smaller scale tests |
-| **Configuration** | Payload parameters | Environment variables |
+### Test Execution Fails
 
-Both implementations generate the same events and support the same configuration options, making them interchangeable for testing different scenarios.
+1. Check SSM agent is online: `aws ssm describe-instance-information`
+2. Verify instance has DSQL permissions (IAM role)
+3. Check S3 bucket permissions
+4. Review test output in SSM command history
+
+### High Connection Pool Wait Times
+
+- Increase `MAX_POOL_SIZE` environment variable
+- Reduce thread count
+- Check DSQL connection limits
+
+## Project Structure
+
+```
+dsql-load-test-java/
+├── scripts/              # CLI entry points
+│   ├── run_test_suite.py      # Main orchestrator
+│   ├── monitor_tests.py       # Progress monitoring
+│   ├── analyze_results.py    # Analysis wrapper
+│   └── run_minimal_test.py   # Verification test
+├── test_suite/           # Core package
+│   ├── config.py         # Configuration
+│   ├── executor.py       # AWS operations
+│   ├── runner.py         # Test orchestration
+│   ├── monitor.py        # Progress monitoring
+│   └── resource_metrics.py  # Metrics collection
+├── src/main/java/        # Java load test application
+├── test-config.json      # Test matrix configuration
+├── results/              # Test results
+└── archive/              # Archived outdated files
+```
+
+## Additional Resources
+
+- **Infrastructure & Costs:** `../INFRASTRUCTURE_AND_COSTS.md`
+- **Java Application Details:** See `src/main/java/` for implementation
+- **Test Configuration:** See `test-config.json` for test matrix
+
+## Migration Notes
+
+The test suite was migrated from bash scripts to Python:
+- Old bash scripts moved to `archive/legacy/`
+- Old nested package structure in `archive/archive_old/`
+- Current structure uses flat `test_suite/` package
+

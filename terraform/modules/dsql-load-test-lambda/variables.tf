@@ -99,7 +99,7 @@ variable "aws_region" {
 variable "cloudwatch_logs_retention_days" {
   description = "CloudWatch Logs retention period in days"
   type        = number
-  default     = 7
+  default     = 1
 }
 
 variable "reserved_concurrent_executions" {

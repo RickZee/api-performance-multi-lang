@@ -17,7 +17,7 @@ variable "inactivity_hours" {
 variable "cloudwatch_logs_retention_days" {
   description = "CloudWatch Logs retention period in days"
   type        = number
-  default     = 3
+  default     = 1
 }
 
 variable "aws_region" {

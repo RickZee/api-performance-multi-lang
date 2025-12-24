@@ -312,14 +312,12 @@ locals {
 
   # Environment-based configuration
   # - dev: Absolute minimum infrastructure (1 day logs, 1 day backups, no RDS Proxy, db.t3.small)
-  # - test: Standard testing setup (3 days logs, 3 days backups, RDS Proxy enabled, db.r5.large)
+  # - test: Standard testing setup (1 day logs, 3 days backups, RDS Proxy enabled, db.r5.large)
   is_dev  = var.environment == "dev"
   is_test = var.environment == "test"
 
-  # CloudWatch Logs retention: 1 day for dev, 3 days for test
-  cloudwatch_logs_retention = var.cloudwatch_logs_retention_days != null ? var.cloudwatch_logs_retention_days : (
-    local.is_dev ? 1 : 3
-  )
+  # CloudWatch Logs retention: 1 day for all environments
+  cloudwatch_logs_retention = var.cloudwatch_logs_retention_days != null ? var.cloudwatch_logs_retention_days : 1
 
   # Backup retention: 1 day for dev, 3 days for test
   backup_retention = var.backup_retention_period != null ? var.backup_retention_period : (
@@ -624,9 +622,19 @@ module "database" {
 }
 
 # SSM VPC Endpoints (for SSM Session Manager from private subnets)
+# Required for test runner EC2 instance in private subnet to connect via SSM Session Manager
 # Bastion host is in public subnet and can use internet gateway for SSM
-# These endpoints remain configured for private subnets only (no change needed)
-# Note: Existing endpoints are fine - bastion doesn't need them
+module "ssm_endpoints" {
+  count  = var.enable_dsql_test_runner_ec2 && var.enable_aurora_dsql_cluster ? 1 : 0
+  source = "./modules/ssm-endpoints"
+
+  project_name    = var.project_name
+  vpc_id          = module.vpc[0].vpc_id
+  subnet_ids      = module.vpc[0].private_subnet_ids
+  vpc_cidr_block  = module.vpc[0].vpc_cidr
+
+  tags = local.common_tags
+}
 
 # S3 VPC Endpoint (Gateway type - free, no data transfer charges)
 # Enables S3 access from VPC without internet gateway
@@ -717,9 +725,10 @@ module "ec2_auto_stop" {
 #
 # After that, Terraform will automatically grant the bastion role access via Lambda.
 
-# Lambda function to grant IAM role access (for bastion)
+# Lambda function to grant IAM role access (shared by bastion and test runner)
+# The Lambda can grant multiple IAM roles - role_arn here is just for module initialization
 module "dsql_iam_grant" {
-  count  = var.enable_bastion_host && var.enable_aurora_dsql_cluster ? 1 : 0
+  count  = (var.enable_bastion_host || var.enable_dsql_test_runner_ec2) && var.enable_aurora_dsql_cluster ? 1 : 0
   source = "./modules/dsql-iam-grant"
 
   project_name            = var.project_name
@@ -731,150 +740,41 @@ module "dsql_iam_grant" {
   tags                   = local.common_tags
 }
 
-# Reuse existing Lambda function for test runner (same Lambda can grant multiple roles)
-
-# Invoke Lambda to grant IAM role access
-resource "null_resource" "grant_bastion_iam_access" {
+# Grant IAM role access to DSQL via Lambda function (for bastion)
+resource "aws_lambda_invocation" "grant_bastion_iam_access" {
   count = var.enable_bastion_host && var.enable_aurora_dsql_cluster ? 1 : 0
 
-  triggers = {
-    bastion_instance_id = module.bastion_host[0].instance_id
-    dsql_cluster_id     = module.aurora_dsql[0].cluster_resource_id
-    iam_user            = var.iam_database_user
-    bastion_role_arn    = "arn:aws:iam::${data.aws_caller_identity.current.account_id}:role/${var.project_name}-bastion-role"
-    lambda_function_name = module.dsql_iam_grant[0].lambda_function_name
-  }
+  function_name = module.dsql_iam_grant[0].lambda_function_name
 
-  # Invoke Lambda function to grant IAM access
-  provisioner "local-exec" {
-    command = <<-EOT
-      set -e
-      echo "Granting IAM role access via Lambda..."
-      
-      # Create payload file
-      cat > /tmp/lambda-payload-tf.json <<EOF
-      {
-        "dsql_host": "${module.aurora_dsql[0].dsql_host}",
-        "iam_user": "${var.iam_database_user}",
-        "role_arn": "arn:aws:iam::${data.aws_caller_identity.current.account_id}:role/${var.project_name}-bastion-role",
-        "region": "${var.aws_region}"
-      }
-      EOF
-      
-      # Invoke Lambda
-      aws lambda invoke \
-        --function-name ${module.dsql_iam_grant[0].lambda_function_name} \
-        --cli-binary-format raw-in-base64-out \
-        --payload file:///tmp/lambda-payload-tf.json \
-        --region ${var.aws_region} \
-        /tmp/lambda-response.json
-      
-      echo ""
-      echo "Lambda response:"
-      cat /tmp/lambda-response.json | jq . 2>/dev/null || cat /tmp/lambda-response.json
-      echo ""
-      
-      # Check if Lambda succeeded
-      STATUS=$(cat /tmp/lambda-response.json | jq -r '.statusCode // .errorMessage // "500"')
-      if [[ "$STATUS" == *"error"* ]] || [[ "$STATUS" != "200" ]]; then
-        echo "⚠️  Warning: Lambda returned status/error: $STATUS"
-        if [[ "$STATUS" == *"psycopg2"* ]]; then
-          echo "Error: Lambda missing psycopg2 dependency. Package may not have been created correctly."
-          echo "Run: terraform apply -target=module.dsql_iam_grant.null_resource.lambda_package"
-        elif [[ "$STATUS" == *"postgres"* ]] || [[ "$STATUS" == *"access"* ]]; then
-          echo "This may be expected if the Lambda role is not yet mapped to postgres user."
-          echo ""
-          echo "One-time setup required:"
-          LAMBDA_ROLE_ARN="arn:aws:iam::${data.aws_caller_identity.current.account_id}:role/${var.project_name}-dsql-iam-grant-role"
-          echo "  AWS IAM GRANT postgres TO '$LAMBDA_ROLE_ARN';"
-        fi
-        echo ""
-        echo "Or grant bastion role directly:"
-        echo "  AWS IAM GRANT ${var.iam_database_user} TO 'arn:aws:iam::${data.aws_caller_identity.current.account_id}:role/${var.project_name}-bastion-role';"
-        exit 0  # Don't fail, just warn
-      else
-        echo "✅ IAM role mapping granted successfully!"
-        cat /tmp/lambda-response.json | jq -r '.body' 2>/dev/null | jq . 2>/dev/null || echo ""
-      fi
-    EOT
-  }
+  input = jsonencode({
+    dsql_host = module.aurora_dsql[0].dsql_host
+    iam_user  = var.iam_database_user
+    role_arn  = "arn:aws:iam::${data.aws_caller_identity.current.account_id}:role/${var.project_name}-bastion-role"
+    region    = var.aws_region
+  })
 
   depends_on = [
-    module.bastion_host,
-    module.aurora_dsql,
     module.dsql_iam_grant,
+    module.aurora_dsql,
   ]
 }
 
-# Invoke Lambda to grant test runner IAM role access (reuse existing Lambda)
-resource "null_resource" "grant_test_runner_iam_access" {
-  count = var.enable_dsql_test_runner_ec2 && var.enable_aurora_dsql_cluster && var.enable_bastion_host ? 1 : 0
+# Grant test runner IAM role access to DSQL via Lambda function
+# Reuse the same Lambda function (it can grant multiple roles)
+resource "aws_lambda_invocation" "grant_test_runner_iam_access" {
+  count = var.enable_dsql_test_runner_ec2 && var.enable_aurora_dsql_cluster ? 1 : 0
 
-  triggers = {
-    test_runner_instance_id = module.dsql_test_runner[0].instance_id
-    dsql_cluster_id         = module.aurora_dsql[0].cluster_resource_id
-    iam_user                = var.iam_database_user
-    test_runner_role_arn    = "arn:aws:iam::${data.aws_caller_identity.current.account_id}:role/${var.project_name}-dsql-test-runner-role"
-    lambda_function_name    = module.dsql_iam_grant[0].lambda_function_name
-  }
+  function_name = module.dsql_iam_grant[0].lambda_function_name
 
-  # Invoke Lambda function to grant IAM access
-  provisioner "local-exec" {
-    command = <<-EOT
-      set -e
-      echo "Granting test runner IAM role access via Lambda..."
-      
-      # Create payload file
-      cat > /tmp/lambda-payload-test-runner-tf.json <<EOF
-      {
-        "dsql_host": "${module.aurora_dsql[0].dsql_host}",
-        "iam_user": "${var.iam_database_user}",
-        "role_arn": "arn:aws:iam::${data.aws_caller_identity.current.account_id}:role/${var.project_name}-dsql-test-runner-role",
-        "region": "${var.aws_region}"
-      }
-      EOF
-      
-      # Invoke Lambda (reuse existing Lambda function)
-      aws lambda invoke \
-        --function-name ${module.dsql_iam_grant[0].lambda_function_name} \
-        --cli-binary-format raw-in-base64-out \
-        --payload file:///tmp/lambda-payload-test-runner-tf.json \
-        --region ${var.aws_region} \
-        /tmp/lambda-response-test-runner.json
-      
-      echo ""
-      echo "Lambda response:"
-      cat /tmp/lambda-response-test-runner.json | jq . 2>/dev/null || cat /tmp/lambda-response-test-runner.json
-      echo ""
-      
-      # Check if Lambda succeeded
-      STATUS=$(cat /tmp/lambda-response-test-runner.json | jq -r '.statusCode // .errorMessage // "500"')
-      if [[ "$STATUS" == *"error"* ]] || [[ "$STATUS" != "200" ]]; then
-        echo "⚠️  Warning: Lambda returned status/error: $STATUS"
-        if [[ "$STATUS" == *"psycopg2"* ]]; then
-          echo "Error: Lambda missing psycopg2 dependency. Package may not have been created correctly."
-          echo "Run: terraform apply -target=module.dsql_iam_grant.null_resource.lambda_package"
-        elif [[ "$STATUS" == *"postgres"* ]] || [[ "$STATUS" == *"access"* ]]; then
-          echo "This may be expected if the Lambda role is not yet mapped to postgres user."
-          echo ""
-          echo "One-time setup required:"
-          LAMBDA_ROLE_ARN="arn:aws:iam::${data.aws_caller_identity.current.account_id}:role/${var.project_name}-dsql-iam-grant-role"
-          echo "  AWS IAM GRANT postgres TO '$LAMBDA_ROLE_ARN';"
-        fi
-        echo ""
-        echo "Or grant test runner role directly:"
-        echo "  AWS IAM GRANT ${var.iam_database_user} TO 'arn:aws:iam::${data.aws_caller_identity.current.account_id}:role/${var.project_name}-dsql-test-runner-role';"
-        exit 0  # Don't fail, just warn
-      else
-        echo "✅ Test runner IAM role mapping granted successfully!"
-        cat /tmp/lambda-response-test-runner.json | jq -r '.body' 2>/dev/null | jq . 2>/dev/null || echo ""
-      fi
-    EOT
-  }
+  input = jsonencode({
+    dsql_host = module.aurora_dsql[0].dsql_host
+    iam_user  = var.iam_database_user
+    role_arn  = "arn:aws:iam::${data.aws_caller_identity.current.account_id}:role/${var.project_name}-dsql-test-runner-role"
+    region    = var.aws_region
+  })
 
   depends_on = [
-    module.dsql_test_runner,
-    module.aurora_dsql,
     module.dsql_iam_grant,
+    module.aurora_dsql,
   ]
 }

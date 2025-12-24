@@ -120,7 +120,7 @@ variable "tags" {
 variable "cloudwatch_logs_retention_days" {
   description = "CloudWatch Logs retention period in days"
   type        = number
-  default     = 7
+  default     = 1
 }
 
 variable "additional_environment_variables" {

@@ -23,8 +23,9 @@ public class DSQLConnection {
     // DSQL connection limits - increase for extreme scaling
     // Note: DSQL supports up to 5000 connections per cluster endpoint
     private static final int ABSOLUTE_MAX_POOL_SIZE = 2000;
-    private static final int DEFAULT_MAX_RETRIES = 3;
-    private static final long DEFAULT_RETRY_DELAY_MS = 500;
+    // DSQL is extremely high-performance - minimal retries needed
+    private static final int DEFAULT_MAX_RETRIES = 1; // Single retry only (DSQL should work first time)
+    private static final long DEFAULT_RETRY_DELAY_MS = 10; // 10ms delay (DSQL responds in microseconds)
     
     private final String dsqlHost;
     private final int port;
@@ -131,8 +132,9 @@ public class DSQLConnection {
             } catch (SQLException e) {
                 lastException = e;
                 if (attempt < maxRetries) {
-                    // Exponential backoff with jitter
-                    long delay = retryDelayMs * (1L << attempt) + (long)(Math.random() * 100);
+                    // DSQL is extremely high-performance - minimal delay needed
+                    // Use fixed small delay instead of exponential backoff
+                    long delay = retryDelayMs;
                     LOGGER.debug("Connection attempt {} failed, retrying in {}ms: {}", 
                                 attempt + 1, delay, e.getMessage());
                     try {
@@ -173,8 +175,9 @@ public class DSQLConnection {
             } catch (SQLException e) {
                 lastException = e;
                 attempt++;
-                // Exponential backoff with jitter, capped at 2 seconds
-                long delay = Math.min(retryDelayMs * (1L << Math.min(attempt, 4)) + (long)(Math.random() * 100), 2000);
+                // DSQL is extremely high-performance - minimal delay needed
+                // Use fixed small delay instead of exponential backoff
+                long delay = retryDelayMs;
                 LOGGER.debug("Connection attempt {} failed, retrying in {}ms", attempt, delay);
                 try {
                     Thread.sleep(delay);
@@ -223,9 +226,11 @@ public class DSQLConnection {
                           Math.min(maxPoolSize / 2, 5);
             config.setMinimumIdle(minIdle);
             
-            // Extended timeout for extreme concurrency - threads may wait longer
-            // Use 120 seconds to give threads more chances to get connections
-            config.setConnectionTimeout(120000); // 120 seconds for extreme concurrency
+            // DSQL is extremely high-performance - but allow time for connection pool initialization
+            // Use reasonable timeouts: 3-10 seconds (DSQL is fast, but pool init takes a moment)
+            int connectionTimeout = maxPoolSize >= 500 ? 10000 : 
+                                   maxPoolSize >= 100 ? 5000 : 3000;
+            config.setConnectionTimeout(connectionTimeout); // 3-10 seconds for high-performance DSQL
             config.setIdleTimeout(600000); // 10 minutes
             config.setMaxLifetime(1800000); // 30 minutes - IAM tokens valid for 15 mins
             config.setLeakDetectionThreshold(120000); // 2 minutes for extreme tests

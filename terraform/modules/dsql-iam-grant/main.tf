@@ -151,16 +151,44 @@ resource "null_resource" "lambda_package" {
   provisioner "local-exec" {
     command = <<-EOT
       set -e
+      
+      # Check if Docker is available
+      if ! command -v docker &> /dev/null; then
+        echo "❌ Error: Docker is required to build Lambda package with correct binaries"
+        echo "Please install Docker: https://docs.docker.com/get-docker/"
+        exit 1
+      fi
+      
+      # Check if Docker daemon is running
+      if ! docker info &> /dev/null; then
+        echo "❌ Error: Docker daemon is not running"
+        echo "Please start Docker and try again"
+        exit 1
+      fi
+      
       PACKAGE_DIR="/tmp/dsql-iam-grant-lambda-package-$${RANDOM}"
       rm -rf "$PACKAGE_DIR"
       mkdir -p "$PACKAGE_DIR"
       
-      # Copy Lambda function
-      cp "${path.module}/lambda_function.py" "$PACKAGE_DIR/"
+      # Get absolute path to module directory
+      MODULE_DIR="$(cd "${path.module}" && pwd)"
       
-      # Install psycopg2-binary in package directory (boto3 is already in Lambda runtime)
-      echo "Installing psycopg2-binary..."
-      pip3 install --target "$PACKAGE_DIR" psycopg2-binary boto3 --quiet --disable-pip-version-check 2>&1 | grep -v "WARNING" || true
+      # Use Docker to build with Lambda-compatible binaries
+      # Using public.ecr.aws/lambda/python:3.11 which matches the Lambda runtime exactly
+      # Explicitly specify linux/amd64 platform for x86_64 Lambda architecture
+      echo "Building Lambda package with Docker (Lambda Python 3.11 runtime, x86_64)..."
+      docker run --rm \
+        --platform linux/amd64 \
+        --entrypoint /bin/bash \
+        -v "$MODULE_DIR:/var/task" \
+        -v "$PACKAGE_DIR:/package" \
+        public.ecr.aws/lambda/python:3.11 \
+        -c "
+          # Install psycopg2-binary in package directory (boto3 is already in Lambda runtime)
+          pip install --target /package psycopg2-binary --quiet --disable-pip-version-check --no-cache-dir 2>&1 | grep -v 'WARNING' || true
+          # Copy Lambda function code
+          cp /var/task/lambda_function.py /package/
+        "
       
       # Create zip file
       cd "$PACKAGE_DIR"

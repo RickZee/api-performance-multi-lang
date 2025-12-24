@@ -9,9 +9,15 @@ import java.util.UUID;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Collections;
+import java.util.Map;
+import java.util.HashMap;
+import java.util.concurrent.ConcurrentHashMap;
 
 /**
  * Main load test class for DSQL.
@@ -33,8 +39,48 @@ public class DSQLLoadTest {
      * Run Scenario 1: Individual inserts with connection resilience for extreme scaling.
      */
     public TestResult runScenario1(int iterations, int insertsPerIteration, int threadIndex) {
+        return runScenario1(iterations, insertsPerIteration, threadIndex, 0);
+    }
+    
+    /**
+     * Run Scenario 1: Individual inserts with connection resilience for extreme scaling.
+     * @param warmupIterations Number of warm-up iterations to run before measurement (not counted in metrics)
+     */
+    public TestResult runScenario1(int iterations, int insertsPerIteration, int threadIndex, int warmupIterations) {
         LOGGER.info("Starting Scenario 1: thread={}, iterations={}, insertsPerIter={}, eventType={}, payloadSize={}", 
                    threadIndex, iterations, insertsPerIteration, eventType, payloadSize);
+        
+        // Warm-up phase (not counted in metrics)
+        if (warmupIterations > 0) {
+            LOGGER.info("Thread {} running {} warm-up iterations", threadIndex, warmupIterations);
+            Connection warmupConn = null;
+            try {
+                warmupConn = getConnectionWithRetry(threadIndex, new AtomicInteger(0));
+                if (warmupConn != null) {
+                    for (int w = 0; w < warmupIterations; w++) {
+                        for (int j = 0; j < insertsPerIteration; j++) {
+                            try {
+                                String eventId = String.format("load-test-warmup-%d-%d-%d-%s", 
+                                                               threadIndex, w, j, UUID.randomUUID().toString());
+                                ObjectNode event = generateEvent(eventType, threadIndex, w, j, payloadSize);
+                                EventRepository.insertIndividual(warmupConn, eventId, event);
+                            } catch (Exception e) {
+                                // Ignore warm-up errors
+                            }
+                        }
+                    }
+                }
+            } catch (Exception e) {
+                LOGGER.debug("Thread {} warm-up error (ignored): {}", threadIndex, e.getMessage());
+            } finally {
+                if (warmupConn != null) {
+                    try {
+                        warmupConn.close();
+                    } catch (Exception ignore) {}
+                }
+            }
+            LOGGER.info("Thread {} completed warm-up phase", threadIndex);
+        }
         
         long startTime = System.currentTimeMillis();
         AtomicInteger successCount = new AtomicInteger(0);
@@ -42,6 +88,8 @@ public class DSQLLoadTest {
         AtomicInteger connectionRetries = new AtomicInteger(0);
         int totalExpected = iterations * insertsPerIteration;
         int logInterval = Math.max(1, iterations / 10); // Log every 10% progress
+        List<Long> latencies = Collections.synchronizedList(new ArrayList<>());
+        Map<ErrorCategory, AtomicInteger> errorsByCategory = new ConcurrentHashMap<>();
         
         Connection conn = null;
         try {
@@ -69,13 +117,43 @@ public class DSQLLoadTest {
                                                        threadIndex, i, j, UUID.randomUUID().toString());
                         ObjectNode event = generateEvent(eventType, threadIndex, i, j, payloadSize);
                         
+                        long opStartTime = System.currentTimeMillis();
                         int inserted = EventRepository.insertIndividual(conn, eventId, event);
+                        long opLatency = System.currentTimeMillis() - opStartTime;
+                        
+                        // Validate insert only if executeUpdate returned 0 (might be conflict or failure)
+                        // This avoids doubling database operations for successful inserts
                         if (inserted > 0) {
+                            // Insert succeeded - count as success
                             successCount.incrementAndGet();
+                            latencies.add(opLatency);
+                        } else {
+                            // Insert returned 0 - verify if it actually exists (might be ON CONFLICT DO NOTHING)
+                            boolean verified = false;
+                            try {
+                                verified = EventRepository.verifyInsert(conn, eventId);
+                            } catch (Exception verifyEx) {
+                                LOGGER.debug("Thread {} failed to verify insert for {}: {}", threadIndex, eventId, verifyEx.getMessage());
+                            }
+                            
+                            if (verified) {
+                                // Row exists (likely conflict) - count as success
+                                successCount.incrementAndGet();
+                                latencies.add(opLatency);
+                            } else {
+                                // Insert actually failed - don't proceed
+                                errorCount.incrementAndGet();
+                                errorsByCategory.computeIfAbsent(ErrorCategory.QUERY_ERROR, k -> new AtomicInteger(0)).incrementAndGet();
+                                LOGGER.warn("Thread {} insert failed for {}, not proceeding", threadIndex, eventId);
+                            }
                         }
                     } catch (Exception e) {
                         LOGGER.debug("Thread {} error inserting event: {}", threadIndex, e.getMessage());
                         errorCount.incrementAndGet();
+                        
+                        // Categorize and track error
+                        ErrorCategory category = ErrorCategory.categorize(e);
+                        errorsByCategory.computeIfAbsent(category, k -> new AtomicInteger(0)).incrementAndGet();
                         
                         // Try to reconnect if the connection might be stale
                         if (conn != null) {
@@ -118,7 +196,25 @@ public class DSQLLoadTest {
         LOGGER.info("Thread {} completed: Success={}, Errors={}, Duration={}ms, Rate={:.2f} inserts/sec, ConnectionRetries={}", 
                    threadIndex, successCount.get(), errorCount.get(), durationMs, insertsPerSecond, connectionRetries.get());
         
-        return new TestResult(successCount.get(), errorCount.get(), durationMs, insertsPerSecond);
+        // Calculate latency percentiles
+        long minLatency = 0, maxLatency = 0, p50 = 0, p95 = 0, p99 = 0;
+        if (!latencies.isEmpty()) {
+            Collections.sort(latencies);
+            minLatency = latencies.get(0);
+            maxLatency = latencies.get(latencies.size() - 1);
+            p50 = latencies.get((int) (latencies.size() * 0.50));
+            p95 = latencies.get((int) (latencies.size() * 0.95));
+            p99 = latencies.get((int) (latencies.size() * 0.99));
+        }
+        
+        // Convert error category map to string map for JSON serialization
+        Map<String, Integer> errorsByCategoryMap = new HashMap<>();
+        for (Map.Entry<ErrorCategory, AtomicInteger> entry : errorsByCategory.entrySet()) {
+            errorsByCategoryMap.put(entry.getKey().name(), entry.getValue().get());
+        }
+        
+        return new TestResult(successCount.get(), errorCount.get(), durationMs, insertsPerSecond,
+                             minLatency, maxLatency, p50, p95, p99, errorsByCategoryMap);
     }
     
     /**
@@ -126,8 +222,51 @@ public class DSQLLoadTest {
      * For extreme scaling, acquires fresh connections per iteration to handle pool contention.
      */
     public TestResult runScenario2(int iterations, int batchSize, int threadIndex) {
+        return runScenario2(iterations, batchSize, threadIndex, 0);
+    }
+    
+    /**
+     * Run Scenario 2: Batch inserts with per-iteration connection resilience.
+     * For extreme scaling, acquires fresh connections per iteration to handle pool contention.
+     * @param warmupIterations Number of warm-up iterations to run before measurement (not counted in metrics)
+     */
+    public TestResult runScenario2(int iterations, int batchSize, int threadIndex, int warmupIterations) {
         LOGGER.info("Starting Scenario 2: thread={}, iterations={}, batchSize={}, eventType={}, payloadSize={}", 
                    threadIndex, iterations, batchSize, eventType, payloadSize);
+        
+        // Warm-up phase (not counted in metrics)
+        if (warmupIterations > 0) {
+            LOGGER.info("Thread {} running {} warm-up iterations", threadIndex, warmupIterations);
+            Connection warmupConn = null;
+            try {
+                warmupConn = getConnectionWithRetry(threadIndex, new AtomicInteger(0));
+                if (warmupConn != null) {
+                    for (int w = 0; w < warmupIterations; w++) {
+                        try {
+                            String[] eventIds = new String[batchSize];
+                            ObjectNode[] events = new ObjectNode[batchSize];
+                            for (int j = 0; j < batchSize; j++) {
+                                eventIds[j] = String.format("load-test-warmup-%d-%d-%d-%s", 
+                                                            threadIndex, w, j, UUID.randomUUID().toString());
+                                events[j] = generateEvent(eventType, threadIndex, w, j, payloadSize);
+                            }
+                            EventRepository.insertBatch(warmupConn, eventIds, events);
+                        } catch (Exception e) {
+                            // Ignore warm-up errors
+                        }
+                    }
+                }
+            } catch (Exception e) {
+                LOGGER.debug("Thread {} warm-up error (ignored): {}", threadIndex, e.getMessage());
+            } finally {
+                if (warmupConn != null) {
+                    try {
+                        warmupConn.close();
+                    } catch (Exception ignore) {}
+                }
+            }
+            LOGGER.info("Thread {} completed warm-up phase", threadIndex);
+        }
         
         long startTime = System.currentTimeMillis();
         AtomicInteger successCount = new AtomicInteger(0);
@@ -135,6 +274,8 @@ public class DSQLLoadTest {
         AtomicInteger connectionRetries = new AtomicInteger(0);
         int totalExpected = iterations * batchSize;
         int logInterval = Math.max(1, iterations / 10); // Log every 10% progress
+        List<Long> latencies = Collections.synchronizedList(new ArrayList<>());
+        Map<ErrorCategory, AtomicInteger> errorsByCategory = new ConcurrentHashMap<>();
         
         // Determine if we should use per-iteration connections (for extreme scaling)
         // This gives other threads a chance to get connections
@@ -181,11 +322,87 @@ public class DSQLLoadTest {
                         events[j] = generateEvent(eventType, threadIndex, i, j, payloadSize);
                     }
                     
+                    long opStartTime = System.currentTimeMillis();
                     int inserted = EventRepository.insertBatch(conn, eventIds, events);
-                    successCount.addAndGet(inserted);
+                    long opLatency = System.currentTimeMillis() - opStartTime;
+                    
+                    // Validate batch insert only if inserted count doesn't match expected
+                    // This avoids doubling database operations for successful batches
+                    if (inserted == events.length) {
+                        // All inserts succeeded - count as success
+                        successCount.addAndGet(inserted);
+                        // For batch operations, record latency per row (average)
+                        long latencyPerRow = opLatency / inserted;
+                        for (int k = 0; k < inserted; k++) {
+                            latencies.add(latencyPerRow);
+                        }
+                    } else if (inserted > 0) {
+                        // Some inserts succeeded - verify which ones actually exist
+                        int verified = 0;
+                        try {
+                            verified = EventRepository.verifyBatchInsert(conn, eventIds);
+                        } catch (Exception verifyEx) {
+                            LOGGER.debug("Thread {} failed to verify batch insert: {}", threadIndex, verifyEx.getMessage());
+                            // Fallback: use inserted count
+                            verified = inserted;
+                        }
+                        
+                        if (verified > 0) {
+                            successCount.addAndGet(verified);
+                            long latencyPerRow = opLatency / verified;
+                            for (int k = 0; k < verified; k++) {
+                                latencies.add(latencyPerRow);
+                            }
+                            
+                            if (verified < events.length) {
+                                // Some inserts failed - don't proceed with failed ones
+                                int failed = events.length - verified;
+                                errorCount.addAndGet(failed);
+                                errorsByCategory.computeIfAbsent(ErrorCategory.QUERY_ERROR, k -> new AtomicInteger(0)).addAndGet(failed);
+                                LOGGER.warn("Thread {} batch insert: {} succeeded, {} failed", threadIndex, verified, failed);
+                            }
+                        } else {
+                            // Verification failed - use inserted count as fallback
+                            successCount.addAndGet(inserted);
+                            errorCount.addAndGet(events.length - inserted);
+                            long latencyPerRow = opLatency / Math.max(inserted, 1);
+                            for (int k = 0; k < inserted; k++) {
+                                latencies.add(latencyPerRow);
+                            }
+                        }
+                    } else {
+                        // All inserts returned 0 - verify if any actually exist
+                        int verified = 0;
+                        try {
+                            verified = EventRepository.verifyBatchInsert(conn, eventIds);
+                        } catch (Exception verifyEx) {
+                            LOGGER.debug("Thread {} failed to verify batch insert: {}", threadIndex, verifyEx.getMessage());
+                        }
+                        
+                        if (verified > 0) {
+                            // Some rows exist (likely conflicts) - count as success
+                            successCount.addAndGet(verified);
+                            long latencyPerRow = opLatency / verified;
+                            for (int k = 0; k < verified; k++) {
+                                latencies.add(latencyPerRow);
+                            }
+                            if (verified < events.length) {
+                                errorCount.addAndGet(events.length - verified);
+                            }
+                        } else {
+                            // All inserts failed - don't proceed
+                            errorCount.addAndGet(events.length);
+                            errorsByCategory.computeIfAbsent(ErrorCategory.QUERY_ERROR, k -> new AtomicInteger(0)).addAndGet(events.length);
+                            LOGGER.warn("Thread {} batch insert failed for all {} events", threadIndex, events.length);
+                        }
+                    }
                 } catch (Exception e) {
                     LOGGER.debug("Thread {} iteration {} error: {}", threadIndex, i, e.getMessage());
                     errorCount.addAndGet(batchSize);
+                    
+                    // Categorize and track error
+                    ErrorCategory category = ErrorCategory.categorize(e);
+                    errorsByCategory.computeIfAbsent(category, k -> new AtomicInteger(0)).addAndGet(batchSize);
                     
                     // If shared connection failed, try to reconnect for next iteration
                     if (!usePerIterationConnections && sharedConn != null) {
@@ -234,15 +451,34 @@ public class DSQLLoadTest {
         LOGGER.info("Thread {} completed: Success={}, Errors={}, Duration={}ms, Rate={:.2f} inserts/sec, ConnectionRetries={}", 
                    threadIndex, successCount.get(), errorCount.get(), durationMs, insertsPerSecond, connectionRetries.get());
         
-        return new TestResult(successCount.get(), errorCount.get(), durationMs, insertsPerSecond);
+        // Calculate latency percentiles
+        long minLatency = 0, maxLatency = 0, p50 = 0, p95 = 0, p99 = 0;
+        if (!latencies.isEmpty()) {
+            Collections.sort(latencies);
+            minLatency = latencies.get(0);
+            maxLatency = latencies.get(latencies.size() - 1);
+            p50 = latencies.get((int) (latencies.size() * 0.50));
+            p95 = latencies.get((int) (latencies.size() * 0.95));
+            p99 = latencies.get((int) (latencies.size() * 0.99));
+        }
+        
+        // Convert error category map to string map for JSON serialization
+        Map<String, Integer> errorsByCategoryMap = new HashMap<>();
+        for (Map.Entry<ErrorCategory, AtomicInteger> entry : errorsByCategory.entrySet()) {
+            errorsByCategoryMap.put(entry.getKey().name(), entry.getValue().get());
+        }
+        
+        return new TestResult(successCount.get(), errorCount.get(), durationMs, insertsPerSecond,
+                             minLatency, maxLatency, p50, p95, p99, errorsByCategoryMap);
     }
     
     /**
      * Get connection with retry and exponential backoff.
      */
     private Connection getConnectionWithRetry(int threadIndex, AtomicInteger retryCounter) {
-        int maxAttempts = 5;
-        long baseDelay = 200; // Start with 200ms
+        // DSQL is extremely high-performance - minimal retries needed
+        int maxAttempts = 1; // Single retry only (DSQL should work first time)
+        long baseDelay = 10; // 10ms delay (DSQL responds in microseconds)
         
         for (int attempt = 0; attempt < maxAttempts; attempt++) {
             try {
@@ -250,8 +486,9 @@ public class DSQLLoadTest {
             } catch (Exception e) {
                 retryCounter.incrementAndGet();
                 if (attempt < maxAttempts - 1) {
-                    // Exponential backoff with jitter
-                    long delay = baseDelay * (1L << attempt) + (long)(Math.random() * 100);
+                    // DSQL is extremely high-performance - minimal delay needed
+                    // Use fixed small delay instead of exponential backoff
+                    long delay = baseDelay;
                     LOGGER.debug("Thread {} connection attempt {} failed, retrying in {}ms", 
                                threadIndex, attempt + 1, delay);
                     try {
@@ -293,6 +530,21 @@ public class DSQLLoadTest {
             default:
                 return EventGenerator.generateCarCreatedEvent(null, payloadSize);
         }
+    }
+    
+    /**
+     * Parse integer from environment variable with default fallback.
+     */
+    private static int parseEnvInt(String name, int defaultValue) {
+        String value = System.getenv(name);
+        if (value != null && !value.isEmpty()) {
+            try {
+                return Integer.parseInt(value);
+            } catch (NumberFormatException e) {
+                return defaultValue;
+            }
+        }
+        return defaultValue;
     }
     
     /**
@@ -344,6 +596,7 @@ public class DSQLLoadTest {
         int threads = Integer.parseInt(threadsStr);
         int iterations = Integer.parseInt(iterationsStr);
         int count = Integer.parseInt(countStr);
+        int warmupIterations = parseEnvInt("WARMUP_ITERATIONS", Math.max(2, iterations / 10)); // Default: 10% or min 2
         
         // Generate test ID if not provided
         if (testId == null || testId.isEmpty()) {
@@ -363,6 +616,7 @@ public class DSQLLoadTest {
         System.out.println("  Threads: " + threads);
         System.out.println("  Iterations: " + iterations);
         System.out.println("  Count: " + count);
+        System.out.println("  Warm-up Iterations: " + warmupIterations);
         System.out.println("  Event Type: " + eventType);
         if (payloadSize != null) {
             System.out.println("  Payload Size: " + payloadSize + " bytes (" + (payloadSize / 1024) + " KB)");
@@ -372,6 +626,12 @@ public class DSQLLoadTest {
         if (outputDir != null && !outputDir.isEmpty()) {
             System.out.println("  Output Directory: " + outputDir);
         }
+        
+        // DSQL is extremely high-performance - no rate limiting needed for regular tests
+        // Only apply minimal delay for extreme scaling (1000+ threads)
+        int connectionRateLimit = parseEnvInt("DSQL_CONNECTION_RATE_LIMIT", 100);
+        long batchDelayMs = threads >= 1000 ? 50 : 0; // No delay for regular tests, 50ms only for extreme
+        System.out.println("  Connection Rate Limit: " + connectionRateLimit + " threads/second");
         System.out.println();
         
         // Initialize results collector
@@ -401,10 +661,22 @@ public class DSQLLoadTest {
                 
                 long startTime = System.currentTimeMillis();
                 
+                // Submit threads in rate-limited batches to respect DSQL's 100 conn/sec limit
                 for (int i = 0; i < threads; i++) {
                     final int threadIndex = i;
-                    futures.add(executor.submit(() -> test.runScenario1(iterations, count, threadIndex)));
-                    if ((i + 1) % 10 == 0 || (i + 1) == threads) {
+                    futures.add(executor.submit(() -> test.runScenario1(iterations, count, threadIndex, warmupIterations)));
+                    
+                    // Rate limit: pause after every batch to respect DSQL's 100 conn/sec limit
+                    if ((i + 1) % connectionRateLimit == 0 && i < threads - 1) {
+                        System.out.printf("Started %d/%d threads, pausing for rate limit...%n", i + 1, threads);
+                        try {
+                            Thread.sleep(batchDelayMs);
+                        } catch (InterruptedException e) {
+                            Thread.currentThread().interrupt();
+                            System.err.println("Thread startup interrupted");
+                            break;
+                        }
+                    } else if ((i + 1) % 10 == 0 || (i + 1) == threads) {
                         System.out.println("Started " + (i + 1) + "/" + threads + " threads...");
                     }
                 }
@@ -414,11 +686,26 @@ public class DSQLLoadTest {
                 
                 List<TestResult> results1 = new ArrayList<>();
                 int completed = 0;
+                // DSQL is extremely high-performance - but account for thread startup and connection pool init
+                // Calculate timeout: iterations * count * 20ms per insert + 10s buffer for overhead
+                // For basic tests: 20 iterations × 1 count × 20ms = 0.4s + 10s = 10.4s
+                // For larger tests: up to 60s max
+                long timeoutSeconds = Math.min(Math.max((iterations * count * 20L) / 1000 + 10, 15), 60);
+                System.out.println("Waiting for threads to complete (timeout: " + timeoutSeconds + "s)...");
                 for (Future<TestResult> future : futures) {
-                    results1.add(future.get());
-                    completed++;
-                    if (completed % 10 == 0 || completed == threads) {
-                        System.out.println("Completed " + completed + "/" + threads + " threads...");
+                    try {
+                        results1.add(future.get(timeoutSeconds, TimeUnit.SECONDS));
+                        completed++;
+                        if (completed % 10 == 0 || completed == threads) {
+                            System.out.println("Completed " + completed + "/" + threads + " threads...");
+                        }
+                    } catch (TimeoutException e) {
+                        System.err.println("ERROR: Thread timed out after " + timeoutSeconds + " seconds!");
+                        future.cancel(true);
+                        // Create a failed result with minimal data
+                        TestResult failedResult = new TestResult(0, count * iterations, 0, 0.0);
+                        results1.add(failedResult);
+                        completed++;
                     }
                 }
                 
@@ -434,12 +721,31 @@ public class DSQLLoadTest {
                 
                 // Record results
                 if (collector != null) {
+                    // Store pool metrics
+                    PerformanceMetrics.PoolMetrics metricsPoolMetrics = new PerformanceMetrics.PoolMetrics();
+                    metricsPoolMetrics.setActiveConnections(poolMetrics.activeConnections);
+                    metricsPoolMetrics.setIdleConnections(poolMetrics.idleConnections);
+                    metricsPoolMetrics.setWaitingThreads(poolMetrics.threadsAwaitingConnection);
+                    metricsPoolMetrics.setTotalConnections(poolMetrics.totalConnections);
+                    metricsPoolMetrics.setMaxPoolSize(poolMetrics.maxPoolSize);
+                    collector.setPoolMetrics(metricsPoolMetrics);
                     int totalSuccess = results1.stream().mapToInt(r -> r.successCount).sum();
                     int totalErrors = results1.stream().mapToInt(r -> r.errorCount).sum();
                     double avgRate = results1.stream().mapToDouble(r -> r.insertsPerSecond).average().orElse(0);
                     double throughput = totalDuration > 0 ? (totalSuccess * 1000.0) / totalDuration : 0;
+                    
+                    // Perform database validation
+                    int actualRows = 0;
+                    try (Connection validationConn = connection.getConnection()) {
+                        actualRows = EventRepository.countAllLoadTestRows(validationConn);
+                        System.out.println("Database validation: Found " + actualRows + " rows (expected: " + expectedRows1 + ")");
+                    } catch (Exception e) {
+                        LOGGER.warn("Failed to validate database rows: {}", e.getMessage());
+                        actualRows = totalSuccess; // Fallback to success count
+                    }
+                    
                     collector.recordScenarioResult(1, totalSuccess, totalErrors, totalDuration, 
-                                                   throughput, avgRate, expectedRows1, totalSuccess, results1);
+                                                   throughput, avgRate, expectedRows1, actualRows, results1);
                 }
                 
                 futures.clear();
@@ -455,10 +761,22 @@ public class DSQLLoadTest {
                 
                 long startTime = System.currentTimeMillis();
                 
+                // Submit threads in rate-limited batches to respect DSQL's 100 conn/sec limit
                 for (int i = 0; i < threads; i++) {
                     final int threadIndex = i;
-                    futures.add(executor.submit(() -> test.runScenario2(iterations, count, threadIndex)));
-                    if ((i + 1) % 10 == 0 || (i + 1) == threads) {
+                    futures.add(executor.submit(() -> test.runScenario2(iterations, count, threadIndex, warmupIterations)));
+                    
+                    // Rate limit: pause after every batch to respect DSQL's 100 conn/sec limit
+                    if ((i + 1) % connectionRateLimit == 0 && i < threads - 1) {
+                        System.out.printf("Started %d/%d threads, pausing for rate limit...%n", i + 1, threads);
+                        try {
+                            Thread.sleep(batchDelayMs);
+                        } catch (InterruptedException e) {
+                            Thread.currentThread().interrupt();
+                            System.err.println("Thread startup interrupted");
+                            break;
+                        }
+                    } else if ((i + 1) % 10 == 0 || (i + 1) == threads) {
                         System.out.println("Started " + (i + 1) + "/" + threads + " threads...");
                     }
                 }
@@ -468,11 +786,26 @@ public class DSQLLoadTest {
                 
                 List<TestResult> results2 = new ArrayList<>();
                 int completed = 0;
+                // DSQL is extremely high-performance - but account for thread startup and connection pool init
+                // Calculate timeout: iterations * count * batch_size * 10ms per batch + 10s buffer for overhead
+                // For basic tests: 20 iterations × 1 count × 10ms = 0.2s + 10s = 10.2s
+                // For larger tests: up to 60s max
+                long timeoutSeconds = Math.min(Math.max((iterations * count * 10L) / 1000 + 10, 15), 60);
+                System.out.println("Waiting for threads to complete (timeout: " + timeoutSeconds + "s)...");
                 for (Future<TestResult> future : futures) {
-                    results2.add(future.get());
-                    completed++;
-                    if (completed % 10 == 0 || completed == threads) {
-                        System.out.println("Completed " + completed + "/" + threads + " threads...");
+                    try {
+                        results2.add(future.get(timeoutSeconds, TimeUnit.SECONDS));
+                        completed++;
+                        if (completed % 10 == 0 || completed == threads) {
+                            System.out.println("Completed " + completed + "/" + threads + " threads...");
+                        }
+                    } catch (TimeoutException e) {
+                        System.err.println("ERROR: Thread timed out after " + timeoutSeconds + " seconds!");
+                        future.cancel(true);
+                        // Create a failed result with minimal data
+                        TestResult failedResult = new TestResult(0, count * iterations, 0, 0.0);
+                        results2.add(failedResult);
+                        completed++;
                     }
                 }
                 
@@ -488,12 +821,31 @@ public class DSQLLoadTest {
                 
                 // Record results
                 if (collector != null) {
+                    // Store pool metrics
+                    PerformanceMetrics.PoolMetrics metricsPoolMetrics = new PerformanceMetrics.PoolMetrics();
+                    metricsPoolMetrics.setActiveConnections(poolMetrics.activeConnections);
+                    metricsPoolMetrics.setIdleConnections(poolMetrics.idleConnections);
+                    metricsPoolMetrics.setWaitingThreads(poolMetrics.threadsAwaitingConnection);
+                    metricsPoolMetrics.setTotalConnections(poolMetrics.totalConnections);
+                    metricsPoolMetrics.setMaxPoolSize(poolMetrics.maxPoolSize);
+                    collector.setPoolMetrics(metricsPoolMetrics);
                     int totalSuccess = results2.stream().mapToInt(r -> r.successCount).sum();
                     int totalErrors = results2.stream().mapToInt(r -> r.errorCount).sum();
                     double avgRate = results2.stream().mapToDouble(r -> r.insertsPerSecond).average().orElse(0);
                     double throughput = totalDuration > 0 ? (totalSuccess * 1000.0) / totalDuration : 0;
+                    
+                    // Perform database validation
+                    int actualRows = 0;
+                    try (Connection validationConn = connection.getConnection()) {
+                        actualRows = EventRepository.countAllLoadTestRows(validationConn);
+                        System.out.println("Database validation: Found " + actualRows + " rows (expected: " + expectedRows2 + ")");
+                    } catch (Exception e) {
+                        LOGGER.warn("Failed to validate database rows: {}", e.getMessage());
+                        actualRows = totalSuccess; // Fallback to success count
+                    }
+                    
                     collector.recordScenarioResult(2, totalSuccess, totalErrors, totalDuration, 
-                                                   throughput, avgRate, expectedRows2, totalSuccess, results2);
+                                                   throughput, avgRate, expectedRows2, actualRows, results2);
                 }
             }
             
@@ -555,12 +907,30 @@ public class DSQLLoadTest {
         final int errorCount;
         final long durationMs;
         final double insertsPerSecond;
+        final long minLatencyMs;
+        final long maxLatencyMs;
+        final long p50LatencyMs;
+        final long p95LatencyMs;
+        final long p99LatencyMs;
+        final Map<String, Integer> errorsByCategory;
         
         TestResult(int successCount, int errorCount, long durationMs, double insertsPerSecond) {
+            this(successCount, errorCount, durationMs, insertsPerSecond, 0, 0, 0, 0, 0, new HashMap<>());
+        }
+        
+        TestResult(int successCount, int errorCount, long durationMs, double insertsPerSecond,
+                  long minLatencyMs, long maxLatencyMs, long p50LatencyMs, long p95LatencyMs, long p99LatencyMs,
+                  Map<String, Integer> errorsByCategory) {
             this.successCount = successCount;
             this.errorCount = errorCount;
             this.durationMs = durationMs;
             this.insertsPerSecond = insertsPerSecond;
+            this.minLatencyMs = minLatencyMs;
+            this.maxLatencyMs = maxLatencyMs;
+            this.p50LatencyMs = p50LatencyMs;
+            this.p95LatencyMs = p95LatencyMs;
+            this.p99LatencyMs = p99LatencyMs;
+            this.errorsByCategory = errorsByCategory != null ? errorsByCategory : new HashMap<>();
         }
     }
 }

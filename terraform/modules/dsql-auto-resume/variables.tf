@@ -22,7 +22,7 @@ variable "dsql_target_min_capacity" {
 variable "cloudwatch_logs_retention_days" {
   description = "CloudWatch Logs retention period in days"
   type        = number
-  default     = 2
+  default     = 1
 }
 
 variable "tags" {

@@ -6,13 +6,19 @@
     "payload_size": null,
     "event_type": "CarCreated"
   },
+  "thresholds": {
+    "min_throughput": 10000,
+    "max_p99_latency_ms": 500,
+    "max_error_rate": 0.01
+  },
   "test_groups": {
     "scenario1_thread_scaling": {
       "scenario": 1,
       "threads": [1, 10, 25, 50, 100],
       "iterations": 20,
       "count": 1,
-      "payload_size": null
+      "payload_size": null,
+      "tags": ["standard"]
     },
     "scenario1_loop_impact": {
       "scenario": 1,
@@ -56,14 +62,16 @@
       "threads": 500,
       "iterations": 10,
       "count": 20,
-      "payload_size": null
+      "payload_size": null,
+      "tags": ["extreme"]
     },
     "scenario1_super_heavy_2": {
       "scenario": 1,
       "threads": 1000,
       "iterations": 10,
       "count": 20,
-      "payload_size": null
+      "payload_size": null,
+      "tags": ["extreme"]
     },
     "scenario2_super_heavy_1": {
       "scenario": 2,
@@ -87,7 +95,8 @@
       "iterations": 10,
       "count": 500,
       "batch_size": 500,
-      "payload_size": null
+      "payload_size": null,
+      "tags": ["extreme"]
     },
     "scenario2_extreme_scaling_2": {
       "scenario": 2,
@@ -95,7 +104,8 @@
       "iterations": 10,
       "count": 500,
       "batch_size": 500,
-      "payload_size": null
+      "payload_size": null,
+      "tags": ["extreme"]
     },
     "scenario2_extreme_scaling_3": {
       "scenario": 2,
@@ -103,7 +113,8 @@
       "iterations": 5,
       "count": 1000,
       "batch_size": 1000,
-      "payload_size": null
+      "payload_size": null,
+      "tags": ["extreme"]
     },
     "scenario2_extreme_scaling_4": {
       "scenario": 2,
@@ -111,7 +122,8 @@
       "iterations": 2,
       "count": 1000,
       "batch_size": 1000,
-      "payload_size": null
+      "payload_size": null,
+      "tags": ["extreme"]
     }
   }
 }

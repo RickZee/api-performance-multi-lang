@@ -7,6 +7,7 @@ import org.slf4j.LoggerFactory;
 
 import java.sql.Connection;
 import java.sql.PreparedStatement;
+import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.sql.Timestamp;
 import java.time.Instant;
@@ -97,6 +98,95 @@ public class EventRepository {
             
             return stmt.executeUpdate();
         }
+    }
+    
+    /**
+     * Count rows inserted by a specific test run.
+     * @param conn Database connection
+     * @param testIdPrefix Test ID prefix to match (e.g., "load-test-individual-0" or "load-test-batch-0")
+     * @return Number of rows matching the prefix
+     */
+    public static int countRowsByTestPrefix(Connection conn, String testIdPrefix) throws SQLException {
+        String countSql = "SELECT COUNT(*) FROM car_entities_schema.business_events WHERE id LIKE ?";
+        try (PreparedStatement stmt = conn.prepareStatement(countSql)) {
+            stmt.setString(1, testIdPrefix + "%");
+            try (ResultSet rs = stmt.executeQuery()) {
+                if (rs.next()) {
+                    return rs.getInt(1);
+                }
+            }
+        }
+        return 0;
+    }
+    
+    /**
+     * Count all rows inserted by load tests (any thread).
+     * @param conn Database connection
+     * @return Number of rows with load-test prefix
+     */
+    public static int countAllLoadTestRows(Connection conn) throws SQLException {
+        String countSql = "SELECT COUNT(*) FROM car_entities_schema.business_events WHERE id LIKE 'load-test-%'";
+        try (PreparedStatement stmt = conn.prepareStatement(countSql)) {
+            try (ResultSet rs = stmt.executeQuery()) {
+                if (rs.next()) {
+                    return rs.getInt(1);
+                }
+            }
+        }
+        return 0;
+    }
+    
+    /**
+     * Verify that an event was successfully inserted by querying the database.
+     * @param conn Database connection
+     * @param eventId The event ID to verify
+     * @return true if the event exists in the database, false otherwise
+     */
+    public static boolean verifyInsert(Connection conn, String eventId) throws SQLException {
+        String verifySql = "SELECT COUNT(*) FROM car_entities_schema.business_events WHERE id = ?";
+        try (PreparedStatement stmt = conn.prepareStatement(verifySql)) {
+            stmt.setString(1, eventId);
+            try (ResultSet rs = stmt.executeQuery()) {
+                if (rs.next()) {
+                    return rs.getInt(1) > 0;
+                }
+            }
+        }
+        return false;
+    }
+    
+    /**
+     * Verify that a batch of events were successfully inserted by querying the database.
+     * @param conn Database connection
+     * @param eventIds Array of event IDs to verify
+     * @return Number of events that were successfully inserted
+     */
+    public static int verifyBatchInsert(Connection conn, String[] eventIds) throws SQLException {
+        if (eventIds.length == 0) {
+            return 0;
+        }
+        
+        // Build query with IN clause
+        StringBuilder sql = new StringBuilder("SELECT COUNT(*) FROM car_entities_schema.business_events WHERE id IN (");
+        for (int i = 0; i < eventIds.length; i++) {
+            if (i > 0) {
+                sql.append(", ");
+            }
+            sql.append("?");
+        }
+        sql.append(")");
+        
+        try (PreparedStatement stmt = conn.prepareStatement(sql.toString())) {
+            for (int i = 0; i < eventIds.length; i++) {
+                stmt.setString(i + 1, eventIds[i]);
+            }
+            try (ResultSet rs = stmt.executeQuery()) {
+                if (rs.next()) {
+                    return rs.getInt(1);
+                }
+            }
+        }
+        return 0;
     }
 }
 

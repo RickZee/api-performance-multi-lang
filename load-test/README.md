@@ -1,5 +1,17 @@
 # Load Test Documentation
 
+## Infrastructure and Costs
+
+For detailed information about the infrastructure required for load testing, associated costs, and cost reduction measures, see:
+
+- **[Infrastructure and Costs Documentation](INFRASTRUCTURE_AND_COSTS.md)** - Complete guide to infrastructure requirements, cost breakdown, and cost optimization features
+
+**Quick Summary**:
+- **Infrastructure**: EC2 test runner, Aurora DSQL cluster, S3 bucket, VPC networking
+- **Cost per test run**: ~$1.75-$2.47 (2-4 hour test suite)
+- **Monthly cost**: ~$2-10/month (with auto-stop/pause optimizations)
+- **Cost optimization features**: EC2 auto-stop, DSQL auto-pause/resume, ARM instances, lifecycle management
+
 ## HTML Report Structure and Testing
 
 ### Report Structure

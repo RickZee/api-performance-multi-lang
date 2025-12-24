@@ -202,6 +202,10 @@ resource "aws_instance" "test_runner" {
     #!/bin/bash
     set -e
     
+    # Ensure SSM agent is running (should be pre-installed on Amazon Linux 2023)
+    systemctl enable amazon-ssm-agent || true
+    systemctl start amazon-ssm-agent || true
+    
     # Update system
     dnf update -y
     

@@ -70,6 +70,14 @@ __pycache__/
 *.so
 .Python
 
+# Python coverage files
+.coverage
+**/.coverage
+.coverage.*
+htmlcov/
+**/htmlcov/
+*.cover
+
 # Locally stored archived files
 archive/
 

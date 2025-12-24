@@ -35,6 +35,10 @@ public class TestResultsCollector {
         this.metrics = new PerformanceMetrics();
         this.metrics.setTestId(testId);
         this.metrics.setTimestamp(Instant.now().toString());
+        
+        // Collect system metrics at initialization
+        SystemMetrics systemMetrics = new SystemMetrics();
+        this.metrics.setSystemMetrics(systemMetrics);
     }
     
     /**
@@ -78,6 +82,21 @@ public class TestResultsCollector {
         scenarioResult.setTotalSuccess(totalSuccess);
         scenarioResult.setTotalErrors(totalErrors);
         scenarioResult.setDurationMs(durationMs);
+        
+        // Aggregate errors by category from thread results
+        Map<String, Integer> aggregatedErrorsByCategory = new HashMap<>();
+        if (threadResults != null) {
+            for (DSQLLoadTest.TestResult result : threadResults) {
+                if (result.errorsByCategory != null) {
+                    for (Map.Entry<String, Integer> entry : result.errorsByCategory.entrySet()) {
+                        aggregatedErrorsByCategory.merge(entry.getKey(), entry.getValue(), Integer::sum);
+                    }
+                }
+            }
+        }
+        if (!aggregatedErrorsByCategory.isEmpty()) {
+            scenarioResult.setErrorsByCategory(aggregatedErrorsByCategory);
+        }
         scenarioResult.setThroughputInsertsPerSec(throughput);
         scenarioResult.setAvgInsertsPerSec(avgRate);
         scenarioResult.setExpectedRows(expectedRows);
@@ -86,6 +105,7 @@ public class TestResultsCollector {
         // Store per-thread results if available
         if (threadResults != null && !threadResults.isEmpty()) {
             Map<Integer, PerformanceMetrics.ThreadResult> threadMap = new HashMap<>();
+            
             for (int i = 0; i < threadResults.size(); i++) {
                 DSQLLoadTest.TestResult result = threadResults.get(i);
                 PerformanceMetrics.ThreadResult threadResult = new PerformanceMetrics.ThreadResult();
@@ -94,9 +114,24 @@ public class TestResultsCollector {
                 threadResult.setErrorCount(result.errorCount);
                 threadResult.setDurationMs(result.durationMs);
                 threadResult.setInsertsPerSec(result.insertsPerSecond);
+                
+                // Add latency metrics
+                threadResult.setMinLatencyMs(result.minLatencyMs);
+                threadResult.setMaxLatencyMs(result.maxLatencyMs);
+                threadResult.setP50LatencyMs(result.p50LatencyMs);
+                threadResult.setP95LatencyMs(result.p95LatencyMs);
+                threadResult.setP99LatencyMs(result.p99LatencyMs);
+                
                 threadMap.put(i, threadResult);
+                
+                // Collect latencies for aggregate stats (if we had per-operation data, we'd use that)
+                // For now, we'll calculate aggregate from thread-level percentiles
             }
             scenarioResult.setThreadResults(threadMap);
+            
+            // Calculate aggregate latency stats from thread results
+            PerformanceMetrics.LatencyStats latencyStats = calculateAggregateLatencyStats(threadResults);
+            scenarioResult.setLatencyStats(latencyStats);
         }
         
         if (scenario == 1) {
@@ -104,6 +139,13 @@ public class TestResultsCollector {
         } else if (scenario == 2) {
             testResults.setScenario2(scenarioResult);
         }
+    }
+    
+    /**
+     * Set connection pool metrics.
+     */
+    public void setPoolMetrics(PerformanceMetrics.PoolMetrics poolMetrics) {
+        metrics.setPoolMetrics(poolMetrics);
     }
     
     /**
@@ -214,6 +256,59 @@ public class TestResultsCollector {
             return "\"" + value.replace("\"", "\"\"") + "\"";
         }
         return value;
+    }
+    
+    /**
+     * Calculate aggregate latency statistics from thread results.
+     */
+    private PerformanceMetrics.LatencyStats calculateAggregateLatencyStats(List<DSQLLoadTest.TestResult> threadResults) {
+        PerformanceMetrics.LatencyStats stats = new PerformanceMetrics.LatencyStats();
+        
+        if (threadResults == null || threadResults.isEmpty()) {
+            return stats;
+        }
+        
+        // Collect all latency values for aggregate calculation
+        List<Long> allMinLatencies = new ArrayList<>();
+        List<Long> allMaxLatencies = new ArrayList<>();
+        List<Long> allP50Latencies = new ArrayList<>();
+        List<Long> allP95Latencies = new ArrayList<>();
+        List<Long> allP99Latencies = new ArrayList<>();
+        
+        for (DSQLLoadTest.TestResult result : threadResults) {
+            if (result.minLatencyMs > 0) allMinLatencies.add(result.minLatencyMs);
+            if (result.maxLatencyMs > 0) allMaxLatencies.add(result.maxLatencyMs);
+            if (result.p50LatencyMs > 0) allP50Latencies.add(result.p50LatencyMs);
+            if (result.p95LatencyMs > 0) allP95Latencies.add(result.p95LatencyMs);
+            if (result.p99LatencyMs > 0) allP99Latencies.add(result.p99LatencyMs);
+        }
+        
+        if (!allMinLatencies.isEmpty()) {
+            allMinLatencies.sort(Long::compareTo);
+            stats.setMinLatencyMs(allMinLatencies.get(0));
+        }
+        
+        if (!allMaxLatencies.isEmpty()) {
+            allMaxLatencies.sort(Long::compareTo);
+            stats.setMaxLatencyMs(allMaxLatencies.get(allMaxLatencies.size() - 1));
+        }
+        
+        if (!allP50Latencies.isEmpty()) {
+            allP50Latencies.sort(Long::compareTo);
+            stats.setP50LatencyMs(allP50Latencies.get((int) (allP50Latencies.size() * 0.50)));
+        }
+        
+        if (!allP95Latencies.isEmpty()) {
+            allP95Latencies.sort(Long::compareTo);
+            stats.setP95LatencyMs(allP95Latencies.get((int) (allP95Latencies.size() * 0.95)));
+        }
+        
+        if (!allP99Latencies.isEmpty()) {
+            allP99Latencies.sort(Long::compareTo);
+            stats.setP99LatencyMs(allP99Latencies.get((int) (allP99Latencies.size() * 0.99)));
+        }
+        
+        return stats;
     }
     
     public PerformanceMetrics getMetrics() {

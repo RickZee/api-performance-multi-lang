@@ -1,0 +1,35 @@
+{
+  "baseline": {
+    "threads": 10,
+    "iterations": 2,
+    "batch_size": 10,
+    "payload_size": null,
+    "event_type": "CarCreated"
+  },
+  "thresholds": {
+    "min_throughput": 1000,
+    "max_p99_latency_ms": 1000,
+    "max_error_rate": 0.05
+  },
+  "test_groups": {
+    "smoke_test_scenario1": {
+      "scenario": 1,
+      "threads": 10,
+      "iterations": 2,
+      "count": 5,
+      "payload_size": null,
+      "tags": ["smoke-test", "scenario1", "individual-inserts"],
+      "description": "Smoke test: Scenario 1 (individual inserts) - minimal test to validate pipeline works. Note: Scenario 1 does not use batch_size."
+    },
+    "smoke_test_scenario2": {
+      "scenario": 2,
+      "threads": 10,
+      "iterations": 2,
+      "count": 10,
+      "payload_size": null,
+      "tags": ["smoke-test", "scenario2", "batch-inserts"],
+      "description": "Smoke test: Scenario 2 (batch inserts) - minimal test to validate pipeline works. Note: batch_size is automatically set to count (10) for scenario 2."
+    }
+  }
+}
+
