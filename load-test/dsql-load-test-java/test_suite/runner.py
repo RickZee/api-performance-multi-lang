@@ -460,7 +460,8 @@ class TestRunner:
         self,
         test_groups: Optional[List[str]] = None,
         resume: bool = False,
-        tags: Optional[List[str]] = None
+        tags: Optional[List[str]] = None,
+        stop_instance_after: bool = True
     ) -> dict:
         """Run full test suite or specific groups."""
         print("=" * 80)
@@ -469,92 +470,109 @@ class TestRunner:
         print(f"Results directory: {self.results_dir}")
         print()
         
-        # Ensure EC2 instance is ready
-        print("=== Checking EC2 Instance ===")
-        if not self.executor.ensure_instance_ready():
-            raise RuntimeError("Failed to start EC2 instance or SSM agent not ready")
-        print()
-        
-        # Load test configuration
-        print("=== Loading test configuration ===")
-        config_loader = TestConfigLoader(str(self.config_path))
-        config_loader.load_config()
-        tests = config_loader.generate_test_matrix(test_groups)
-        
-        # Filter by tags if specified
-        if tags:
-            original_count = len(tests)
-            tests = [t for t in tests if any(tag in t.tags for tag in tags)]
-            print(f"Filtered by tags {tags}: {len(tests)}/{original_count} tests")
-        
-        # Filter completed tests if resuming
-        if resume:
-            original_count = len(tests)
-            tests = [t for t in tests if t.test_id not in self.completed]
-            skipped = original_count - len(tests)
-            if skipped > 0:
-                print(f"Skipping {skipped} already completed tests")
-        
-        total_tests = len(tests)
-        print(f"Total tests to run: {total_tests}")
-        print()
-        
-        if total_tests == 0:
-            print("No tests to run")
-            return {'total': 0, 'completed': 0, 'failed': 0, 'results_dir': str(self.results_dir)}
-        
-        # Prepare environment (one-time setup)
-        if not self._prepare_environment():
-            raise RuntimeError("Failed to prepare EC2 environment")
-        print()
-        
-        # Clear database
-        if not self._clear_database():
-            print("Warning: Failed to clear database, continuing anyway...")
-        print()
-        
-        # Upload test suite start marker to S3
-        self._upload_test_suite_start_marker(total_tests)
-        
-        # Run tests
-        completed_count = 0
-        failed_count = 0
-        
-        for i, test_def in enumerate(tests, 1):
-            print(f"[{i}/{total_tests}] Running: {test_def.test_id}")
-            print(f"  Scenario: {test_def.scenario}, Threads: {test_def.threads}, "
-                  f"Iterations: {test_def.iterations}, Count: {test_def.count}")
-            
-            try:
-                success = self._run_single_test(test_def)
-                
-                if success:
-                    self.completed.add(test_def.test_id)
-                    self._save_completed()
-                    completed_count += 1
-                    print(f"  ✓ Test completed")
-                else:
-                    failed_count += 1
-                    print(f"  ✗ Test failed")
-            except Exception as e:
-                print(f"  ✗ Error: {e}")
-                failed_count += 1
-            
+        try:
+            # Ensure EC2 instance is ready
+            print("=== Checking EC2 Instance ===")
+            if not self.executor.ensure_instance_ready():
+                raise RuntimeError("Failed to start EC2 instance or SSM agent not ready")
             print()
-        
-        # Summary
-        print("=" * 80)
-        print("Test Suite Complete")
-        print("=" * 80)
-        print(f"Results saved to: {self.results_dir}")
-        print(f"Completed: {completed_count}/{total_tests}")
-        print(f"Failed: {failed_count}/{total_tests}")
-        print()
-        
-        return {
-            'total': total_tests,
-            'completed': completed_count,
-            'failed': failed_count,
-            'results_dir': str(self.results_dir)
-        }
+            
+            # Load test configuration
+            print("=== Loading test configuration ===")
+            config_loader = TestConfigLoader(str(self.config_path))
+            config_loader.load_config()
+            tests = config_loader.generate_test_matrix(test_groups)
+            
+            # Filter by tags if specified
+            if tags:
+                original_count = len(tests)
+                tests = [t for t in tests if any(tag in t.tags for tag in tags)]
+                print(f"Filtered by tags {tags}: {len(tests)}/{original_count} tests")
+            
+            # Filter completed tests if resuming
+            if resume:
+                original_count = len(tests)
+                tests = [t for t in tests if t.test_id not in self.completed]
+                skipped = original_count - len(tests)
+                if skipped > 0:
+                    print(f"Skipping {skipped} already completed tests")
+            
+            total_tests = len(tests)
+            print(f"Total tests to run: {total_tests}")
+            print()
+            
+            if total_tests == 0:
+                print("No tests to run")
+                return {'total': 0, 'completed': 0, 'failed': 0, 'results_dir': str(self.results_dir)}
+            
+            # Prepare environment (one-time setup)
+            if not self._prepare_environment():
+                raise RuntimeError("Failed to prepare EC2 environment")
+            print()
+            
+            # Clear database
+            if not self._clear_database():
+                print("Warning: Failed to clear database, continuing anyway...")
+            print()
+            
+            # Upload test suite start marker to S3
+            self._upload_test_suite_start_marker(total_tests)
+            
+            # Run tests
+            completed_count = 0
+            failed_count = 0
+            
+            for i, test_def in enumerate(tests, 1):
+                print(f"[{i}/{total_tests}] Running: {test_def.test_id}")
+                print(f"  Scenario: {test_def.scenario}, Threads: {test_def.threads}, "
+                      f"Iterations: {test_def.iterations}, Count: {test_def.count}")
+                
+                try:
+                    success = self._run_single_test(test_def)
+                    
+                    if success:
+                        self.completed.add(test_def.test_id)
+                        self._save_completed()
+                        completed_count += 1
+                        print(f"  ✓ Test completed")
+                    else:
+                        failed_count += 1
+                        print(f"  ✗ Test failed")
+                except KeyboardInterrupt:
+                    print("\n  ⚠ Test execution interrupted by user")
+                    failed_count += 1
+                    raise  # Re-raise to trigger cleanup
+                except Exception as e:
+                    print(f"  ✗ Error: {e}")
+                    failed_count += 1
+                
+                print()
+            
+            # Summary
+            print("=" * 80)
+            print("Test Suite Complete")
+            print("=" * 80)
+            print(f"Results saved to: {self.results_dir}")
+            print(f"Completed: {completed_count}/{total_tests}")
+            print(f"Failed: {failed_count}/{total_tests}")
+            print()
+            
+            return {
+                'total': total_tests,
+                'completed': completed_count,
+                'failed': failed_count,
+                'results_dir': str(self.results_dir)
+            }
+        except KeyboardInterrupt:
+            print("\n⚠ Test execution interrupted by user")
+            raise  # Re-raise after cleanup
+        finally:
+            # Always stop instance after tests (unless explicitly disabled)
+            if stop_instance_after:
+                print("=== Stopping EC2 Instance ===")
+                try:
+                    self.executor.stop_instance()
+                except Exception as e:
+                    print(f"Warning: Failed to stop instance: {e}")
+                print()
 

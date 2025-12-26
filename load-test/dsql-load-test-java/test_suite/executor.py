@@ -97,6 +97,34 @@ class RemoteExecutor:
         print(f"Warning: SSM agent not online after {timeout} seconds")
         return False
     
+    def stop_instance(self) -> bool:
+        """Stop EC2 instance if it's running."""
+        status = self._get_instance_status()
+        state = status.get('state')
+        
+        if state == 'running':
+            print(f"Stopping instance {self.config.instance_id}...")
+            try:
+                self.ec2.stop_instances(InstanceIds=[self.config.instance_id])
+                
+                # Wait for stopped state
+                waiter = self.ec2.get_waiter('instance_stopped')
+                waiter.wait(
+                    InstanceIds=[self.config.instance_id],
+                    WaiterConfig={'Delay': 5, 'MaxAttempts': 60}
+                )
+                print("Instance stopped")
+                return True
+            except (ClientError, BotoCoreError) as e:
+                print(f"Error stopping instance: {e}")
+                return False
+        elif state in ['stopped', 'stopping']:
+            print(f"Instance is already stopped or stopping (state: {state})")
+            return True
+        else:
+            print(f"Instance state is {state}, cannot stop")
+            return False
+    
     def run_command(self, commands: list[str], timeout: int = 120) -> Tuple[bool, str, str]:
         """
         Run command via SSM, return (success, stdout, stderr).

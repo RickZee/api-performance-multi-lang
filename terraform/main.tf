@@ -714,6 +714,24 @@ module "ec2_auto_stop" {
   tags = local.common_tags
 }
 
+# EC2 Auto-Stop Lambda for Test Runner Instance
+# Monitors SSM sessions, DSQL API calls, and EC2 activity, stops test runner if no activity for 30 minutes
+# Sends email notification when instance is stopped
+module "ec2_auto_stop_test_runner" {
+  count  = var.enable_dsql_test_runner_ec2 && var.enable_aurora_dsql_cluster ? 1 : 0
+  source = "./modules/ec2-auto-stop"
+
+  function_name                  = "${var.project_name}-test-runner-auto-stop"
+  ec2_instance_id                = module.dsql_test_runner[0].instance_id
+  bastion_role_arn               = module.dsql_test_runner[0].iam_role_arn
+  inactivity_hours               = 0.5  # 30 minutes
+  aws_region                     = var.aws_region
+  cloudwatch_logs_retention_days = local.cloudwatch_logs_retention
+  admin_email                    = var.aurora_auto_stop_admin_email  # Set to rick's email in terraform.tfvars
+
+  tags = local.common_tags
+}
+
 # Grant Bastion Host IAM Role Access to DSQL IAM User
 # 
 # DSQL requires IAM authentication even for admin operations, creating a chicken-and-egg problem.
