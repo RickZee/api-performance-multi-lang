@@ -1,0 +1,71 @@
+plugins {
+    id 'java'
+    id 'application'
+}
+
+group = 'com.example'
+version = '1.0.0'
+description = 'Apache Flink Event Routing Application for MSK'
+
+java {
+    sourceCompatibility = '17'
+    targetCompatibility = '17'
+}
+
+repositories {
+    mavenCentral()
+}
+
+dependencies {
+    // Flink Core
+    implementation 'org.apache.flink:flink-streaming-java:1.18.1'
+    implementation 'org.apache.flink:flink-table-api-java-bridge:1.18.1'
+    implementation 'org.apache.flink:flink-table-planner-loader:1.18.1'
+    implementation 'org.apache.flink:flink-clients:1.18.1'
+    
+    // Flink Kafka Connector
+    implementation 'org.apache.flink:flink-connector-kafka:3.0.1-1.18'
+    
+    // AWS MSK IAM Auth
+    implementation 'software.amazon.msk:aws-msk-iam-auth:1.1.9'
+    
+    // JSON Format
+    implementation 'org.apache.flink:flink-json:1.18.1'
+    
+    // Logging
+    implementation 'org.slf4j:slf4j-api:1.7.36'
+    implementation 'org.slf4j:slf4j-log4j12:1.7.36'
+    implementation 'log4j:log4j:1.2.17'
+}
+
+application {
+    mainClass = 'com.example.flink.EventRoutingApplication'
+}
+
+jar {
+    manifest {
+        attributes(
+            'Main-Class': 'com.example.flink.EventRoutingApplication'
+        )
+    }
+    
+    from {
+        configurations.runtimeClasspath.collect { it.isDirectory() ? it : zipTree(it) }
+    }
+    
+    duplicatesStrategy = DuplicatesStrategy.EXCLUDE
+}
+
+tasks.register('fatJar', Jar) {
+    archiveClassifier = 'all'
+    from sourceSets.main.output
+    dependsOn configurations.runtimeClasspath
+    from {
+        configurations.runtimeClasspath.collect { it.isDirectory() ? it : zipTree(it) }
+    }
+    duplicatesStrategy = DuplicatesStrategy.EXCLUDE
+    manifest {
+        attributes 'Main-Class': 'com.example.flink.EventRoutingApplication'
+    }
+}
+

@@ -20,6 +20,7 @@ The system automatically:
 
 **Stream Processors:**
 - **Flink SQL** (Confluent Cloud): Writes to `filtered-*-events-flink` topics
+- **Managed Flink** (AWS MSK): Writes to `filtered-*-events-msk` topics
 - **Spring Boot Kafka Streams**: Writes to `filtered-*-events-spring` topics
 
 Consumers subscribe to the appropriate topic based on which processor is active.
@@ -48,15 +49,32 @@ Consumers subscribe to the appropriate topic based on which processor is active.
 
 ## Quick Start
 
+### Deployment Options
+
+This system supports **3 deployment options**:
+
+1. **Docker-based Local Development** - Local Kafka, Flink, and consumers
+2. **Confluent Cloud** - Fully managed Confluent Cloud with Flink SQL
+3. **AWS MSK + Managed Flink** - AWS managed services (MSK Serverless + Managed Service for Apache Flink)
+
 ### Prerequisites
 
+**For Confluent Cloud:**
 - **Confluent Cloud account** ([sign up](https://confluent.cloud))
 - **Confluent CLI** (`brew install confluentinc/tap/cli`)
 - **PostgreSQL database** (Aurora PostgreSQL or self-managed)
 - **Network connectivity** between Confluent Cloud and PostgreSQL
-- **AWS CLI** configured with appropriate credentials (for bastion host access)
+
+**For AWS MSK:**
+- **AWS Account** with appropriate IAM permissions
+- **Terraform** (`brew install terraform`)
+- **AWS CLI** configured with credentials
+- **PostgreSQL database** (Aurora PostgreSQL or self-managed)
+- **VPC** in target region (us-east-1 recommended)
 
 ### Setup Steps
+
+**Option 1: Confluent Cloud (Recommended for Managed Service)**
 
 1. **Follow the [Confluent Cloud Setup Guide](CONFLUENT_CLOUD_SETUP_GUIDE.md)**
    - Create environment and Kafka cluster
@@ -64,6 +82,15 @@ Consumers subscribe to the appropriate topic based on which processor is active.
    - Create Flink compute pool
    - Deploy CDC connector
    - Deploy Flink SQL statements
+
+**Option 2: AWS MSK + Managed Flink (AWS Native)**
+
+1. **Follow the [AWS MSK Flink Setup Guide](AWS_MSK_FLINK_SETUP_GUIDE.md)**
+   - Deploy infrastructure via Terraform
+   - Set up MSK Serverless cluster
+   - Configure MSK Connect with Debezium
+   - Deploy Managed Flink application
+   - Deploy MSK consumers
 
 2. **Verify the Pipeline**
 
@@ -148,18 +175,19 @@ Consumers subscribe to the appropriate topic based on which processor is active.
 ## Key Features
 
 - **Real-time CDC** from PostgreSQL to Kafka
-- **Intelligent Filtering** via Flink SQL
-- **Auto-scaling** with Confluent Cloud Flink
-- **Schema Management** with Schema Registry
+- **Intelligent Filtering** via Flink SQL or Spring Boot Kafka Streams
+- **Auto-scaling** with Confluent Cloud Flink or AWS Managed Flink
+- **Schema Management** with Schema Registry (Confluent or Glue)
 - **Multi-topic Routing** to consumer-specific topics
-- **Fully Managed** infrastructure (Confluent Cloud)
+- **Multiple Deployment Options**: Docker, Confluent Cloud, or AWS MSK
 
 ## Documentation
 
 | Document | Description |
 |----------|-------------|
 | [ARCHITECTURE.md](ARCHITECTURE.md) | System architecture, data flow, and component details |
-| [CONFLUENT_CLOUD_SETUP_GUIDE.md](CONFLUENT_CLOUD_SETUP_GUIDE.md) | Complete step-by-step setup guide |
+| [CONFLUENT_CLOUD_SETUP_GUIDE.md](CONFLUENT_CLOUD_SETUP_GUIDE.md) | Complete Confluent Cloud setup guide |
+| [AWS_MSK_FLINK_SETUP_GUIDE.md](AWS_MSK_FLINK_SETUP_GUIDE.md) | Complete AWS MSK + Managed Flink setup guide |
 | [BACKEND_IMPLEMENTATION.md](BACKEND_IMPLEMENTATION.md) | Back-end infrastructure (Lambda, Aurora, RDS Proxy) |
 | [ADVANCED_USE_CASES.md](ADVANCED_USE_CASES.md) | Advanced monitoring, testing, and configuration |
 | [DISASTER_RECOVERY.md](DISASTER_RECOVERY.md) | Disaster recovery procedures |

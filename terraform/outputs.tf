@@ -227,3 +227,49 @@ output "bastion_auto_stop_function_arn" {
   description = "EC2 auto-stop Lambda function ARN for bastion host"
   value       = var.enable_bastion_host && var.enable_aurora_dsql_cluster ? module.ec2_auto_stop[0].function_arn : null
 }
+
+# MSK Outputs
+output "msk_cluster_arn" {
+  description = "ARN of the MSK Serverless cluster"
+  value       = var.enable_msk && var.enable_vpc ? module.msk_serverless[0].cluster_arn : null
+}
+
+output "msk_cluster_name" {
+  description = "Name of the MSK Serverless cluster"
+  value       = var.enable_msk && var.enable_vpc ? module.msk_serverless[0].cluster_name : null
+}
+
+output "msk_bootstrap_brokers" {
+  description = "Bootstrap broker addresses for MSK cluster (IAM auth)"
+  value       = var.enable_msk && var.enable_vpc ? module.msk_serverless[0].bootstrap_brokers_sasl_iam : null
+}
+
+output "msk_connect_connector_arn" {
+  description = "ARN of the MSK Connect connector"
+  value       = var.enable_msk && var.enable_vpc && var.enable_aurora ? module.msk_connect[0].connector_arn : null
+}
+
+output "flink_application_arn" {
+  description = "ARN of the Managed Flink application"
+  value       = var.enable_msk && var.enable_vpc ? module.managed_flink[0].application_arn : null
+}
+
+output "flink_application_name" {
+  description = "Name of the Managed Flink application"
+  value       = var.enable_msk && var.enable_vpc ? module.managed_flink[0].application_name : null
+}
+
+output "flink_s3_bucket_name" {
+  description = "S3 bucket name for Flink application artifacts"
+  value       = var.enable_msk && var.enable_vpc ? module.managed_flink[0].s3_bucket_name : null
+}
+
+output "msk_connect_s3_bucket_name" {
+  description = "S3 bucket name for MSK Connect plugin artifacts"
+  value       = var.enable_msk && var.enable_vpc && var.enable_aurora ? module.msk_connect[0].s3_bucket_name : null
+}
+
+output "glue_schema_registry_arn" {
+  description = "ARN of the Glue Schema Registry"
+  value       = var.enable_msk && var.enable_glue_schema_registry ? module.glue_schema_registry[0].registry_arn : null
+}

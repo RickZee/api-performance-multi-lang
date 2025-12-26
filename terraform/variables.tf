@@ -418,3 +418,27 @@ variable "aurora_auto_stop_admin_email" {
   type        = string
   default     = ""
 }
+
+variable "enable_msk" {
+  description = "Whether to create MSK Serverless cluster and related infrastructure"
+  type        = bool
+  default     = false
+}
+
+variable "msk_cluster_name" {
+  description = "Name of the MSK Serverless cluster"
+  type        = string
+  default     = ""
+}
+
+variable "enable_glue_schema_registry" {
+  description = "Whether to create Glue Schema Registry for MSK"
+  type        = bool
+  default     = false
+}
+
+variable "flink_app_jar_key" {
+  description = "S3 key for the Flink application JAR file (relative to S3 bucket created by managed-flink module)"
+  type        = string
+  default     = "flink-app.jar"
+}

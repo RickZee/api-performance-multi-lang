@@ -796,3 +796,120 @@ resource "aws_lambda_invocation" "grant_test_runner_iam_access" {
     module.aurora_dsql,
   ]
 }
+
+# ============================================================================
+# MSK Serverless Cluster Module
+# ============================================================================
+module "msk_serverless" {
+  count  = var.enable_msk && var.enable_vpc ? 1 : 0
+  source = "./modules/msk-serverless"
+
+  cluster_name = var.msk_cluster_name != "" ? var.msk_cluster_name : "${var.project_name}-msk-cluster"
+  vpc_id       = module.vpc[0].vpc_id
+  subnet_ids   = module.vpc[0].private_subnet_ids
+  vpc_cidr     = module.vpc[0].vpc_cidr
+
+  tags = local.common_tags
+}
+
+# ============================================================================
+# MSK Connect Module (Debezium CDC Connector)
+# ============================================================================
+module "msk_connect" {
+  count  = var.enable_msk && var.enable_vpc && var.enable_aurora ? 1 : 0
+  source = "./modules/msk-connect"
+
+  project_name         = var.project_name
+  msk_cluster_name     = module.msk_serverless[0].cluster_name
+  msk_bootstrap_servers = module.msk_serverless[0].bootstrap_brokers_sasl_iam
+  vpc_id               = module.vpc[0].vpc_id
+  subnet_ids           = module.vpc[0].private_subnet_ids
+  vpc_cidr             = module.vpc[0].vpc_cidr
+
+  connector_configuration = {
+    "connector.class"                    = "io.debezium.connector.postgresql.PostgresConnector"
+    "tasks.max"                          = "1"
+    "database.hostname"                  = module.aurora[0].cluster_endpoint
+    "database.port"                      = "5432"
+    "database.user"                      = var.database_user
+    "database.password"                  = var.database_password
+    "database.dbname"                    = var.database_name
+    "database.server.name"               = "aurora-postgres-cdc"
+    "topic.prefix"                       = "aurora-postgres-cdc"
+    "database.sslmode"                  = "require"
+    "table.include.list"                 = "public.event_headers"
+    "plugin.name"                        = "pgoutput"
+    "slot.name"                          = "event_headers_msk_debezium_slot"
+    "publication.name"                   = "event_headers_msk_publication"
+    "publication.autocreate.mode"        = "filtered"
+    "snapshot.mode"                      = "initial"
+    "key.converter"                      = "org.apache.kafka.connect.json.JsonConverter"
+    "key.converter.schemas.enable"       = "false"
+    "value.converter"                    = "org.apache.kafka.connect.json.JsonConverter"
+    "value.converter.schemas.enable"     = "false"
+    "transforms"                         = "unwrap,route"
+    "transforms.unwrap.type"             = "io.debezium.transforms.ExtractNewRecordState"
+    "transforms.unwrap.drop.tombstones"  = "false"
+    "transforms.unwrap.add.fields"       = "op,table,ts_ms"
+    "transforms.unwrap.add.fields.prefix" = "__"
+    "transforms.unwrap.delete.handling.mode" = "rewrite"
+    "transforms.route.type"              = "org.apache.kafka.connect.transforms.RegexRouter"
+    "transforms.route.regex"             = "aurora-postgres-cdc\\.public\\.event_headers"
+    "transforms.route.replacement"       = "raw-event-headers"
+    "errors.tolerance"                   = "all"
+    "errors.log.enable"                  = "true"
+    "errors.log.include.messages"        = "true"
+  }
+
+  connector_mcu_count  = 1
+  connector_min_workers = 1
+  connector_max_workers = 2
+  log_retention_days   = local.cloudwatch_logs_retention
+
+  tags = local.common_tags
+}
+
+# Security group rule: Allow MSK Connect to access Aurora
+resource "aws_security_group_rule" "aurora_from_msk_connect" {
+  count = var.enable_msk && var.enable_vpc && var.enable_aurora ? 1 : 0
+
+  type                     = "ingress"
+  from_port                = 5432
+  to_port                  = 5432
+  protocol                 = "tcp"
+  source_security_group_id = module.msk_connect[0].security_group_id
+  security_group_id        = module.aurora[0].security_group_id
+  description              = "Allow MSK Connect to access Aurora PostgreSQL"
+}
+
+# ============================================================================
+# Managed Service for Apache Flink Module
+# ============================================================================
+module "managed_flink" {
+  count  = var.enable_msk && var.enable_vpc ? 1 : 0
+  source = "./modules/managed-flink"
+
+  project_name         = var.project_name
+  msk_cluster_name     = module.msk_serverless[0].cluster_name
+  msk_bootstrap_servers = module.msk_serverless[0].bootstrap_brokers_sasl_iam
+  flink_app_jar_key    = var.flink_app_jar_key
+  parallelism          = 1
+  parallelism_per_kpu  = 1
+  enable_glue_schema_registry = var.enable_glue_schema_registry
+  log_retention_days   = local.cloudwatch_logs_retention
+
+  tags = local.common_tags
+}
+
+# ============================================================================
+# Glue Schema Registry Module
+# ============================================================================
+module "glue_schema_registry" {
+  count  = var.enable_msk && var.enable_glue_schema_registry ? 1 : 0
+  source = "./modules/glue-schema-registry"
+
+  registry_name = "${var.project_name}-schema-registry"
+  description   = "Schema registry for CDC streaming events"
+
+  tags = local.common_tags
+}
