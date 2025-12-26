@@ -651,6 +651,51 @@ module "s3_endpoint" {
   tags = local.common_tags
 }
 
+# CloudWatch Logs VPC Endpoint (Interface type)
+# Enables Lambda functions and other services in private subnets to send logs without NAT Gateway
+# Reduces NAT Gateway data processing costs
+module "cloudwatch_logs_endpoint" {
+  count  = (var.enable_aurora || var.enable_aurora_dsql_cluster) && (var.enable_python_lambda_pg || var.enable_python_lambda_dsql) ? 1 : 0
+  source = "./modules/cloudwatch-logs-endpoint"
+
+  project_name    = var.project_name
+  vpc_id          = module.vpc[0].vpc_id
+  subnet_ids      = module.vpc[0].private_subnet_ids
+  vpc_cidr_block  = module.vpc[0].vpc_cidr
+
+  tags = local.common_tags
+}
+
+# ECR VPC Endpoints (Interface type)
+# Enables pulling Docker images from ECR without NAT Gateway
+# Useful if EC2 instances or Lambda functions need to pull container images
+module "ecr_endpoint" {
+  count  = (var.enable_aurora || var.enable_aurora_dsql_cluster) && (var.enable_bastion_host || var.enable_dsql_test_runner_ec2) ? 1 : 0
+  source = "./modules/ecr-endpoint"
+
+  project_name    = var.project_name
+  vpc_id          = module.vpc[0].vpc_id
+  subnet_ids      = module.vpc[0].private_subnet_ids
+  vpc_cidr_block  = module.vpc[0].vpc_cidr
+
+  tags = local.common_tags
+}
+
+# Secrets Manager VPC Endpoint (Interface type)
+# Enables accessing secrets from private subnets without NAT Gateway
+# Useful if Lambda functions or EC2 instances need to access secrets
+module "secrets_manager_endpoint" {
+  count  = (var.enable_aurora || var.enable_aurora_dsql_cluster) && (var.enable_python_lambda_pg || var.enable_python_lambda_dsql || var.enable_bastion_host) ? 1 : 0
+  source = "./modules/secrets-manager-endpoint"
+
+  project_name    = var.project_name
+  vpc_id          = module.vpc[0].vpc_id
+  subnet_ids      = module.vpc[0].private_subnet_ids
+  vpc_cidr_block  = module.vpc[0].vpc_cidr
+
+  tags = local.common_tags
+}
+
 # DSQL Test Runner EC2 Instance - Separate EC2 instance for load testing
 # Access via SSM Session Manager only (no SSH, in private subnet)
 module "dsql_test_runner" {
@@ -667,6 +712,7 @@ module "dsql_test_runner" {
   dsql_kms_key_arn                = module.aurora_dsql[0].kms_key_arn
   aws_region                      = var.aws_region
   s3_bucket_name                  = aws_s3_bucket.lambda_deployments.id
+  enable_ipv6                     = var.enable_ipv6
 
   tags = local.common_tags
 }
@@ -689,9 +735,11 @@ module "bastion_host" {
   dsql_kms_key_arn                = module.aurora_dsql[0].kms_key_arn
   aws_region                      = var.aws_region
   s3_bucket_name                  = aws_s3_bucket.lambda_deployments.id
+  msk_cluster_name                = var.enable_msk && var.enable_vpc ? module.msk_serverless[0].cluster_name : ""
   ssh_public_key                  = var.bastion_ssh_public_key
   ssh_allowed_cidr_blocks         = var.bastion_ssh_allowed_cidr_blocks
   allocate_elastic_ip            = var.bastion_allocate_elastic_ip
+  enable_ipv6                     = var.enable_ipv6
 
   tags = local.common_tags
 }

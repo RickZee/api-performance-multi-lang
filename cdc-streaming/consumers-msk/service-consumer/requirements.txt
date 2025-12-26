@@ -1,3 +1,2 @@
-confluent-kafka>=2.3.0
-aws-msk-iam-sasl-signer-python>=1.0.0
-
+# Consumer-specific requirements (if any)
+# Shared requirements are in ../shared/requirements.txt

@@ -427,23 +427,23 @@ For detailed Flink setup, configuration, and SQL job deployment, see [CONFLUENT_
 
 The system includes 4 dockerized consumers, one for each filtered topic:
 
-1. **Loan Consumer** (`consumers/loan-consumer/`)
+1. **Loan Consumer** (`consumers-confluent/loan-consumer/`)
    - Topic: `filtered-loan-created-events-flink` or `filtered-loan-created-events-spring`
    - Consumer Group: `loan-consumer-group`
    - Processes `LoanCreated` events
    - **Note**: Topic name depends on which processor is active (configured via `KAFKA_TOPIC` env var)
 
-2. **Loan Payment Consumer** (`consumers/loan-payment-consumer/`)
+2. **Loan Payment Consumer** (`consumers-confluent/loan-payment-consumer/`)
    - Topic: `filtered-loan-payment-submitted-events-flink` or `filtered-loan-payment-submitted-events-spring`
    - Consumer Group: `loan-payment-consumer-group`
    - Processes `LoanPaymentSubmitted` events
 
-3. **Service Consumer** (`consumers/service-consumer/`)
+3. **Service Consumer** (`consumers-confluent/service-consumer/`)
    - Topic: `filtered-service-events-flink` or `filtered-service-events-spring`
    - Consumer Group: `service-consumer-group`
    - Processes `CarServiceDone` events
 
-4. **Car Consumer** (`consumers/car-consumer/`)
+4. **Car Consumer** (`consumers-confluent/car-consumer/`)
    - Topic: `filtered-car-created-events-flink` or `filtered-car-created-events-spring`
    - Consumer Group: `car-consumer-group`
    - Processes `CarCreated` events
@@ -572,7 +572,7 @@ Consumers receive events in the relational structure format defined in the [Data
 
 3. **Process Entities**: Access nested entity data from the parsed `event_data`
 
-See `consumers/loan-consumer/consumer.py` for a complete implementation example.
+See `consumers-confluent/loan-consumer/consumer.py` for a complete implementation example.
 
 **Key Points**:
 

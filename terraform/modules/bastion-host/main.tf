@@ -121,6 +121,45 @@ resource "aws_iam_role_policy" "s3_read" {
   })
 }
 
+# IAM policy for MSK access (for topic creation and management)
+resource "aws_iam_role_policy" "msk_access" {
+  count = var.msk_cluster_name != "" ? 1 : 0
+  name  = "${var.project_name}-bastion-msk-access"
+  role  = aws_iam_role.bastion.id
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect = "Allow"
+        Action = [
+          "kafka-cluster:Connect",
+          "kafka-cluster:AlterCluster",
+          "kafka-cluster:DescribeCluster"
+        ]
+        Resource = "arn:aws:kafka:${var.aws_region}:${data.aws_caller_identity.current.account_id}:cluster/${var.msk_cluster_name}/*"
+      },
+      {
+        Effect = "Allow"
+        Action = [
+          "kafka-cluster:*Topic*",
+          "kafka-cluster:WriteData",
+          "kafka-cluster:ReadData"
+        ]
+        Resource = "arn:aws:kafka:${var.aws_region}:${data.aws_caller_identity.current.account_id}:topic/${var.msk_cluster_name}/*"
+      },
+      {
+        Effect = "Allow"
+        Action = [
+          "kafka-cluster:AlterGroup",
+          "kafka-cluster:DescribeGroup"
+        ]
+        Resource = "arn:aws:kafka:${var.aws_region}:${data.aws_caller_identity.current.account_id}:group/${var.msk_cluster_name}/*"
+      }
+    ]
+  })
+}
+
 # IAM Instance Profile
 resource "aws_iam_instance_profile" "bastion" {
   name = "${var.project_name}-bastion-profile"
@@ -171,7 +210,41 @@ resource "aws_security_group" "bastion" {
     cidr_blocks = ["0.0.0.0/0"]
   }
 
-  # Outbound to Confluent Cloud Kafka (port 9092)
+  # IPv6 egress for HTTPS (if IPv6 is enabled)
+  # Enables access to GitHub and other services over IPv6 without NAT Gateway
+  dynamic "egress" {
+    for_each = var.enable_ipv6 ? [1] : []
+    content {
+      description      = "Allow HTTPS outbound (IPv6)"
+      from_port        = 443
+      to_port          = 443
+      protocol         = "tcp"
+      ipv6_cidr_blocks = ["::/0"]
+    }
+  }
+
+  # IPv6 egress for HTTP (if IPv6 is enabled)
+  dynamic "egress" {
+    for_each = var.enable_ipv6 ? [1] : []
+    content {
+      description      = "Allow HTTP outbound (IPv6)"
+      from_port        = 80
+      to_port          = 80
+      protocol         = "tcp"
+      ipv6_cidr_blocks = ["::/0"]
+    }
+  }
+
+  # Outbound to MSK Serverless (port 9098 for IAM auth)
+  egress {
+    description = "Allow outbound to MSK Serverless (IAM auth)"
+    from_port   = 9098
+    to_port     = 9098
+    protocol    = "tcp"
+    cidr_blocks = [var.vpc_cidr_block]
+  }
+
+  # Outbound to Confluent Cloud Kafka (port 9092) - kept for backward compatibility
   egress {
     description = "Allow outbound to Confluent Cloud Kafka"
     from_port   = 9092
@@ -215,6 +288,14 @@ resource "aws_instance" "bastion" {
 
   # Associate Elastic IP if requested
   associate_public_ip_address = true
+
+  # Increase root volume size to 30GB to accommodate Kafka tools and other dependencies
+  # AMI snapshot requires minimum 30GB, and we need extra space for Kafka (~300MB+ extracted)
+  root_block_device {
+    volume_size = 30
+    volume_type = "gp3"
+    encrypted   = true
+  }
 
   # User data to install PostgreSQL client, AWS CLI, Python 3, and validation dependencies
   user_data = <<-EOF

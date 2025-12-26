@@ -93,6 +93,9 @@ resource "aws_eip" "nat" {
 }
 
 # NAT Gateway
+# ⚠️ COST WARNING: NAT Gateway costs $32.40/month base charge + $0.045/GB data processing.
+# With IPv6 enabled (enable_ipv6 = true), NAT Gateway is typically NOT needed for outbound internet access.
+# Consider using VPC endpoints for AWS services and IPv6 for external services to avoid NAT Gateway costs.
 resource "aws_nat_gateway" "this" {
   count = var.enable_nat_gateway ? 1 : 0
 

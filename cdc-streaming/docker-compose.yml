@@ -104,7 +104,7 @@ services:
   # Loan Consumer (Spring)
   loan-consumer:
     build:
-      context: ./consumers/loan-consumer
+      context: ./consumers-confluent/loan-consumer
       dockerfile: Dockerfile
     container_name: cdc-loan-consumer-spring
     hostname: loan-consumer-spring
@@ -124,7 +124,7 @@ services:
   # Loan Payment Consumer (Spring)
   loan-payment-consumer:
     build:
-      context: ./consumers/loan-payment-consumer
+      context: ./consumers-confluent/loan-payment-consumer
       dockerfile: Dockerfile
     container_name: cdc-loan-payment-consumer-spring
     hostname: loan-payment-consumer-spring
@@ -144,7 +144,7 @@ services:
   # Service Consumer (Spring)
   service-consumer:
     build:
-      context: ./consumers/service-consumer
+      context: ./consumers-confluent/service-consumer
       dockerfile: Dockerfile
     container_name: cdc-service-consumer-spring
     hostname: service-consumer-spring
@@ -164,7 +164,7 @@ services:
   # Car Consumer (Spring)
   car-consumer:
     build:
-      context: ./consumers/car-consumer
+      context: ./consumers-confluent/car-consumer
       dockerfile: Dockerfile
     container_name: cdc-car-consumer-spring
     hostname: car-consumer-spring
@@ -188,7 +188,7 @@ services:
   # Loan Consumer (Flink)
   loan-consumer-flink:
     build:
-      context: ./consumers/loan-consumer
+      context: ./consumers-confluent/loan-consumer
       dockerfile: Dockerfile
     container_name: cdc-loan-consumer-flink
     hostname: loan-consumer-flink
@@ -208,7 +208,7 @@ services:
   # Loan Payment Consumer (Flink)
   loan-payment-consumer-flink:
     build:
-      context: ./consumers/loan-payment-consumer
+      context: ./consumers-confluent/loan-payment-consumer
       dockerfile: Dockerfile
     container_name: cdc-loan-payment-consumer-flink
     hostname: loan-payment-consumer-flink
@@ -228,7 +228,7 @@ services:
   # Service Consumer (Flink)
   service-consumer-flink:
     build:
-      context: ./consumers/service-consumer
+      context: ./consumers-confluent/service-consumer
       dockerfile: Dockerfile
     container_name: cdc-service-consumer-flink
     hostname: service-consumer-flink
@@ -248,7 +248,7 @@ services:
   # Car Consumer (Flink)
   car-consumer-flink:
     build:
-      context: ./consumers/car-consumer
+      context: ./consumers-confluent/car-consumer
       dockerfile: Dockerfile
     container_name: cdc-car-consumer-flink
     hostname: car-consumer-flink

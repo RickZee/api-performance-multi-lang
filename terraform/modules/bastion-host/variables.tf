@@ -64,6 +64,18 @@ variable "allocate_elastic_ip" {
   default     = false
 }
 
+variable "msk_cluster_name" {
+  description = "MSK cluster name for IAM permissions (optional)"
+  type        = string
+  default     = ""
+}
+
+variable "enable_ipv6" {
+  description = "Enable IPv6 support in security groups"
+  type        = bool
+  default     = false
+}
+
 variable "tags" {
   description = "Tags to apply to resources"
   type        = map(string)

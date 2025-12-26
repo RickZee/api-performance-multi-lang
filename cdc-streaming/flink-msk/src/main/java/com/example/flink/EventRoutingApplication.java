@@ -2,6 +2,7 @@ package com.example.flink;
 
 import org.apache.flink.api.common.restartstrategy.RestartStrategies;
 import org.apache.flink.configuration.Configuration;
+import org.apache.flink.configuration.GlobalConfiguration;
 import org.apache.flink.configuration.RestOptions;
 import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
 import org.apache.flink.table.api.EnvironmentSettings;
@@ -28,10 +29,38 @@ public class EventRoutingApplication {
     private static final String SQL_FILE = "/business-events-routing-msk.sql";
     
     public static void main(String[] args) throws Exception {
-        // Get bootstrap servers from environment variable or use default
-        String bootstrapServers = System.getenv("BOOTSTRAP_SERVERS");
+        // Get bootstrap servers from multiple sources (priority order):
+        // 1. System property
+        // 2. Environment variable
+        // 3. Command line argument
+        // 4. Flink configuration (from property groups)
+        String bootstrapServers = System.getProperty("bootstrap.servers");
         if (bootstrapServers == null || bootstrapServers.isEmpty()) {
-            throw new IllegalArgumentException("BOOTSTRAP_SERVERS environment variable is required");
+            bootstrapServers = System.getenv("BOOTSTRAP_SERVERS");
+        }
+        if ((bootstrapServers == null || bootstrapServers.isEmpty()) && args.length > 0) {
+            bootstrapServers = args[0];
+        }
+        // Try to read from properties file in resources
+        if (bootstrapServers == null || bootstrapServers.isEmpty()) {
+            try {
+                java.util.Properties props = new java.util.Properties();
+                try (InputStream is = EventRoutingApplication.class.getResourceAsStream("/application.properties")) {
+                    if (is != null) {
+                        props.load(is);
+                        bootstrapServers = props.getProperty("bootstrap.servers");
+                        if (bootstrapServers != null && !bootstrapServers.isEmpty()) {
+                            LOG.info("Found bootstrap servers from properties file: {}", bootstrapServers);
+                        }
+                    }
+                }
+            } catch (Exception e) {
+                LOG.warn("Could not read bootstrap servers from properties file: {}", e.getMessage());
+            }
+        }
+        // Final check - throw error if still not found
+        if (bootstrapServers == null || bootstrapServers.isEmpty()) {
+            throw new IllegalArgumentException("BOOTSTRAP_SERVERS environment variable, bootstrap.servers system property, command line argument, or application.properties file is required");
         }
         
         LOG.info("Starting Flink Event Routing Application");
@@ -47,6 +76,26 @@ public class EventRoutingApplication {
             .build();
         StreamTableEnvironment tableEnv = StreamTableEnvironment.create(env, settings);
         
+        // Try to get bootstrap servers from TableEnvironment configuration if not already set
+        // (This is a fallback, but properties file should have already provided it)
+        if (bootstrapServers == null || bootstrapServers.isEmpty()) {
+            try {
+                // Try reading from TableEnvironment's configuration
+                // Property groups might be accessible via the table config
+                Configuration tableConfig = tableEnv.getConfig().getConfiguration();
+                String configValue = tableConfig.getString("kafka.source.bootstrap.servers", null);
+                if (configValue == null || configValue.isEmpty()) {
+                    configValue = tableConfig.getString("kafka.sink.bootstrap.servers", null);
+                }
+                if (configValue != null && !configValue.isEmpty()) {
+                    bootstrapServers = configValue;
+                    LOG.info("Found bootstrap servers from TableEnvironment config: {}", bootstrapServers);
+                }
+            } catch (Exception e) {
+                LOG.warn("Could not read bootstrap servers from TableEnvironment: {}", e.getMessage());
+            }
+        }
+        
         // Load and execute SQL statements
         String sqlContent = loadSQLFile();
         
@@ -54,14 +103,38 @@ public class EventRoutingApplication {
         sqlContent = sqlContent.replace("${bootstrap.servers}", bootstrapServers);
         
         // Split SQL into individual statements and execute
-        String[] statements = sqlContent.split(";");
+        // Use a more robust splitting that handles semicolons in string literals
+        java.util.List<String> statements = new java.util.ArrayList<>();
+        StringBuilder currentStatement = new StringBuilder();
+        boolean inSingleQuote = false;
+        boolean inDoubleQuote = false;
         
-        for (String statement : statements) {
-            statement = statement.trim();
-            if (statement.isEmpty() || statement.startsWith("--")) {
+        for (int i = 0; i < sqlContent.length(); i++) {
+            char c = sqlContent.charAt(i);
+            
+            if (c == '\'' && (i == 0 || sqlContent.charAt(i - 1) != '\\')) {
+                inSingleQuote = !inSingleQuote;
+            } else if (c == '"' && (i == 0 || sqlContent.charAt(i - 1) != '\\')) {
+                inDoubleQuote = !inDoubleQuote;
+            } else if (c == ';' && !inSingleQuote && !inDoubleQuote) {
+                String stmt = currentStatement.toString().trim();
+                if (!stmt.isEmpty() && !stmt.startsWith("--")) {
+                    statements.add(stmt);
+                }
+                currentStatement = new StringBuilder();
                 continue;
             }
             
+            currentStatement.append(c);
+        }
+        
+        // Add the last statement if any
+        String lastStmt = currentStatement.toString().trim();
+        if (!lastStmt.isEmpty() && !lastStmt.startsWith("--")) {
+            statements.add(lastStmt);
+        }
+        
+        for (String statement : statements) {
             // Remove comments
             statement = removeComments(statement);
             if (statement.trim().isEmpty()) {

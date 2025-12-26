@@ -21,6 +21,9 @@
 #   --skip-clear-logs   Skip clearing consumer logs before validation
 #   --skip-to-step N    Resume from step N (1-11)
 #   --debug             Enable verbose output with timing
+#   --skip-java-service Skip Spring Boot stream processor (Java service)
+#   --skip-confluent    Skip Confluent Cloud pipeline validation
+#   --skip-aws-msk      Skip AWS MSK pipeline validation
 #
 # Requirements:
 #   - Terraform outputs available (Aurora endpoint, Lambda API URL, credentials)
@@ -77,6 +80,9 @@ SKIP_TO_STEP=0
 DEBUG=false
 FAST_MODE=false
 WAIT_TIME=15
+SKIP_JAVA_SERVICE=false
+SKIP_CONFLUENT=false
+SKIP_AWS_MSK=false
 
 # Parse command-line arguments
 while [[ $# -gt 0 ]]; do
@@ -109,6 +115,18 @@ while [[ $# -gt 0 ]]; do
       ;;
     --debug)
       DEBUG=true
+      shift
+      ;;
+    --skip-java-service)
+      SKIP_JAVA_SERVICE=true
+      shift
+      ;;
+    --skip-confluent)
+      SKIP_CONFLUENT=true
+      shift
+      ;;
+    --skip-aws-msk)
+      SKIP_AWS_MSK=true
       shift
       ;;
     *)
@@ -213,11 +231,16 @@ if [ "$SKIP_TO_STEP" -le 1 ] && [ "$SKIP_PREREQUISITES" = false ]; then
     pass "terraform found"
   fi
 
-  if ! command -v confluent &> /dev/null; then
-    fail "Confluent CLI not found"
-    MISSING_DEPS=1
+  # Only require Confluent CLI if not skipping Confluent
+  if [ "$SKIP_CONFLUENT" = false ]; then
+    if ! command -v confluent &> /dev/null; then
+      fail "Confluent CLI not found (required when not using --skip-confluent)"
+      MISSING_DEPS=1
+    else
+      pass "Confluent CLI found"
+    fi
   else
-    pass "Confluent CLI found"
+    info "Confluent CLI check skipped (--skip-confluent flag)"
   fi
 
   if ! command -v docker &> /dev/null; then
@@ -253,15 +276,22 @@ if [ "$SKIP_TO_STEP" -le 1 ] && [ "$SKIP_PREREQUISITES" = false ]; then
     exit 1
   fi
 
-  # Check Confluent Cloud login (optional - only needed for Kafka validation)
-  ensure_confluent_login || true
+  # Check Confluent Cloud login (only if not skipping Confluent)
+  if [ "$SKIP_CONFLUENT" = false ]; then
+    ensure_confluent_login || true
+  else
+    info "Skipping Confluent Cloud login check (--skip-confluent flag)"
+  fi
 
   step_end
   save_checkpoint "1"
   echo ""
 elif [ "$SKIP_PREREQUISITES" = true ]; then
   info "Skipping prerequisites check (--skip-prereqs flag)"
-  ensure_confluent_login || true
+  # Only check Confluent login if not skipping Confluent
+  if [ "$SKIP_CONFLUENT" = false ]; then
+    ensure_confluent_login || true
+  fi
 fi
 
 # Step 2: Start Aurora Cluster
@@ -454,23 +484,49 @@ if [ "$SKIP_TO_STEP" -le 3 ]; then
   cd "$PROJECT_ROOT/cdc-streaming"
   
   # Detect deployment option (Confluent Cloud vs MSK)
-  DEPLOYMENT_OPTION="confluent"
+  # Respect skip flags - if both are skipped, error out
+  DEPLOYMENT_OPTION=""
   MSK_ENABLED=false
   
-  # Check if MSK is enabled via Terraform
-  cd "$PROJECT_ROOT/terraform"
-  if terraform output -raw enable_msk 2>/dev/null | grep -q "true"; then
+  # If Confluent is skipped, force MSK (if not also skipped)
+  if [ "$SKIP_CONFLUENT" = true ]; then
+    if [ "$SKIP_AWS_MSK" = true ]; then
+      fail "Both Confluent and AWS MSK are skipped. At least one pipeline option must be enabled."
+      exit 1
+    fi
     MSK_ENABLED=true
     DEPLOYMENT_OPTION="msk"
-    info "MSK deployment detected"
-  elif [ -n "${KAFKA_BOOTSTRAP_SERVERS:-}" ] && echo "$KAFKA_BOOTSTRAP_SERVERS" | grep -q "kafka-serverless\|msk"; then
-    MSK_ENABLED=true
-    DEPLOYMENT_OPTION="msk"
-    info "MSK deployment detected (from bootstrap servers)"
+    info "Confluent skipped, forcing MSK deployment"
+  # If MSK is skipped, force Confluent
+  elif [ "$SKIP_AWS_MSK" = true ]; then
+    DEPLOYMENT_OPTION="confluent"
+    info "MSK skipped, using Confluent Cloud deployment"
+  # Otherwise, auto-detect based on Terraform/environment
   else
-    info "Confluent Cloud deployment detected"
+    # Check for MSK bootstrap servers first (most reliable)
+    cd "$PROJECT_ROOT/terraform"
+    MSK_BOOTSTRAP=$(terraform output -raw msk_bootstrap_brokers 2>/dev/null || echo "")
+    cd "$PROJECT_ROOT/cdc-streaming"
+    
+    if [ -n "$MSK_BOOTSTRAP" ] && echo "$MSK_BOOTSTRAP" | grep -q "kafka-serverless\|msk"; then
+      MSK_ENABLED=true
+      DEPLOYMENT_OPTION="msk"
+      info "MSK deployment detected (from Terraform bootstrap servers)"
+    elif [ -n "${KAFKA_BOOTSTRAP_SERVERS:-}" ] && echo "$KAFKA_BOOTSTRAP_SERVERS" | grep -q "kafka-serverless\|msk"; then
+      MSK_ENABLED=true
+      DEPLOYMENT_OPTION="msk"
+      info "MSK deployment detected (from environment bootstrap servers)"
+    else
+      DEPLOYMENT_OPTION="confluent"
+      info "Confluent Cloud deployment detected (default)"
+    fi
   fi
-  cd "$PROJECT_ROOT/cdc-streaming"
+  
+  # Final check: ensure we have a deployment option
+  if [ -z "$DEPLOYMENT_OPTION" ]; then
+    fail "Could not determine deployment option. Check Terraform outputs or environment variables."
+    exit 1
+  fi
   
   # Check if docker-compose file exists
   if [ ! -f "docker-compose.yml" ]; then
@@ -482,8 +538,8 @@ if [ "$SKIP_TO_STEP" -le 3 ]; then
   info "Checking consumer status..."
   
   if [ "$MSK_ENABLED" = true ]; then
-    # MSK consumers: 4 consumers with -msk suffix
-    ALL_CONSUMERS="loan-consumer-msk loan-payment-consumer-msk car-consumer-msk service-consumer-msk"
+    # MSK consumers: 4 consumers (service names match Confluent, container names have -msk suffix)
+    ALL_CONSUMERS="loan-consumer loan-payment-consumer car-consumer service-consumer"
     EXPECTED_COUNT=4
     COMPOSE_FILE="docker-compose.msk.yml"
     
@@ -565,7 +621,7 @@ if [ "$SKIP_TO_STEP" -le 3 ]; then
     startup_elapsed=0
     while [ $startup_elapsed -lt $max_startup_wait ]; do
       if [ "$MSK_ENABLED" = true ]; then
-        RUNNING_COUNT=$(docker ps --format '{{.Names}}' | grep -E "(loan-consumer-msk|loan-payment-consumer-msk|car-consumer-msk|service-consumer-msk)" | wc -l | tr -d ' ')
+        RUNNING_COUNT=$(docker ps --format '{{.Names}}' | grep -E "(cdc-loan-consumer-msk|cdc-loan-payment-consumer-msk|cdc-car-consumer-msk|cdc-service-consumer-msk)" | wc -l | tr -d ' ')
       else
         RUNNING_COUNT=$(docker ps --format '{{.Names}}' | grep -E "cdc-(car-consumer|loan-consumer|loan-payment-consumer|service-consumer)" | wc -l | tr -d ' ')
       fi
@@ -684,7 +740,7 @@ if [ "$SKIP_TO_STEP" -le 5 ] && [ "$SKIP_CLEAR_LOGS" = false ]; then
     # Clear MSK consumer logs
     cd "$PROJECT_ROOT/cdc-streaming"
     if docker-compose -f docker-compose.msk.yml ps 2>/dev/null | grep -q "Up"; then
-      docker-compose -f docker-compose.msk.yml restart loan-consumer-msk loan-payment-consumer-msk car-consumer-msk service-consumer-msk 2>&1 | tail -5
+      docker-compose -f docker-compose.msk.yml restart loan-consumer loan-payment-consumer car-consumer service-consumer 2>&1 | tail -5
       pass "MSK consumer logs cleared and consumers recreated"
     else
       warn "MSK consumers not running, skipping log clear"
@@ -758,7 +814,7 @@ else
 fi
 
 # Step 7: Start Stream Processor
-if [ "$SKIP_TO_STEP" -le 7 ]; then
+if [ "$SKIP_TO_STEP" -le 7 ] && [ "$SKIP_JAVA_SERVICE" = false ]; then
   step_start "Start Stream Processor"
   section "Step 7: Start Stream Processor"
   echo ""
@@ -823,6 +879,10 @@ if [ "$SKIP_TO_STEP" -le 7 ]; then
   step_end
   save_checkpoint "7"
   echo ""
+elif [ "$SKIP_JAVA_SERVICE" = true ]; then
+  info "Skipping Java service (Spring Boot stream processor) - --skip-java-service flag"
+  save_checkpoint "7"
+  echo ""
 fi
 
 # Step 8: Wait for CDC Propagation
@@ -854,19 +914,23 @@ if [ "$SKIP_TO_STEP" -le 9 ]; then
   fi
 
   if [ "$DEPLOYMENT_OPTION" = "msk" ]; then
-    # MSK topic validation
-    info "Validating MSK topics..."
-    
-    # Get MSK bootstrap servers from Terraform
-    cd "$PROJECT_ROOT/terraform"
-    MSK_BOOTSTRAP_SERVERS=$(terraform output -raw msk_bootstrap_brokers 2>/dev/null || echo "")
-    AWS_REGION=$(terraform output -raw aws_region 2>/dev/null || echo "us-east-1")
-    cd "$PROJECT_ROOT"
-    
-    if [ -z "$MSK_BOOTSTRAP_SERVERS" ]; then
-      warn "MSK bootstrap servers not found in Terraform outputs"
+    if [ "$SKIP_AWS_MSK" = true ]; then
+      warn "Skipping MSK topic validation (--skip-aws-msk flag)"
       jq '.msk_validated = "skipped"' "$RESULTS_FILE" > "$RESULTS_FILE.tmp" && mv "$RESULTS_FILE.tmp" "$RESULTS_FILE"
     else
+      # MSK topic validation
+      info "Validating MSK topics..."
+      
+      # Get MSK bootstrap servers from Terraform
+      cd "$PROJECT_ROOT/terraform"
+      MSK_BOOTSTRAP_SERVERS=$(terraform output -raw msk_bootstrap_brokers 2>/dev/null || echo "")
+      AWS_REGION=$(terraform output -raw aws_region 2>/dev/null || echo "us-east-1")
+      cd "$PROJECT_ROOT"
+      
+      if [ -z "$MSK_BOOTSTRAP_SERVERS" ]; then
+        warn "MSK bootstrap servers not found in Terraform outputs"
+        jq '.msk_validated = "skipped"' "$RESULTS_FILE" > "$RESULTS_FILE.tmp" && mv "$RESULTS_FILE.tmp" "$RESULTS_FILE"
+      else
       # Validate MSK topics using AWS CLI or Kafka tools
       # Note: MSK topic validation requires Kafka client tools or AWS SDK
       info "MSK Bootstrap Servers: $MSK_BOOTSTRAP_SERVERS"
@@ -891,11 +955,15 @@ if [ "$SKIP_TO_STEP" -le 9 ]; then
         info "  - AWS SDK/CLI with proper IAM permissions"
         jq '.msk_validated = "skipped"' "$RESULTS_FILE" > "$RESULTS_FILE.tmp" && mv "$RESULTS_FILE.tmp" "$RESULTS_FILE"
       fi
+      fi
     fi
   else
     # Confluent Cloud topic validation
+    if [ "$SKIP_CONFLUENT" = true ]; then
+      warn "Skipping Confluent Cloud topic validation (--skip-confluent flag)"
+      jq '.kafka_validated = "skipped"' "$RESULTS_FILE" > "$RESULTS_FILE.tmp" && mv "$RESULTS_FILE.tmp" "$RESULTS_FILE"
     # Check if Confluent is logged in before attempting Kafka validation
-    if confluent environment list &> /dev/null; then
+    elif confluent environment list &> /dev/null; then
       # Determine which processor to validate based on which is running
       # NOTE: Each processor writes only to its own topics:
       #   - Flink SQL writes to -flink topics only
@@ -944,22 +1012,26 @@ if [ "$SKIP_TO_STEP" -le 10 ]; then
   fi
 
   if [ "$DEPLOYMENT_OPTION" = "msk" ]; then
-    # MSK consumer validation
-    info "Validating 4 MSK consumers:"
-    info "  - loan-consumer-msk (from filtered-loan-created-events-msk)"
-    info "  - loan-payment-consumer-msk (from filtered-loan-payment-submitted-events-msk)"
-    info "  - car-consumer-msk (from filtered-car-created-events-msk)"
-    info "  - service-consumer-msk (from filtered-service-events-msk)"
-    echo ""
-    
-    cd "$PROJECT_ROOT/cdc-streaming"
-    
-    # Check each MSK consumer for received events
-    MSK_CONSUMERS_VALIDATED=0
-    MSK_CONSUMERS_TOTAL=4
-    
-    for consumer in loan-consumer-msk loan-payment-consumer-msk car-consumer-msk service-consumer-msk; do
-      if docker ps --format '{{.Names}}' | grep -q "$consumer"; then
+    if [ "$SKIP_AWS_MSK" = true ]; then
+      warn "Skipping MSK consumer validation (--skip-aws-msk flag)"
+      jq '.msk_consumers_validated = "skipped"' "$RESULTS_FILE" > "$RESULTS_FILE.tmp" && mv "$RESULTS_FILE.tmp" "$RESULTS_FILE"
+    else
+      # MSK consumer validation
+      info "Validating 4 MSK consumers:"
+      info "  - cdc-loan-consumer-msk (from filtered-loan-created-events-msk)"
+      info "  - cdc-loan-payment-consumer-msk (from filtered-loan-payment-submitted-events-msk)"
+      info "  - cdc-car-consumer-msk (from filtered-car-created-events-msk)"
+      info "  - cdc-service-consumer-msk (from filtered-service-events-msk)"
+      echo ""
+      
+      cd "$PROJECT_ROOT/cdc-streaming"
+      
+      # Check each MSK consumer for received events
+      MSK_CONSUMERS_VALIDATED=0
+      MSK_CONSUMERS_TOTAL=4
+      
+      for consumer in cdc-loan-consumer-msk cdc-loan-payment-consumer-msk cdc-car-consumer-msk cdc-service-consumer-msk; do
+        if docker ps --format '{{.Names}}' | grep -q "$consumer"; then
         # Check consumer logs for event processing
         LOG_COUNT=$(docker logs "$consumer" 2>&1 | grep -c "Event.*Received.*MSK" || echo "0")
         if [ "$LOG_COUNT" -gt 0 ]; then
@@ -976,26 +1048,32 @@ if [ "$SKIP_TO_STEP" -le 10 ]; then
     
     cd "$PROJECT_ROOT"
     
-    if [ $MSK_CONSUMERS_VALIDATED -eq $MSK_CONSUMERS_TOTAL ]; then
-      pass "All $MSK_CONSUMERS_TOTAL MSK consumers validated successfully"
-      jq '.msk_consumers_validated = true' "$RESULTS_FILE" > "$RESULTS_FILE.tmp" && mv "$RESULTS_FILE.tmp" "$RESULTS_FILE"
-    else
-      fail "Only $MSK_CONSUMERS_VALIDATED/$MSK_CONSUMERS_TOTAL MSK consumers validated"
-      jq '.msk_consumers_validated = false' "$RESULTS_FILE" > "$RESULTS_FILE.tmp" && mv "$RESULTS_FILE.tmp" "$RESULTS_FILE"
+      if [ $MSK_CONSUMERS_VALIDATED -eq $MSK_CONSUMERS_TOTAL ]; then
+        pass "All $MSK_CONSUMERS_TOTAL MSK consumers validated successfully"
+        jq '.msk_consumers_validated = true' "$RESULTS_FILE" > "$RESULTS_FILE.tmp" && mv "$RESULTS_FILE.tmp" "$RESULTS_FILE"
+      else
+        fail "Only $MSK_CONSUMERS_VALIDATED/$MSK_CONSUMERS_TOTAL MSK consumers validated"
+        jq '.msk_consumers_validated = false' "$RESULTS_FILE" > "$RESULTS_FILE.tmp" && mv "$RESULTS_FILE.tmp" "$RESULTS_FILE"
+      fi
     fi
   else
+    if [ "$SKIP_CONFLUENT" = true ]; then
+      warn "Skipping Confluent Cloud consumer validation (--skip-confluent flag)"
+      jq '.consumers_validated = "skipped"' "$RESULTS_FILE" > "$RESULTS_FILE.tmp" && mv "$RESULTS_FILE.tmp" "$RESULTS_FILE"
+    else
     # Confluent Cloud consumer validation
     info "Validating all 8 consumers:"
     info "  - 4 Spring consumers (from filtered-*-events-spring topics)"
     info "  - 4 Flink consumers (from filtered-*-events-flink topics)"
     echo ""
 
-    if "$SCRIPT_DIR/validate-consumers.sh" "$EVENTS_FILE"; then
-      pass "All 8 consumers validated successfully"
-      jq '.consumers_validated = true' "$RESULTS_FILE" > "$RESULTS_FILE.tmp" && mv "$RESULTS_FILE.tmp" "$RESULTS_FILE"
-    else
-      fail "Consumer validation failed"
-      jq '.consumers_validated = false' "$RESULTS_FILE" > "$RESULTS_FILE.tmp" && mv "$RESULTS_FILE.tmp" "$RESULTS_FILE"
+      if "$SCRIPT_DIR/validate-consumers.sh" "$EVENTS_FILE"; then
+        pass "All 8 consumers validated successfully"
+        jq '.consumers_validated = true' "$RESULTS_FILE" > "$RESULTS_FILE.tmp" && mv "$RESULTS_FILE.tmp" "$RESULTS_FILE"
+      else
+        fail "Consumer validation failed"
+        jq '.consumers_validated = false' "$RESULTS_FILE" > "$RESULTS_FILE.tmp" && mv "$RESULTS_FILE.tmp" "$RESULTS_FILE"
+      fi
     fi
   fi
   

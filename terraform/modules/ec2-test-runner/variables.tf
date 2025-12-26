@@ -51,6 +51,12 @@ variable "s3_bucket_name" {
   default     = ""
 }
 
+variable "enable_ipv6" {
+  description = "Enable IPv6 support in security groups"
+  type        = bool
+  default     = false
+}
+
 variable "tags" {
   description = "Tags to apply to resources"
   type        = map(string)

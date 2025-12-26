@@ -180,6 +180,43 @@ resource "aws_security_group" "test_runner" {
     cidr_blocks = ["0.0.0.0/0"]
   }
 
+  # IPv6 egress for HTTPS (if IPv6 is enabled)
+  # Enables access to GitHub and other services over IPv6 without NAT Gateway
+  dynamic "egress" {
+    for_each = var.enable_ipv6 ? [1] : []
+    content {
+      description      = "Allow HTTPS outbound (IPv6)"
+      from_port        = 443
+      to_port          = 443
+      protocol         = "tcp"
+      ipv6_cidr_blocks = ["::/0"]
+    }
+  }
+
+  # IPv6 egress for HTTP (if IPv6 is enabled)
+  dynamic "egress" {
+    for_each = var.enable_ipv6 ? [1] : []
+    content {
+      description      = "Allow HTTP outbound (IPv6)"
+      from_port        = 80
+      to_port          = 80
+      protocol         = "tcp"
+      ipv6_cidr_blocks = ["::/0"]
+    }
+  }
+
+  # IPv6 egress for Kafka/Confluent Cloud (if IPv6 is enabled)
+  dynamic "egress" {
+    for_each = var.enable_ipv6 ? [1] : []
+    content {
+      description      = "Allow Kafka/Confluent Cloud outbound (IPv6)"
+      from_port        = 9092
+      to_port          = 9092
+      protocol         = "tcp"
+      ipv6_cidr_blocks = ["::/0"]
+    }
+  }
+
   tags = merge(
     var.tags,
     {

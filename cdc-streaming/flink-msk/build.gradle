@@ -8,8 +8,8 @@ version = '1.0.0'
 description = 'Apache Flink Event Routing Application for MSK'
 
 java {
-    sourceCompatibility = '17'
-    targetCompatibility = '17'
+    sourceCompatibility = '11'
+    targetCompatibility = '11'
 }
 
 repositories {

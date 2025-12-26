@@ -176,7 +176,20 @@ variable "enable_ipv6" {
 }
 
 variable "enable_nat_gateway" {
-  description = "Enable NAT Gateway for private subnets (IPv4). Not needed if enable_ipv6 is true."
+  description = <<-EOT
+    Enable NAT Gateway for private subnets (IPv4). Not needed if enable_ipv6 is true.
+    
+    ⚠️ COST WARNING: NAT Gateway costs $32.40/month base charge + $0.045/GB data processing.
+    With IPv6 enabled and VPC endpoints configured, NAT Gateway is typically NOT needed.
+    
+    Only enable if:
+    - You have IPv4-only services that require internet access (e.g., legacy APIs)
+    - EC2 instances need to access external IPv4-only services (GitHub, Confluent Cloud)
+    - You cannot use IPv6 or VPC endpoints for your use case
+    
+    Recommended: Set to false and use IPv6 + VPC endpoints instead.
+    This can save $32-52/month in infrastructure costs.
+  EOT
   type        = bool
   default     = false
 }
