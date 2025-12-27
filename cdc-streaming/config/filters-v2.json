@@ -1,0 +1,106 @@
+{
+  "version": 2,
+  "filters": [
+    {
+      "id": "car-created-filter-v2",
+      "name": "Car Created Events V2",
+      "description": "Filters CarCreated events by event_type (V2 breaking schema)",
+      "consumerId": "car-consumer-v2",
+      "outputTopic": "filtered-car-created-events-v2-spring",
+      "enabled": true,
+      "conditions": [
+        {
+          "field": "event_type",
+          "operator": "equals",
+          "value": "CarCreated",
+          "valueType": "string"
+        },
+        {
+          "field": "__op",
+          "operator": "equals",
+          "value": "c",
+          "valueType": "string"
+        }
+      ],
+      "conditionLogic": "AND",
+      "status": "deployed",
+      "version": 2
+    },
+    {
+      "id": "loan-created-filter-v2",
+      "name": "Loan Created Events V2",
+      "description": "Filters LoanCreated events by event_type (V2 breaking schema)",
+      "consumerId": "loan-consumer-v2",
+      "outputTopic": "filtered-loan-created-events-v2-spring",
+      "enabled": true,
+      "conditions": [
+        {
+          "field": "event_type",
+          "operator": "equals",
+          "value": "LoanCreated",
+          "valueType": "string"
+        },
+        {
+          "field": "__op",
+          "operator": "equals",
+          "value": "c",
+          "valueType": "string"
+        }
+      ],
+      "conditionLogic": "AND",
+      "status": "deployed",
+      "version": 2
+    },
+    {
+      "id": "loan-payment-submitted-filter-v2",
+      "name": "Loan Payment Submitted Events V2",
+      "description": "Filters LoanPaymentSubmitted events by event_type (V2 breaking schema)",
+      "consumerId": "loan-payment-consumer-v2",
+      "outputTopic": "filtered-loan-payment-submitted-events-v2-spring",
+      "enabled": true,
+      "conditions": [
+        {
+          "field": "event_type",
+          "operator": "equals",
+          "value": "LoanPaymentSubmitted",
+          "valueType": "string"
+        },
+        {
+          "field": "__op",
+          "operator": "equals",
+          "value": "c",
+          "valueType": "string"
+        }
+      ],
+      "conditionLogic": "AND",
+      "status": "deployed",
+      "version": 2
+    },
+    {
+      "id": "service-events-filter-v2",
+      "name": "Service Events V2",
+      "description": "Filters CarServiceDone events by event_type (V2 breaking schema)",
+      "consumerId": "service-consumer-v2",
+      "outputTopic": "filtered-service-events-v2-spring",
+      "enabled": true,
+      "conditions": [
+        {
+          "field": "event_type",
+          "operator": "equals",
+          "value": "CarServiceDone",
+          "valueType": "string"
+        },
+        {
+          "field": "__op",
+          "operator": "equals",
+          "value": "c",
+          "valueType": "string"
+        }
+      ],
+      "conditionLogic": "AND",
+      "status": "deployed",
+      "version": 2
+    }
+  ]
+}
+
