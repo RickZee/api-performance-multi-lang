@@ -121,7 +121,7 @@ info "Installing Python dependencies on bastion..."
 INSTALL_COMMAND_ID=$(aws ssm send-command \
     --instance-ids "$BASTION_ID" \
     --document-name "AWS-RunShellScript" \
-    --parameters 'commands=["cd /opt/msk-consumers/shared && python3 -m pip install --user -r requirements.txt 2>&1 || python3 -m pip install --user confluent-kafka aws-msk-iam-sasl-signer-python backports.zoneinfo"]' \
+    --parameters 'commands=["cd /opt/msk-consumers/shared && sudo -u ec2-user python3 -m pip install --user -r requirements.txt 2>&1 || sudo -u ec2-user python3 -m pip install --user kafka-python aws-msk-iam-sasl-signer-python backports.zoneinfo"]' \
     --output text \
     --query 'Command.CommandId')
 
@@ -178,6 +178,7 @@ WorkingDirectory=/opt/msk-consumers/${consumer}
 Environment="KAFKA_BOOTSTRAP_SERVERS=${MSK_BOOTSTRAP}"
 Environment="KAFKA_TOPIC=${TOPIC}"
 Environment="AWS_REGION=${AWS_REGION}"
+Environment="AWS_DEFAULT_REGION=${AWS_REGION}"
 Environment="CONSUMER_GROUP_ID=${consumer}-group-msk"
 Environment="KAFKA_CLIENT_ID=${consumer}-client-msk"
 Environment="PYTHONPATH=/opt/msk-consumers/shared:/opt/msk-consumers/${consumer}"

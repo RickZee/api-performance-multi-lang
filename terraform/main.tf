@@ -930,6 +930,19 @@ resource "aws_security_group_rule" "aurora_from_msk_connect" {
   description              = "Allow MSK Connect to access Aurora PostgreSQL"
 }
 
+# Security group rule: Allow Flink to access MSK
+resource "aws_security_group_rule" "msk_from_flink" {
+  count = var.enable_msk && var.enable_vpc ? 1 : 0
+
+  type                     = "ingress"
+  from_port                = 9098
+  to_port                  = 9098
+  protocol                 = "tcp"
+  source_security_group_id = module.managed_flink[0].security_group_id
+  security_group_id        = module.msk_serverless[0].security_group_id
+  description              = "Allow Flink application to access MSK (IAM auth port)"
+}
+
 # ============================================================================
 # Managed Service for Apache Flink Module
 # ============================================================================
@@ -945,6 +958,11 @@ module "managed_flink" {
   parallelism_per_kpu  = 1
   enable_glue_schema_registry = var.enable_glue_schema_registry
   log_retention_days   = local.cloudwatch_logs_retention
+
+  # VPC Configuration for Flink to access MSK
+  vpc_id              = module.vpc[0].vpc_id
+  subnet_ids          = module.vpc[0].private_subnet_ids
+  security_group_ids  = [] # Flink will create its own security group if needed
 
   tags = local.common_tags
 }

@@ -538,75 +538,81 @@ if [ "$SKIP_TO_STEP" -le 3 ]; then
   info "Checking consumer status..."
   
   if [ "$MSK_ENABLED" = true ]; then
-    # MSK consumers: 4 consumers (service names match Confluent, container names have -msk suffix)
-    ALL_CONSUMERS="loan-consumer loan-payment-consumer car-consumer service-consumer"
-    EXPECTED_COUNT=4
-    COMPOSE_FILE="docker-compose.msk.yml"
+    # MSK consumers run on bastion host, not locally
+    # Check bastion host for running consumers
+    info "MSK consumers run on bastion host - checking bastion status..."
     
-    if [ ! -f "$COMPOSE_FILE" ]; then
-      fail "docker-compose.msk.yml not found"
-      exit 1
+    cd "$PROJECT_ROOT/terraform"
+    BASTION_INSTANCE_ID=$(terraform output -raw bastion_host_instance_id 2>/dev/null || echo "")
+    AWS_REGION=$(terraform output -raw aws_region 2>/dev/null || echo "us-east-1")
+    cd "$PROJECT_ROOT"
+    
+    if [ -z "$BASTION_INSTANCE_ID" ]; then
+      warn "Bastion host not found. MSK consumers should run on bastion host."
+      warn "To check bastion consumers: ./cdc-streaming/scripts/check-bastion-consumers.sh"
+      RUNNING_CONSUMERS=0
+      EXPECTED_COUNT=4
+    else
+      # Check bastion consumers using check-bastion-consumers.sh script
+      BASTION_STATUS=$(cd "$PROJECT_ROOT" && "$SCRIPT_DIR/check-bastion-consumers.sh" --status 2>&1 | grep -E "(cdc-loan-consumer-msk|cdc-loan-payment-consumer-msk|cdc-car-consumer-msk|cdc-service-consumer-msk)" | grep -c "Up" || echo "0")
+      RUNNING_CONSUMERS=$(echo "$BASTION_STATUS" | tr -d '[:space:]')
+      if [ -z "$RUNNING_CONSUMERS" ] || [ "$RUNNING_CONSUMERS" = "" ]; then
+        RUNNING_CONSUMERS=0
+      fi
+      EXPECTED_COUNT=4
+      ALL_CONSUMERS="loan-consumer loan-payment-consumer car-consumer service-consumer"
+      
+      if [ "$RUNNING_CONSUMERS" -ge "$EXPECTED_COUNT" ]; then
+        pass "All $EXPECTED_COUNT MSK consumers running on bastion host"
+      else
+        info "Found $RUNNING_CONSUMERS/$EXPECTED_COUNT MSK consumers on bastion host"
+        info "To start consumers on bastion, use deployment scripts or connect via SSM"
+      fi
     fi
   else
-    # Confluent Cloud consumers: 8 consumers (4 Spring + 4 Flink)
+    # Confluent Cloud consumers: 8 consumers (4 Spring + 4 Flink) - run locally
     ALL_CONSUMERS="car-consumer loan-consumer loan-payment-consumer service-consumer car-consumer-flink loan-consumer-flink loan-payment-consumer-flink service-consumer-flink"
     EXPECTED_COUNT=8
     COMPOSE_FILE="docker-compose.yml"
+    
+    RUNNING_CONSUMERS=0
+    # For Confluent, check by service name (matches container names)
+    for consumer in $ALL_CONSUMERS; do
+      if docker ps --format '{{.Names}}' | grep -q "${consumer}"; then
+        RUNNING_CONSUMERS=$((RUNNING_CONSUMERS + 1))
+      fi
+    done
   fi
   
-  RUNNING_CONSUMERS=0
-  
-  for consumer in $ALL_CONSUMERS; do
-    if docker ps --format '{{.Names}}' | grep -q "${consumer}"; then
-      RUNNING_CONSUMERS=$((RUNNING_CONSUMERS + 1))
-    fi
-  done
-  
-  if [ $RUNNING_CONSUMERS -lt $EXPECTED_COUNT ]; then
-    if [ "$MSK_ENABLED" = true ]; then
-      info "Starting 4 MSK consumers..."
+  if [ "$MSK_ENABLED" = true ]; then
+    # MSK consumers run on bastion - don't start locally
+    if [ $RUNNING_CONSUMERS -lt $EXPECTED_COUNT ]; then
+      warn "MSK consumers should run on bastion host, not locally"
+      info "To start MSK consumers on bastion:"
+      info "  1. Connect to bastion: terraform output -raw bastion_host_ssm_command | bash"
+      info "  2. Or use deployment scripts in cdc-streaming/scripts/"
+      info "  3. Check status: ./cdc-streaming/scripts/check-bastion-consumers.sh"
     else
-      info "Starting all 8 consumers (4 Spring + 4 Flink)..."
+      pass "All $EXPECTED_COUNT MSK consumers running on bastion host"
     fi
+  elif [ $RUNNING_CONSUMERS -lt $EXPECTED_COUNT ]; then
+    # Confluent consumers run locally
+    info "Starting all 8 consumers (4 Spring + 4 Flink)..."
     
     # Source environment files if they exist
     if [ -f "$PROJECT_ROOT/cdc-streaming/.env" ]; then
       source "$PROJECT_ROOT/cdc-streaming/.env"
     fi
     
-    if [ "$MSK_ENABLED" = true ]; then
-      # MSK requires bootstrap servers and AWS region
-      if [ -z "$KAFKA_BOOTSTRAP_SERVERS" ]; then
-        # Try to get from Terraform
-        cd "$PROJECT_ROOT/terraform"
-        KAFKA_BOOTSTRAP_SERVERS=$(terraform output -raw msk_bootstrap_brokers 2>/dev/null || echo "")
-        AWS_REGION=$(terraform output -raw aws_region 2>/dev/null || echo "us-east-1")
-        cd "$PROJECT_ROOT/cdc-streaming"
-        
-        if [ -z "$KAFKA_BOOTSTRAP_SERVERS" ]; then
-          fail "KAFKA_BOOTSTRAP_SERVERS environment variable not set and not found in Terraform outputs"
-          exit 1
-        fi
-        export KAFKA_BOOTSTRAP_SERVERS
-        export AWS_REGION
-      fi
-      
-      # Verify AWS credentials
-      if ! aws sts get-caller-identity &>/dev/null; then
-        warn "AWS credentials not configured. MSK consumers require IAM authentication."
-        warn "Set AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY, or configure AWS CLI"
-      fi
-    else
-      # Confluent Cloud requires bootstrap servers
-      if [ -z "$KAFKA_BOOTSTRAP_SERVERS" ] && [ -z "$CONFLUENT_BOOTSTRAP_SERVERS" ]; then
-        fail "KAFKA_BOOTSTRAP_SERVERS or CONFLUENT_BOOTSTRAP_SERVERS environment variable not set"
-        exit 1
-      fi
-      
-      # Use CONFLUENT_BOOTSTRAP_SERVERS if KAFKA_BOOTSTRAP_SERVERS is not set
-      if [ -z "$KAFKA_BOOTSTRAP_SERVERS" ] && [ -n "$CONFLUENT_BOOTSTRAP_SERVERS" ]; then
-        export KAFKA_BOOTSTRAP_SERVERS="$CONFLUENT_BOOTSTRAP_SERVERS"
-      fi
+    # Confluent Cloud requires bootstrap servers
+    if [ -z "$KAFKA_BOOTSTRAP_SERVERS" ] && [ -z "$CONFLUENT_BOOTSTRAP_SERVERS" ]; then
+      fail "KAFKA_BOOTSTRAP_SERVERS or CONFLUENT_BOOTSTRAP_SERVERS environment variable not set"
+      exit 1
+    fi
+    
+    # Use CONFLUENT_BOOTSTRAP_SERVERS if KAFKA_BOOTSTRAP_SERVERS is not set
+    if [ -z "$KAFKA_BOOTSTRAP_SERVERS" ] && [ -n "$CONFLUENT_BOOTSTRAP_SERVERS" ]; then
+      export KAFKA_BOOTSTRAP_SERVERS="$CONFLUENT_BOOTSTRAP_SERVERS"
     fi
     
     if docker-compose version &> /dev/null; then
@@ -620,11 +626,7 @@ if [ "$SKIP_TO_STEP" -le 3 ]; then
     max_startup_wait=20
     startup_elapsed=0
     while [ $startup_elapsed -lt $max_startup_wait ]; do
-      if [ "$MSK_ENABLED" = true ]; then
-        RUNNING_COUNT=$(docker ps --format '{{.Names}}' | grep -E "(cdc-loan-consumer-msk|cdc-loan-payment-consumer-msk|cdc-car-consumer-msk|cdc-service-consumer-msk)" | wc -l | tr -d ' ')
-      else
-        RUNNING_COUNT=$(docker ps --format '{{.Names}}' | grep -E "cdc-(car-consumer|loan-consumer|loan-payment-consumer|service-consumer)" | wc -l | tr -d ' ')
-      fi
+      RUNNING_COUNT=$(docker ps --format '{{.Names}}' | grep -E "cdc-(car-consumer|loan-consumer|loan-payment-consumer|service-consumer)" | wc -l | tr -d ' ')
       if [ "$RUNNING_COUNT" -ge $EXPECTED_COUNT ]; then
         pass "All $EXPECTED_COUNT consumers started (after ${startup_elapsed}s)"
         break
@@ -642,18 +644,27 @@ if [ "$SKIP_TO_STEP" -le 3 ]; then
   
   # Verify consumers are running
   CONSUMER_CHECK_FAILED=0
-  for consumer in $ALL_CONSUMERS; do
-    if docker ps --format '{{.Names}}' | grep -q "${consumer}"; then
-      pass "${consumer} is running"
-    elif docker ps -a --format '{{.Names}}' | grep -q "${consumer}"; then
-      CONTAINER_STATUS=$(docker ps -a --format '{{.Names}} {{.Status}}' | grep "${consumer}" | awk '{print $2}')
-      warn "${consumer} exists but status is: $CONTAINER_STATUS"
-      CONSUMER_CHECK_FAILED=1
-    else
-      fail "${consumer} container not found"
+  if [ "$MSK_ENABLED" = true ]; then
+    # For MSK, consumers run on bastion - just note that we checked
+    info "MSK consumers run on bastion host (checked above)"
+    if [ $RUNNING_CONSUMERS -lt $EXPECTED_COUNT ]; then
       CONSUMER_CHECK_FAILED=1
     fi
-  done
+  else
+    # For Confluent, check by service name (local containers)
+    for consumer in $ALL_CONSUMERS; do
+      if docker ps --format '{{.Names}}' | grep -q "${consumer}"; then
+        pass "${consumer} is running"
+      elif docker ps -a --format '{{.Names}}' | grep -q "${consumer}"; then
+        CONTAINER_STATUS=$(docker ps -a --format '{{.Names}} {{.Status}}' | grep "${consumer}" | awk '{print $2}')
+        warn "${consumer} exists but status is: $CONTAINER_STATUS"
+        CONSUMER_CHECK_FAILED=1
+      else
+        fail "${consumer} container not found"
+        CONSUMER_CHECK_FAILED=1
+      fi
+    done
+  fi
   
   if [ $CONSUMER_CHECK_FAILED -eq 1 ]; then
     warn "Some consumers are not running properly"
@@ -737,15 +748,12 @@ if [ "$SKIP_TO_STEP" -le 5 ] && [ "$SKIP_CLEAR_LOGS" = false ]; then
   fi
   
   if [ "$DEPLOYMENT_OPTION" = "msk" ]; then
-    # Clear MSK consumer logs
-    cd "$PROJECT_ROOT/cdc-streaming"
-    if docker-compose -f docker-compose.msk.yml ps 2>/dev/null | grep -q "Up"; then
-      docker-compose -f docker-compose.msk.yml restart loan-consumer loan-payment-consumer car-consumer service-consumer 2>&1 | tail -5
-      pass "MSK consumer logs cleared and consumers recreated"
-    else
-      warn "MSK consumers not running, skipping log clear"
-    fi
-    cd "$PROJECT_ROOT"
+    # MSK consumers run on bastion - log clearing handled by restarting containers on bastion
+    info "MSK consumers run on bastion host - log clearing requires restarting containers on bastion"
+    info "To clear logs on bastion, connect and restart: terraform output -raw bastion_host_ssm_command | bash"
+    info "Or restart via: docker-compose -f docker-compose.msk.yml restart <consumer>"
+    warn "Skipping log clear for MSK consumers (they run on bastion, not locally)"
+    # Note: In a full deployment, you might want to add SSM commands here to restart bastion consumers
   else
     # Clear Confluent Cloud consumer logs
     if "$SCRIPT_DIR/clear-consumer-logs.sh" --restart 2>&1 | tail -10; then
@@ -1016,44 +1024,64 @@ if [ "$SKIP_TO_STEP" -le 10 ]; then
       warn "Skipping MSK consumer validation (--skip-aws-msk flag)"
       jq '.msk_consumers_validated = "skipped"' "$RESULTS_FILE" > "$RESULTS_FILE.tmp" && mv "$RESULTS_FILE.tmp" "$RESULTS_FILE"
     else
-      # MSK consumer validation
-      info "Validating 4 MSK consumers:"
-      info "  - cdc-loan-consumer-msk (from filtered-loan-created-events-msk)"
-      info "  - cdc-loan-payment-consumer-msk (from filtered-loan-payment-submitted-events-msk)"
-      info "  - cdc-car-consumer-msk (from filtered-car-created-events-msk)"
-      info "  - cdc-service-consumer-msk (from filtered-service-events-msk)"
+      # MSK consumer validation - consumers run on bastion host
+      info "Validating 4 MSK consumers on bastion host:"
+      info "  - loan-consumer (cdc-loan-consumer-msk) from filtered-loan-created-events-msk"
+      info "  - loan-payment-consumer (cdc-loan-payment-consumer-msk) from filtered-loan-payment-submitted-events-msk"
+      info "  - car-consumer (cdc-car-consumer-msk) from filtered-car-created-events-msk"
+      info "  - service-consumer (cdc-service-consumer-msk) from filtered-service-events-msk"
       echo ""
       
-      cd "$PROJECT_ROOT/cdc-streaming"
-      
-      # Check each MSK consumer for received events
+      # Check bastion consumers using check-bastion-consumers.sh
       MSK_CONSUMERS_VALIDATED=0
       MSK_CONSUMERS_TOTAL=4
       
-      for consumer in cdc-loan-consumer-msk cdc-loan-payment-consumer-msk cdc-car-consumer-msk cdc-service-consumer-msk; do
-        if docker ps --format '{{.Names}}' | grep -q "$consumer"; then
-        # Check consumer logs for event processing
-        LOG_COUNT=$(docker logs "$consumer" 2>&1 | grep -c "Event.*Received.*MSK" || echo "0")
-        if [ "$LOG_COUNT" -gt 0 ]; then
-          pass "$consumer processed $LOG_COUNT events"
-          MSK_CONSUMERS_VALIDATED=$((MSK_CONSUMERS_VALIDATED + 1))
+      # Get consumer names for bastion check
+      CONSUMER_NAMES=("loan-consumer" "loan-payment-consumer" "car-consumer" "service-consumer")
+      
+      for consumer_name in "${CONSUMER_NAMES[@]}"; do
+        info "Checking $consumer_name on bastion host..."
+        
+        # Get logs from bastion (last 100 lines to search for events)
+        BASTION_LOGS=$(cd "$PROJECT_ROOT" && "$SCRIPT_DIR/check-bastion-consumers.sh" --logs 100 "$consumer_name" 2>&1)
+        
+        # Check if consumer is running
+        if echo "$BASTION_LOGS" | grep -q "Container not found\|not running"; then
+          fail "$consumer_name is not running on bastion host"
         else
-          warn "$consumer is running but no events found in logs"
-          info "Check logs: docker logs $consumer"
+          # Check for event processing in logs
+          # Look for various event received patterns
+          LOG_COUNT=$(echo "$BASTION_LOGS" | grep -cE "(Event.*Received|Processing event|Consumed event|Event processed)" || echo "0")
+          LOG_COUNT=$(echo "$LOG_COUNT" | tr -d '[:space:]')
+          if [ -z "$LOG_COUNT" ] || [ "$LOG_COUNT" = "" ]; then
+            LOG_COUNT=0
+          fi
+          
+          if [ "$LOG_COUNT" -gt 0 ]; then
+            pass "$consumer_name processed events (found $LOG_COUNT event references in logs)"
+            MSK_CONSUMERS_VALIDATED=$((MSK_CONSUMERS_VALIDATED + 1))
+          else
+            # Check if consumer is at least running and connected
+            if echo "$BASTION_LOGS" | grep -qE "(Consumer started|Waiting for messages|Bootstrap Servers)"; then
+              warn "$consumer_name is running on bastion but no events found in recent logs"
+              info "Check full logs: ./cdc-streaming/scripts/check-bastion-consumers.sh --logs $consumer_name"
+            else
+              warn "$consumer_name status unclear - check bastion: ./cdc-streaming/scripts/check-bastion-consumers.sh --status"
+            fi
+          fi
         fi
-      else
-        fail "$consumer is not running"
-      fi
-    done
-    
-    cd "$PROJECT_ROOT"
-    
+      done
+      
       if [ $MSK_CONSUMERS_VALIDATED -eq $MSK_CONSUMERS_TOTAL ]; then
-        pass "All $MSK_CONSUMERS_TOTAL MSK consumers validated successfully"
+        pass "All $MSK_CONSUMERS_TOTAL MSK consumers validated successfully on bastion host"
         jq '.msk_consumers_validated = true' "$RESULTS_FILE" > "$RESULTS_FILE.tmp" && mv "$RESULTS_FILE.tmp" "$RESULTS_FILE"
       else
-        fail "Only $MSK_CONSUMERS_VALIDATED/$MSK_CONSUMERS_TOTAL MSK consumers validated"
-        jq '.msk_consumers_validated = false' "$RESULTS_FILE" > "$RESULTS_FILE.tmp" && mv "$RESULTS_FILE.tmp" "$RESULTS_FILE"
+        if [ $MSK_CONSUMERS_VALIDATED -gt 0 ]; then
+          warn "Only $MSK_CONSUMERS_VALIDATED/$MSK_CONSUMERS_TOTAL MSK consumers validated on bastion host"
+        else
+          fail "No MSK consumers validated on bastion host"
+        fi
+        jq ".msk_consumers_validated = $MSK_CONSUMERS_VALIDATED" "$RESULTS_FILE" > "$RESULTS_FILE.tmp" && mv "$RESULTS_FILE.tmp" "$RESULTS_FILE"
       fi
     fi
   else

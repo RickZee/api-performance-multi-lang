@@ -81,7 +81,7 @@ if [ -f "terraform.tfbackend" ]; then
     terraform init -backend-config=terraform.tfbackend
 else
     print_info "Using local state (backend not configured yet)..."
-    print_warn "After first apply, run ./scripts/setup-backend.sh to migrate to S3"
+    print_warn "After first apply, manually migrate to S3 backend (see README.md)"
     terraform init -backend=false
 fi
 

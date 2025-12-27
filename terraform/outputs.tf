@@ -249,6 +249,16 @@ output "msk_connect_connector_arn" {
   value       = var.enable_msk && var.enable_vpc && var.enable_aurora ? module.msk_connect[0].connector_arn : null
 }
 
+output "msk_connect_connector_name" {
+  description = "Name of the MSK Connect connector"
+  value       = var.enable_msk && var.enable_vpc && var.enable_aurora ? module.msk_connect[0].connector_name : null
+}
+
+output "managed_flink_security_group_id" {
+  description = "Security group ID for Flink application"
+  value       = var.enable_msk && var.enable_vpc ? module.managed_flink[0].security_group_id : null
+}
+
 output "flink_application_arn" {
   description = "ARN of the Managed Flink application"
   value       = var.enable_msk && var.enable_vpc ? module.managed_flink[0].application_arn : null

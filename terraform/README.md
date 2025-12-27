@@ -48,13 +48,21 @@ This configuration supports storing Terraform state in S3 with DynamoDB locking 
 
 2. **Migrate to S3 backend** after the first apply:
    ```bash
-   ./scripts/setup-backend.sh
-   ```
+   # Get the bucket name from Terraform outputs
+   BUCKET_NAME=$(terraform output -raw terraform_state_bucket_name)
    
-   This script will:
-   - Get the S3 bucket and DynamoDB table names from Terraform outputs
-   - Create `terraform.tfbackend` configuration file
-   - Migrate your local state to S3
+   # Create terraform.tfbackend file
+   cat > terraform.tfbackend <<EOF
+   bucket       = "$BUCKET_NAME"
+   key          = "terraform.tfstate"
+   region       = "${AWS_REGION:-us-east-1}"
+   encrypt      = true
+   use_lockfile = true
+   EOF
+   
+   # Migrate state to S3
+   terraform init -backend-config=terraform.tfbackend -migrate-state
+   ```
 
 3. **Future operations** will automatically use the S3 backend.
 

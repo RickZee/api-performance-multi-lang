@@ -42,6 +42,24 @@ variable "log_retention_days" {
   default     = 7
 }
 
+variable "vpc_id" {
+  description = "VPC ID for Flink application"
+  type        = string
+  default     = null
+}
+
+variable "subnet_ids" {
+  description = "Subnet IDs for Flink application"
+  type        = list(string)
+  default     = []
+}
+
+variable "security_group_ids" {
+  description = "Security group IDs for Flink application"
+  type        = list(string)
+  default     = []
+}
+
 variable "tags" {
   description = "Tags to apply to resources"
   type        = map(string)

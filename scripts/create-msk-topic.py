@@ -10,19 +10,26 @@ from kafka import KafkaAdminClient
 from kafka.admin import NewTopic
 from kafka.errors import TopicAlreadyExistsError
 import boto3
-from aws_msk_iam_sasl_signer import MSKAuthTokenProvider
+from aws_msk_iam_sasl_signer.MSKAuthTokenProvider import generate_auth_token
+
+class MSKTokenProvider:
+    """Token provider wrapper for kafka-python MSK IAM authentication"""
+    
+    def __init__(self, region: str):
+        self.region = region
+    
+    def token(self) -> str:
+        return generate_auth_token(region=self.region)
 
 def create_topic(bootstrap_servers, topic_name, partitions=3, replication_factor=1):
     """Create a Kafka topic using IAM authentication."""
     
     # Get AWS credentials
     session = boto3.Session()
-    credentials = session.get_credentials()
+    region = session.region_name or 'us-east-1'
     
     # Create MSK IAM auth provider
-    auth_provider = MSKAuthTokenProvider(
-        region=session.region_name or 'us-east-1'
-    )
+    auth_provider = MSKTokenProvider(region=region)
     
     # Create admin client with IAM auth
     admin_client = KafkaAdminClient(

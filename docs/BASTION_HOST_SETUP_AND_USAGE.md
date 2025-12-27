@@ -570,6 +570,78 @@ See `cdc-streaming/msk-topic-creation.md` for detailed instructions.
 
 #### MSK Consumer Deployment
 
+The bastion host can run MSK consumers in two ways:
+1. **Docker containers** (recommended for development/testing)
+2. **Systemd services** (recommended for production)
+
+##### Docker-Based Consumers
+
+**Script**: `cdc-streaming/scripts/check-bastion-consumers.sh`
+
+Check status and logs of dockerized consumers running on bastion hosts without connecting interactively:
+
+```bash
+# Check status of all consumers
+./cdc-streaming/scripts/check-bastion-consumers.sh
+
+# Check status of a specific consumer
+./cdc-streaming/scripts/check-bastion-consumers.sh loan-consumer
+
+# View logs (last 50 lines by default)
+./cdc-streaming/scripts/check-bastion-consumers.sh --logs loan-consumer
+
+# View last 100 lines of logs
+./cdc-streaming/scripts/check-bastion-consumers.sh --logs 100 car-consumer
+
+# View logs for all consumers
+./cdc-streaming/scripts/check-bastion-consumers.sh --logs --all
+```
+
+**Container Names**:
+
+- `cdc-loan-consumer-msk` - Consumes from `filtered-loan-created-events-msk`
+- `cdc-loan-payment-consumer-msk` - Consumes from `filtered-loan-payment-submitted-events-msk`
+- `cdc-car-consumer-msk` - Consumes from `filtered-car-created-events-msk`
+- `cdc-service-consumer-msk` - Consumes from `filtered-service-events-msk`
+
+**Starting Docker Consumers**:
+
+```bash
+# Connect to bastion
+terraform output -raw bastion_host_ssm_command | bash
+
+# Navigate to consumer directory
+cd /opt/msk-consumers
+
+# Set environment variables
+export KAFKA_BOOTSTRAP_SERVERS=$(cd terraform && terraform output -raw msk_bootstrap_brokers)
+export AWS_REGION=$(cd terraform && terraform output -raw aws_region)
+
+# Start all consumers
+docker-compose -f docker-compose.msk.yml up -d loan-consumer loan-payment-consumer car-consumer service-consumer
+
+# Or start individual consumer
+docker-compose -f docker-compose.msk.yml up -d loan-consumer
+```
+
+**Managing Docker Consumers**:
+
+```bash
+# Check status (from local machine)
+./cdc-streaming/scripts/check-bastion-consumers.sh
+
+# View logs (from local machine)
+./cdc-streaming/scripts/check-bastion-consumers.sh --logs 100 loan-consumer
+
+# Or from bastion host
+docker ps --filter "name=cdc-"
+docker logs cdc-loan-consumer-msk --tail 100 -f
+docker-compose -f /opt/msk-consumers/docker-compose.msk.yml restart loan-consumer
+docker-compose -f /opt/msk-consumers/docker-compose.msk.yml stop loan-consumer
+```
+
+##### Systemd-Based Consumers
+
 **Script**: `cdc-streaming/scripts/deploy-msk-consumers-to-bastion.sh`
 
 The bastion host can run MSK consumers as systemd services to consume events from MSK topics.
@@ -603,7 +675,7 @@ This script:
 - `car-consumer-msk` - Consumes from `filtered-car-created-events-msk`
 - `service-consumer-msk` - Consumes from `filtered-service-events-msk`
 
-**Managing Consumers**:
+**Managing Systemd Consumers**:
 
 ```bash
 # Connect to bastion
@@ -653,17 +725,42 @@ Consumers are configured via systemd environment variables:
 
 **Troubleshooting**:
 
-1. **Consumer not starting**:
+1. **Docker Consumer Status** (from local machine):
+   ```bash
+   # Check if containers are running
+   ./cdc-streaming/scripts/check-bastion-consumers.sh
+   
+   # View logs
+   ./cdc-streaming/scripts/check-bastion-consumers.sh --logs 100 loan-consumer
+   ```
+
+2. **Docker Consumer Issues** (from bastion):
+   ```bash
+   # Check container status
+   docker ps -a --filter "name=cdc-"
+   
+   # View logs
+   docker logs cdc-loan-consumer-msk --tail 100
+   
+   # Check if docker-compose file exists
+   ls -la /opt/msk-consumers/docker-compose.msk.yml
+   
+   # Restart a consumer
+   cd /opt/msk-consumers
+   docker-compose -f docker-compose.msk.yml restart loan-consumer
+   ```
+
+3. **Systemd Consumer not starting**:
    ```bash
    sudo journalctl -u loan-consumer-msk -n 50
    ```
 
-2. **Check Python dependencies**:
+4. **Check Python dependencies**:
    ```bash
    python3 -c "import confluent_kafka; import aws_msk_iam_sasl_signer_python"
    ```
 
-3. **Verify MSK connectivity**:
+5. **Verify MSK connectivity**:
    ```bash
    # Test DNS resolution
    nslookup boot-yjc0v78h.c1.kafka-serverless.us-east-1.amazonaws.com
@@ -672,7 +769,7 @@ Consumers are configured via systemd environment variables:
    aws sts get-caller-identity
    ```
 
-4. **Check consumer logs for errors**:
+6. **Check systemd consumer logs for errors**:
    ```bash
    sudo journalctl -u loan-consumer-msk --since "10 minutes ago"
    ```
@@ -1031,8 +1128,12 @@ terraform output bastion_host_public_ip
 # Validate data
 ./scripts/validate-dsql-via-bastion.sh /path/to/events.json
 
-# Deploy MSK consumers
+# Deploy MSK consumers (systemd)
 ./cdc-streaming/scripts/deploy-msk-consumers-to-bastion.sh
+
+# Check dockerized consumer status and logs
+./cdc-streaming/scripts/check-bastion-consumers.sh
+./cdc-streaming/scripts/check-bastion-consumers.sh --logs 100 loan-consumer
 
 # Start stopped instance
 INSTANCE_ID=$(cd terraform && terraform output -raw bastion_host_instance_id)
@@ -1064,6 +1165,7 @@ psql -h $DSQL_HOST -U admin -d postgres -p 5432
 - **IAM Grant Script**: `scripts/grant-bastion-dsql-access.sh`
 - **Validation Script**: `scripts/validate-dsql-via-bastion.sh`
 - **MSK Consumer Deployment**: `cdc-streaming/scripts/deploy-msk-consumers-to-bastion.sh`
+- **MSK Consumer Status/Logs**: `cdc-streaming/scripts/check-bastion-consumers.sh`
 - **MSK Consumer Code**: `cdc-streaming/consumers-msk/`
 
 ## Related Documentation

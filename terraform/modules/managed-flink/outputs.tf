@@ -13,6 +13,11 @@ output "s3_bucket_name" {
   value       = aws_s3_bucket.flink_apps.id
 }
 
+output "security_group_id" {
+  description = "Security group ID for Flink application"
+  value       = var.vpc_id != null ? aws_security_group.flink_app[0].id : null
+}
+
 output "iam_role_arn" {
   description = "ARN of the IAM role for Flink application"
   value       = aws_iam_role.flink_app.arn

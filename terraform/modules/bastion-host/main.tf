@@ -121,6 +121,33 @@ resource "aws_iam_role_policy" "s3_read" {
   })
 }
 
+# IAM policy for CloudWatch Logs access (for monitoring Flink, MSK Connect, etc.)
+resource "aws_iam_role_policy" "cloudwatch_logs" {
+  name = "${var.project_name}-bastion-cloudwatch-logs"
+  role = aws_iam_role.bastion.id
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect = "Allow"
+        Action = [
+          "logs:DescribeLogGroups",
+          "logs:DescribeLogStreams",
+          "logs:GetLogEvents",
+          "logs:FilterLogEvents",
+          "logs:Tail"
+        ]
+        Resource = [
+          "arn:aws:logs:${var.aws_region}:${data.aws_caller_identity.current.account_id}:log-group:/aws/kinesisanalytics/*",
+          "arn:aws:logs:${var.aws_region}:${data.aws_caller_identity.current.account_id}:log-group:/aws/mskconnect/*",
+          "arn:aws:logs:${var.aws_region}:${data.aws_caller_identity.current.account_id}:log-group:/aws/msk/*"
+        ]
+      }
+    ]
+  })
+}
+
 # IAM policy for MSK access (for topic creation and management)
 resource "aws_iam_role_policy" "msk_access" {
   count = var.msk_cluster_name != "" ? 1 : 0

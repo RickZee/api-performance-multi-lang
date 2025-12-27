@@ -10,13 +10,36 @@ import logging
 import sys
 from datetime import datetime
 from typing import Dict, Any, Optional, Callable
-from confluent_kafka import Consumer, KafkaError
-from aws_msk_iam_sasl_signer_python import MSKAuthTokenProvider
+from kafka import KafkaConsumer
+from kafka.errors import KafkaError
+from aws_msk_iam_sasl_signer.MSKAuthTokenProvider import generate_auth_token
 
 try:
     from zoneinfo import ZoneInfo
 except ImportError:
     from backports.zoneinfo import ZoneInfo
+
+
+class MSKTokenProvider:
+    """Token provider wrapper for kafka-python MSK IAM authentication"""
+    
+    def __init__(self, region: str):
+        """
+        Initialize MSK token provider
+        
+        Args:
+            region: AWS region for MSK cluster
+        """
+        self.region = region
+    
+    def token(self) -> str:
+        """
+        Generate and return MSK IAM auth token
+        
+        Returns:
+            Authentication token string
+        """
+        return generate_auth_token(region=self.region)
 
 
 class MSKConsumerBase:
@@ -53,7 +76,7 @@ class MSKConsumerBase:
         self._validate_config()
         
         # Consumer instance (created in start)
-        self.consumer: Optional[Consumer] = None
+        self.consumer: Optional[KafkaConsumer] = None
     
     def _setup_logging(self) -> logging.Logger:
         """Setup logging configuration"""
@@ -122,34 +145,35 @@ class MSKConsumerBase:
             self.logger.warning(f"Failed to parse timestamp '{utc_timestamp_str}': {e}")
             return utc_timestamp_str
     
-    def _create_consumer(self) -> Consumer:
+    def _create_consumer(self) -> KafkaConsumer:
         """Create and configure Kafka consumer with MSK IAM authentication"""
-        # Create MSK IAM auth token provider
-        token_provider = MSKAuthTokenProvider(region=self.config['aws_region'])
+        # Ensure AWS_DEFAULT_REGION is set for kafka-python's MSK IAM implementation
+        # kafka-python's MSK IAM mechanism requires this environment variable
+        if 'AWS_DEFAULT_REGION' not in os.environ:
+            os.environ['AWS_DEFAULT_REGION'] = self.config['aws_region']
+        
+        # Create MSK IAM auth token provider for kafka-python
+        auth_provider = MSKTokenProvider(region=self.config['aws_region'])
         
         # Configure Kafka consumer with MSK IAM auth
-        consumer_config = {
-            'bootstrap.servers': self.config['bootstrap_servers'],
-            'group.id': self.config['consumer_group_id'],
-            'client.id': self.config['client_id'],
-            'auto.offset.reset': 'earliest',
-            'enable.auto.commit': True,
-            'security.protocol': 'SASL_SSL',
-            'sasl.mechanism': 'AWS_MSK_IAM',
-            'sasl.aws.msk.iam.token.provider': token_provider,
-            'session.timeout.ms': 30000,
-            'max.poll.interval.ms': 300000,
-            'socket.keepalive.enable': True,
-            'heartbeat.interval.ms': 10000,
-            'socket.timeout.ms': 60000,
-            'connections.max.idle.ms': 300000,
-            'reconnect.backoff.ms': 100,
-            'reconnect.backoff.max.ms': 10000,
-        }
+        # kafka-python supports MSK IAM via sasl_oauth_token_provider
+        consumer = KafkaConsumer(
+            self.config['topic'],
+            bootstrap_servers=self.config['bootstrap_servers'],
+            group_id=self.config['consumer_group_id'],
+            client_id=self.config['client_id'],
+            auto_offset_reset='earliest',
+            enable_auto_commit=True,
+            security_protocol='SASL_SSL',
+            sasl_mechanism='AWS_MSK_IAM',
+            sasl_oauth_token_provider=auth_provider,
+            session_timeout_ms=30000,
+            max_poll_interval_ms=300000,
+            heartbeat_interval_ms=10000,
+            api_version=(2, 6, 0)  # MSK Serverless supports Kafka 2.6.0+
+        )
         
         self.logger.info("Using MSK IAM authentication")
-        consumer = Consumer(consumer_config)
-        consumer.subscribe([self.config['topic']])
         
         return consumer
     
@@ -172,29 +196,22 @@ class MSKConsumerBase:
     def _consume_messages(self) -> None:
         """Main message consumption loop"""
         try:
-            while True:
-                msg = self.consumer.poll(timeout=1.0)
-                
-                if msg is None:
-                    continue
-                
-                if msg.error():
-                    if msg.error().code() == KafkaError._PARTITION_EOF:
-                        self.logger.debug(f"Reached end of partition {msg.partition()}")
-                    else:
-                        self.logger.error(f"Consumer error: {msg.error()}")
-                    continue
-                
+            # kafka-python uses iterator pattern
+            for message in self.consumer:
                 try:
                     # Parse message value
-                    event_value = json.loads(msg.value().decode('utf-8'))
+                    # kafka-python message.value is already bytes
+                    if isinstance(message.value, bytes):
+                        event_value = json.loads(message.value.decode('utf-8'))
+                    else:
+                        event_value = json.loads(message.value)
                     
                     # Process event using callback
                     self.process_event_callback(event_value)
                     
                 except json.JSONDecodeError as e:
                     self.logger.error(f"Failed to parse message JSON: {e}")
-                    self.logger.debug(f"Message value: {msg.value()}")
+                    self.logger.debug(f"Message value: {message.value}")
                 except Exception as e:
                     self.logger.error(f"Error processing message: {e}", exc_info=True)
                     
