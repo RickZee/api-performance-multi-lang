@@ -2,39 +2,33 @@ FROM eclipse-temurin:17-jdk AS builder
 
 WORKDIR /app
 
-# Copy gradle files (if they exist)
+# Copy gradle files
 COPY build.gradle .
 COPY settings.gradle .
 
-# Install gradle if gradlew doesn't exist
-RUN if [ ! -f gradlew ]; then \
-        apt-get update && apt-get install -y gradle && \
-        gradle wrapper --gradle-version 8.5; \
-    fi
-
-# Copy gradle wrapper if it exists
-COPY gradle/ gradle/ 2>/dev/null || true
-COPY gradlew* . 2>/dev/null || true
+# Copy gradle wrapper
+COPY gradle/ gradle/
+COPY gradlew* ./
 
 # Make gradlew executable
-RUN chmod +x gradlew || true
+RUN chmod +x gradlew
 
 # Download dependencies
-RUN ./gradlew dependencies --no-daemon || gradle dependencies --no-daemon
+RUN ./gradlew dependencies --no-daemon
 
 # Copy source code
 COPY src/ src/
 
 # Build the application
-RUN ./gradlew build -x test --no-daemon || gradle build -x test --no-daemon
+RUN ./gradlew build -x test --no-daemon
 
 # Runtime stage
-FROM eclipse-temurin:17-jre-alpine
+FROM eclipse-temurin:17-jre
 
 WORKDIR /app
 
 # Install git for git sync operations
-RUN apk add --no-cache git
+RUN apt-get update && apt-get install -y git && rm -rf /var/lib/apt/lists/*
 
 # Copy built JAR
 COPY --from=builder /app/build/libs/metadata-service-java-1.0.0.jar app.jar

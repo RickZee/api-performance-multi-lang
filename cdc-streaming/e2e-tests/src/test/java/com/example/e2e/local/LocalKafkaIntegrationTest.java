@@ -3,6 +3,7 @@ package com.example.e2e.local;
 import com.example.e2e.fixtures.TestEventGenerator;
 import com.example.e2e.model.EventHeader;
 import com.example.e2e.utils.KafkaTestUtils;
+import org.apache.kafka.clients.consumer.KafkaConsumer;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.TestInstance;
@@ -21,12 +22,36 @@ public class LocalKafkaIntegrationTest {
     
     private KafkaTestUtils kafkaUtils;
     private String sourceTopic = "raw-event-headers";
-    private String bootstrapServers = "localhost:9092";
+    private String bootstrapServers;
+    private String apiKey;
+    private String apiSecret;
     
     @BeforeAll
     void setUp() {
+        // Support both local Docker Kafka and Confluent Cloud
+        // Check environment variables first (for Confluent Cloud mode)
+        bootstrapServers = System.getenv("KAFKA_BOOTSTRAP_SERVERS");
+        if (bootstrapServers == null || bootstrapServers.isEmpty()) {
+            bootstrapServers = System.getenv("CONFLUENT_BOOTSTRAP_SERVERS");
+        }
+        if (bootstrapServers == null || bootstrapServers.isEmpty()) {
+            // Default to local Docker Kafka
+            bootstrapServers = "localhost:9092";
+        }
+        
+        // Get API credentials if using Confluent Cloud
+        apiKey = System.getenv("CONFLUENT_API_KEY");
+        if (apiKey == null || apiKey.isEmpty()) {
+            apiKey = System.getenv("CONFLUENT_CLOUD_API_KEY");
+        }
+        
+        apiSecret = System.getenv("CONFLUENT_API_SECRET");
+        if (apiSecret == null || apiSecret.isEmpty()) {
+            apiSecret = System.getenv("CONFLUENT_CLOUD_API_SECRET");
+        }
+        
         // Local Kafka doesn't require authentication
-        kafkaUtils = new KafkaTestUtils(bootstrapServers, null, null);
+        kafkaUtils = new KafkaTestUtils(bootstrapServers, apiKey, apiSecret);
     }
     
     @Test
@@ -35,15 +60,23 @@ public class LocalKafkaIntegrationTest {
         String testId = uniquePrefix + "-001";
         EventHeader testEvent = TestEventGenerator.generateCarCreatedEvent(testId);
         
-        kafkaUtils.publishTestEvent(sourceTopic, testEvent);
-        
-        List<EventHeader> carEvents = kafkaUtils.consumeEvents(
-            "filtered-car-created-events-spring", 1, Duration.ofSeconds(30), uniquePrefix
-        );
-        
-        assertThat(carEvents).hasSize(1);
-        assertThat(carEvents.get(0).getEventType()).isEqualTo("CarCreated");
-        assertThat(carEvents.get(0).getId()).startsWith(uniquePrefix);
+        String filteredTopic = "filtered-car-created-events-spring";
+        try (KafkaConsumer<String, byte[]> consumer = kafkaUtils.prepareConsumerForTopic(filteredTopic)) {
+            // Publish the event
+            kafkaUtils.publishTestEvent(sourceTopic, testEvent);
+            
+            // Wait for stream-processor to process the event
+            Thread.sleep(5000);
+            
+            // Consume the event
+            List<EventHeader> carEvents = kafkaUtils.consumeEventsWithConsumer(
+                consumer, 1, Duration.ofSeconds(30), uniquePrefix
+            );
+            
+            assertThat(carEvents).hasSize(1);
+            assertThat(carEvents.get(0).getEventType()).isEqualTo("CarCreated");
+            assertThat(carEvents.get(0).getId()).startsWith(uniquePrefix);
+        }
     }
     
     @Test
@@ -52,15 +85,20 @@ public class LocalKafkaIntegrationTest {
         String testId = uniquePrefix + "-001";
         EventHeader testEvent = TestEventGenerator.generateLoanCreatedEvent(testId);
         
-        kafkaUtils.publishTestEvent(sourceTopic, testEvent);
-        
-        List<EventHeader> loanEvents = kafkaUtils.consumeEvents(
-            "filtered-loan-created-events-spring", 1, Duration.ofSeconds(30), uniquePrefix
-        );
-        
-        assertThat(loanEvents).hasSize(1);
-        assertThat(loanEvents.get(0).getEventType()).isEqualTo("LoanCreated");
-        assertThat(loanEvents.get(0).getId()).startsWith(uniquePrefix);
+        String filteredTopic = "filtered-loan-created-events-spring";
+        try (KafkaConsumer<String, byte[]> consumer = kafkaUtils.prepareConsumerForTopic(filteredTopic)) {
+            kafkaUtils.publishTestEvent(sourceTopic, testEvent);
+            
+            Thread.sleep(5000);
+            
+            List<EventHeader> loanEvents = kafkaUtils.consumeEventsWithConsumer(
+                consumer, 1, Duration.ofSeconds(30), uniquePrefix
+            );
+            
+            assertThat(loanEvents).hasSize(1);
+            assertThat(loanEvents.get(0).getEventType()).isEqualTo("LoanCreated");
+            assertThat(loanEvents.get(0).getId()).startsWith(uniquePrefix);
+        }
     }
     
     @Test
@@ -69,15 +107,20 @@ public class LocalKafkaIntegrationTest {
         String testId = uniquePrefix + "-001";
         EventHeader testEvent = TestEventGenerator.generateLoanPaymentEvent(testId);
         
-        kafkaUtils.publishTestEvent(sourceTopic, testEvent);
-        
-        List<EventHeader> paymentEvents = kafkaUtils.consumeEvents(
-            "filtered-loan-payment-submitted-events-spring", 1, Duration.ofSeconds(30), uniquePrefix
-        );
-        
-        assertThat(paymentEvents).hasSize(1);
-        assertThat(paymentEvents.get(0).getEventType()).isEqualTo("LoanPaymentSubmitted");
-        assertThat(paymentEvents.get(0).getId()).startsWith(uniquePrefix);
+        String filteredTopic = "filtered-loan-payment-submitted-events-spring";
+        try (KafkaConsumer<String, byte[]> consumer = kafkaUtils.prepareConsumerForTopic(filteredTopic)) {
+            kafkaUtils.publishTestEvent(sourceTopic, testEvent);
+            
+            Thread.sleep(5000);
+            
+            List<EventHeader> paymentEvents = kafkaUtils.consumeEventsWithConsumer(
+                consumer, 1, Duration.ofSeconds(30), uniquePrefix
+            );
+            
+            assertThat(paymentEvents).hasSize(1);
+            assertThat(paymentEvents.get(0).getEventType()).isEqualTo("LoanPaymentSubmitted");
+            assertThat(paymentEvents.get(0).getId()).startsWith(uniquePrefix);
+        }
     }
     
     @Test
@@ -86,15 +129,20 @@ public class LocalKafkaIntegrationTest {
         String testId = uniquePrefix + "-001";
         EventHeader testEvent = TestEventGenerator.generateServiceEvent(testId);
         
-        kafkaUtils.publishTestEvent(sourceTopic, testEvent);
-        
-        List<EventHeader> serviceEvents = kafkaUtils.consumeEvents(
-            "filtered-service-events-spring", 1, Duration.ofSeconds(60), uniquePrefix
-        );
-        
-        assertThat(serviceEvents).hasSize(1);
-        assertThat(serviceEvents.get(0).getEventName()).isEqualTo("CarServiceDone");
-        assertThat(serviceEvents.get(0).getId()).startsWith(uniquePrefix);
+        String filteredTopic = "filtered-service-events-spring";
+        try (KafkaConsumer<String, byte[]> consumer = kafkaUtils.prepareConsumerForTopic(filteredTopic)) {
+            kafkaUtils.publishTestEvent(sourceTopic, testEvent);
+            
+            Thread.sleep(5000);
+            
+            List<EventHeader> serviceEvents = kafkaUtils.consumeEventsWithConsumer(
+                consumer, 1, Duration.ofSeconds(60), uniquePrefix
+            );
+            
+            assertThat(serviceEvents).hasSize(1);
+            assertThat(serviceEvents.get(0).getEventName()).isEqualTo("CarServiceDone");
+            assertThat(serviceEvents.get(0).getId()).startsWith(uniquePrefix);
+        }
     }
     
     @Test

@@ -9,7 +9,7 @@ spring:
   
   kafka:
     streams:
-      application-id: event-stream-processor
+      application-id: event-stream-processor-v1
       bootstrap-servers: ${KAFKA_BOOTSTRAP_SERVERS:localhost:9092}
       source-topic: ${SPRING_KAFKA_STREAMS_SOURCE_TOPIC:raw-event-headers}
       properties:
@@ -31,9 +31,12 @@ spring:
         enable.idempotence: true
         # State store settings
         state.dir: /tmp/kafka-streams
-        # Replication factor for internal topics
+        # Replication factor for internal topics (Confluent Cloud uses 3 by default)
+        # Note: These are for internal Kafka Streams topics, not the source topic
         replication.factor: 3
         min.insync.replicas: 2
+        # Consumer settings for Confluent Cloud
+        consumer.auto.offset.reset: earliest
 
 management:
   endpoints:
@@ -52,8 +55,10 @@ management:
 logging:
   level:
     com.example.streamprocessor: INFO
-    org.apache.kafka: WARN
+    org.apache.kafka: INFO
+    org.apache.kafka.streams: INFO
     org.springframework.kafka: INFO
+    org.springframework.kafka.streams: INFO
 
 app:
   display-timezone: ${DISPLAY_TIMEZONE:America/New_York}

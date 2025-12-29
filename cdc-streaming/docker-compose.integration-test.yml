@@ -1,53 +1,8 @@
 version: '3.8'
 
 services:
-  # Confluent Kafka with KRaft (no Zookeeper)
-  kafka:
-    image: confluentinc/cp-kafka:7.5.0
-    hostname: kafka
-    container_name: int-test-kafka
-    ports:
-      - "9092:9092"
-      - "9101:9101"
-    environment:
-      KAFKA_NODE_ID: 1
-      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT
-      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092
-      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
-      KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0
-      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
-      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
-      KAFKA_JMX_PORT: 9101
-      KAFKA_PROCESS_ROLES: broker,controller
-      KAFKA_CONTROLLER_QUORUM_VOTERS: 1@kafka:29093
-      KAFKA_LISTENERS: PLAINTEXT://0.0.0.0:9092,CONTROLLER://0.0.0.0:29093
-      KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
-      KAFKA_LOG_DIRS: /tmp/kraft-combined-logs
-      CLUSTER_ID: MkU3OEVBNTcwNTJENDM2Qk
-    healthcheck:
-      test: kafka-topics --bootstrap-server localhost:9092 --list
-      interval: 5s
-      timeout: 10s
-      retries: 10
-
-  # Confluent Schema Registry
-  schema-registry:
-    image: confluentinc/cp-schema-registry:7.5.0
-    hostname: schema-registry
-    container_name: int-test-schema-registry
-    depends_on:
-      kafka:
-        condition: service_healthy
-    ports:
-      - "8081:8081"
-    environment:
-      SCHEMA_REGISTRY_HOST_NAME: schema-registry
-      SCHEMA_REGISTRY_KAFKASTORE_BOOTSTRAP_SERVERS: kafka:9092
-      SCHEMA_REGISTRY_LISTENERS: http://0.0.0.0:8081
-    healthcheck:
-      test: curl -f http://localhost:8081/subjects || exit 1
-      interval: 5s
-      retries: 10
+  # Note: Using Confluent Cloud for Kafka and Schema Registry
+  # No local Kafka or Schema Registry containers needed
 
   # Mock Confluent Flink API (for deployment testing)
   mock-confluent-api:
@@ -67,8 +22,6 @@ services:
       dockerfile: Dockerfile
     container_name: int-test-metadata-service
     depends_on:
-      kafka:
-        condition: service_healthy
       mock-confluent-api:
         condition: service_started
     ports:
@@ -78,6 +31,10 @@ services:
       CONFLUENT_CLOUD_API_ENDPOINT: http://mock-confluent-api:8082
       CONFLUENT_CLOUD_API_KEY: test-key
       CONFLUENT_CLOUD_API_SECRET: test-secret
+      # Confluent Cloud configuration (from environment variables)
+      KAFKA_BOOTSTRAP_SERVERS: ${KAFKA_BOOTSTRAP_SERVERS}
+      KAFKA_API_KEY: ${KAFKA_API_KEY:-}
+      KAFKA_API_SECRET: ${KAFKA_API_SECRET:-}
     volumes:
       - ../data:/app/test-data:ro
     healthcheck:
@@ -91,17 +48,20 @@ services:
       context: ./stream-processor-spring
       dockerfile: Dockerfile
     container_name: int-test-stream-processor
-    depends_on:
-      kafka:
-        condition: service_healthy
     ports:
       - "8083:8080"
     environment:
-      KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+      # Confluent Cloud configuration (from environment variables)
+      KAFKA_BOOTSTRAP_SERVERS: ${KAFKA_BOOTSTRAP_SERVERS}
+      KAFKA_API_KEY: ${KAFKA_API_KEY:-}
+      KAFKA_API_SECRET: ${KAFKA_API_SECRET:-}
+      KAFKA_SECURITY_PROTOCOL: ${KAFKA_SECURITY_PROTOCOL:-SASL_SSL}
+      KAFKA_SASL_MECHANISM: ${KAFKA_SASL_MECHANISM:-PLAIN}
       SPRING_KAFKA_STREAMS_SOURCE_TOPIC: raw-event-headers
       FILTER_CONFIG_PATH: /app/config/filters.json
     volumes:
       - ./config:/app/config:ro
+      - ./stream-processor-spring/src/main/resources/filters.yml:/app/filters.yml:ro
     healthcheck:
       test: curl -f http://localhost:8080/actuator/health || exit 1
       interval: 5s
@@ -114,30 +74,32 @@ services:
       dockerfile: Dockerfile
     container_name: int-test-stream-processor-v2
     profiles: ["v2"]
-    depends_on:
-      kafka:
-        condition: service_healthy
     ports:
       - "8084:8080"
     environment:
-      KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+      KAFKA_BOOTSTRAP_SERVERS: ${KAFKA_BOOTSTRAP_SERVERS}
+      KAFKA_API_KEY: ${KAFKA_API_KEY:-}
+      KAFKA_API_SECRET: ${KAFKA_API_SECRET:-}
+      KAFKA_SECURITY_PROTOCOL: ${KAFKA_SECURITY_PROTOCOL:-SASL_SSL}
+      KAFKA_SASL_MECHANISM: ${KAFKA_SASL_MECHANISM:-PLAIN}
       SPRING_KAFKA_STREAMS_SOURCE_TOPIC: raw-event-headers-v2
       FILTER_CONFIG_PATH: /app/config/filters-v2.json
       FILTER_VERSION: v2
       OUTPUT_TOPIC_SUFFIX: -v2
     volumes:
       - ./config:/app/config:ro
+      - ./stream-processor-spring/src/main/resources/filters.yml:/app/filters.yml:ro
 
   # Consumers (Spring variant - reads from -spring topics)
   car-consumer:
     build:
       context: ./consumers-confluent/car-consumer
     container_name: int-test-car-consumer
-    depends_on:
-      kafka:
-        condition: service_healthy
     environment:
-      KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+      # Confluent Cloud configuration (from environment variables)
+      KAFKA_BOOTSTRAP_SERVERS: ${KAFKA_BOOTSTRAP_SERVERS}
+      KAFKA_API_KEY: ${KAFKA_API_KEY:-}
+      KAFKA_API_SECRET: ${KAFKA_API_SECRET:-}
       KAFKA_TOPIC: filtered-car-created-events-spring
       CONSUMER_GROUP_ID: int-test-car-consumer-group
 
@@ -145,11 +107,10 @@ services:
     build:
       context: ./consumers-confluent/loan-consumer
     container_name: int-test-loan-consumer
-    depends_on:
-      kafka:
-        condition: service_healthy
     environment:
-      KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+      KAFKA_BOOTSTRAP_SERVERS: ${KAFKA_BOOTSTRAP_SERVERS}
+      KAFKA_API_KEY: ${KAFKA_API_KEY:-}
+      KAFKA_API_SECRET: ${KAFKA_API_SECRET:-}
       KAFKA_TOPIC: filtered-loan-created-events-spring
       CONSUMER_GROUP_ID: int-test-loan-consumer-group
 
@@ -157,11 +118,10 @@ services:
     build:
       context: ./consumers-confluent/loan-payment-consumer
     container_name: int-test-loan-payment-consumer
-    depends_on:
-      kafka:
-        condition: service_healthy
     environment:
-      KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+      KAFKA_BOOTSTRAP_SERVERS: ${KAFKA_BOOTSTRAP_SERVERS}
+      KAFKA_API_KEY: ${KAFKA_API_KEY:-}
+      KAFKA_API_SECRET: ${KAFKA_API_SECRET:-}
       KAFKA_TOPIC: filtered-loan-payment-submitted-events-spring
       CONSUMER_GROUP_ID: int-test-loan-payment-consumer-group
 
@@ -169,11 +129,10 @@ services:
     build:
       context: ./consumers-confluent/service-consumer
     container_name: int-test-service-consumer
-    depends_on:
-      kafka:
-        condition: service_healthy
     environment:
-      KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+      KAFKA_BOOTSTRAP_SERVERS: ${KAFKA_BOOTSTRAP_SERVERS}
+      KAFKA_API_KEY: ${KAFKA_API_KEY:-}
+      KAFKA_API_SECRET: ${KAFKA_API_SECRET:-}
       KAFKA_TOPIC: filtered-service-events-spring
       CONSUMER_GROUP_ID: int-test-service-consumer-group
 
@@ -183,11 +142,10 @@ services:
       context: ./consumers-confluent/car-consumer
     container_name: int-test-car-consumer-v2
     profiles: ["v2"]
-    depends_on:
-      kafka:
-        condition: service_healthy
     environment:
-      KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+      KAFKA_BOOTSTRAP_SERVERS: ${KAFKA_BOOTSTRAP_SERVERS}
+      KAFKA_API_KEY: ${KAFKA_API_KEY:-}
+      KAFKA_API_SECRET: ${KAFKA_API_SECRET:-}
       KAFKA_TOPIC: filtered-car-created-events-v2-spring
       CONSUMER_GROUP_ID: int-test-car-consumer-group-v2
 
@@ -196,11 +154,10 @@ services:
       context: ./consumers-confluent/loan-consumer
     container_name: int-test-loan-consumer-v2
     profiles: ["v2"]
-    depends_on:
-      kafka:
-        condition: service_healthy
     environment:
-      KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+      KAFKA_BOOTSTRAP_SERVERS: ${KAFKA_BOOTSTRAP_SERVERS}
+      KAFKA_API_KEY: ${KAFKA_API_KEY:-}
+      KAFKA_API_SECRET: ${KAFKA_API_SECRET:-}
       KAFKA_TOPIC: filtered-loan-created-events-v2-spring
       CONSUMER_GROUP_ID: int-test-loan-consumer-group-v2
 
@@ -209,11 +166,10 @@ services:
       context: ./consumers-confluent/loan-payment-consumer
     container_name: int-test-loan-payment-consumer-v2
     profiles: ["v2"]
-    depends_on:
-      kafka:
-        condition: service_healthy
     environment:
-      KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+      KAFKA_BOOTSTRAP_SERVERS: ${KAFKA_BOOTSTRAP_SERVERS}
+      KAFKA_API_KEY: ${KAFKA_API_KEY:-}
+      KAFKA_API_SECRET: ${KAFKA_API_SECRET:-}
       KAFKA_TOPIC: filtered-loan-payment-submitted-events-v2-spring
       CONSUMER_GROUP_ID: int-test-loan-payment-consumer-group-v2
 
@@ -222,46 +178,13 @@ services:
       context: ./consumers-confluent/service-consumer
     container_name: int-test-service-consumer-v2
     profiles: ["v2"]
-    depends_on:
-      kafka:
-        condition: service_healthy
     environment:
-      KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+      KAFKA_BOOTSTRAP_SERVERS: ${KAFKA_BOOTSTRAP_SERVERS}
+      KAFKA_API_KEY: ${KAFKA_API_KEY:-}
+      KAFKA_API_SECRET: ${KAFKA_API_SECRET:-}
       KAFKA_TOPIC: filtered-service-events-v2-spring
       CONSUMER_GROUP_ID: int-test-service-consumer-group-v2
 
-  # Topic Initialization
-  init-topics:
-    image: confluentinc/cp-kafka:7.5.0
-    depends_on:
-      kafka:
-        condition: service_healthy
-    command: |
-      bash -c "
-        echo 'Creating V1 topics...'
-        kafka-topics --bootstrap-server kafka:9092 --create --if-not-exists --topic raw-event-headers --partitions 3 --replication-factor 1
-        kafka-topics --bootstrap-server kafka:9092 --create --if-not-exists --topic filtered-car-created-events-spring --partitions 3 --replication-factor 1
-        kafka-topics --bootstrap-server kafka:9092 --create --if-not-exists --topic filtered-loan-created-events-spring --partitions 3 --replication-factor 1
-        kafka-topics --bootstrap-server kafka:9092 --create --if-not-exists --topic filtered-loan-payment-submitted-events-spring --partitions 3 --replication-factor 1
-        kafka-topics --bootstrap-server kafka:9092 --create --if-not-exists --topic filtered-service-events-spring --partitions 3 --replication-factor 1
-        echo 'V1 topics created successfully'
-      "
-
-  # V2 Topic Initialization (for breaking schema changes)
-  init-topics-v2:
-    image: confluentinc/cp-kafka:7.5.0
-    profiles: ["v2"]
-    depends_on:
-      kafka:
-        condition: service_healthy
-    command: |
-      bash -c "
-        echo 'Creating V2 topics...'
-        kafka-topics --bootstrap-server kafka:9092 --create --if-not-exists --topic raw-event-headers-v2 --partitions 3 --replication-factor 1
-        kafka-topics --bootstrap-server kafka:9092 --create --if-not-exists --topic filtered-car-created-events-v2-spring --partitions 3 --replication-factor 1
-        kafka-topics --bootstrap-server kafka:9092 --create --if-not-exists --topic filtered-loan-created-events-v2-spring --partitions 3 --replication-factor 1
-        kafka-topics --bootstrap-server kafka:9092 --create --if-not-exists --topic filtered-loan-payment-submitted-events-v2-spring --partitions 3 --replication-factor 1
-        kafka-topics --bootstrap-server kafka:9092 --create --if-not-exists --topic filtered-service-events-v2-spring --partitions 3 --replication-factor 1
-        echo 'V2 topics created successfully'
-      "
+  # Note: Topics are created in Confluent Cloud using Confluent CLI
+  # See run-all-integration-tests.sh for topic creation via confluent kafka topic create
 

@@ -22,11 +22,42 @@ public class BreakingSchemaChangeTest {
     private KafkaTestUtils kafkaUtils;
     private String sourceTopicV1 = "raw-event-headers";
     private String sourceTopicV2 = "raw-event-headers-v2";
-    private String bootstrapServers = "localhost:9092";
+    private String bootstrapServers;
+    private String apiKey;
+    private String apiSecret;
     
     @BeforeAll
     void setUp() {
-        kafkaUtils = new KafkaTestUtils(bootstrapServers, null, null);
+        // Support both local Docker Kafka and Confluent Cloud
+        // Check environment variables first (for Confluent Cloud mode)
+        bootstrapServers = System.getenv("KAFKA_BOOTSTRAP_SERVERS");
+        if (bootstrapServers == null || bootstrapServers.isEmpty()) {
+            bootstrapServers = System.getenv("CONFLUENT_BOOTSTRAP_SERVERS");
+        }
+        if (bootstrapServers == null || bootstrapServers.isEmpty()) {
+            // Default to local Docker Kafka
+            bootstrapServers = "localhost:9092";
+        }
+        
+        // Get API credentials if using Confluent Cloud
+        apiKey = System.getenv("CONFLUENT_API_KEY");
+        if (apiKey == null || apiKey.isEmpty()) {
+            apiKey = System.getenv("CONFLUENT_CLOUD_API_KEY");
+        }
+        if (apiKey == null || apiKey.isEmpty()) {
+            apiKey = System.getenv("KAFKA_API_KEY");
+        }
+        
+        apiSecret = System.getenv("CONFLUENT_API_SECRET");
+        if (apiSecret == null || apiSecret.isEmpty()) {
+            apiSecret = System.getenv("CONFLUENT_CLOUD_API_SECRET");
+        }
+        if (apiSecret == null || apiSecret.isEmpty()) {
+            apiSecret = System.getenv("KAFKA_API_SECRET");
+        }
+        
+        // Local Kafka doesn't require authentication
+        kafkaUtils = new KafkaTestUtils(bootstrapServers, apiKey, apiSecret);
     }
     
     @Test
