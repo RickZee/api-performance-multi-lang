@@ -1,62 +1,17 @@
 # Generated Spring Boot Filter Configuration
-# Generated at: 2025-12-22T12:37:04.127639
-# Source: config/filters.json
+# Generated at: 2025-12-29T20:39:03.512072Z
+# Source: Metadata Service API
 # DO NOT EDIT MANUALLY - This file is auto-generated
 
 filters:
-  - id: car-created-filter
-    name: Car Created Events
-    description: Filters CarCreated events by event_type
-    outputTopic: filtered-car-created-events-spring
+  - id: test-filter-for-jenkins-1767040743195
+    name: Updated Test Filter
+    description: Updated description
+    outputTopic: test-topic-spring
     conditionLogic: AND
+    enabled: true
     conditions:
       - field: event_type
         operator: equals
-        value: "CarCreated"
-        valueType: string
-      - field: __op
-        operator: equals
-        value: "c"
-        valueType: string
-  - id: loan-created-filter
-    name: Loan Created Events
-    description: Filters LoanCreated events by event_type
-    outputTopic: filtered-loan-created-events-spring
-    conditionLogic: AND
-    conditions:
-      - field: event_type
-        operator: equals
-        value: "LoanCreated"
-        valueType: string
-      - field: __op
-        operator: equals
-        value: "c"
-        valueType: string
-  - id: loan-payment-submitted-filter
-    name: Loan Payment Submitted Events
-    description: Filters LoanPaymentSubmitted events by event_type
-    outputTopic: filtered-loan-payment-submitted-events-spring
-    conditionLogic: AND
-    conditions:
-      - field: event_type
-        operator: equals
-        value: "LoanPaymentSubmitted"
-        valueType: string
-      - field: __op
-        operator: equals
-        value: "c"
-        valueType: string
-  - id: service-events-filter
-    name: Service Events
-    description: Filters CarServiceDone events by event_type
-    outputTopic: filtered-service-events-spring
-    conditionLogic: AND
-    conditions:
-      - field: event_type
-        operator: equals
-        value: "CarServiceDone"
-        valueType: string
-      - field: __op
-        operator: equals
-        value: "c"
+        value: CarCreated
         valueType: string

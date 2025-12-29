@@ -2,6 +2,7 @@ plugins {
     id 'java'
     id 'org.springframework.boot' version '3.2.0'
     id 'io.spring.dependency-management' version '1.1.4'
+    id 'jacoco'
 }
 
 group = 'com.example'
@@ -50,4 +51,60 @@ dependencies {
 
 tasks.named('test') {
     useJUnitPlatform()
+    finalizedBy jacocoTestReport
+    
+    // Show test output in console
+    testLogging {
+        events "passed", "skipped", "failed"
+        exceptionFormat "full"
+        showExceptions true
+        showCauses true
+        showStackTraces true
+        displayGranularity 2
+    }
+    
+    // Show test progress
+    outputs.upToDateWhen { false }
 }
+
+jacocoTestReport {
+    dependsOn test
+    reports {
+        xml.required = true
+        html.required = true
+        csv.required = false
+    }
+    afterEvaluate {
+        classDirectories.setFrom(files(classDirectories.files.collect {
+            fileTree(dir: it, exclude: [
+                '**/config/**',
+                '**/model/**',
+                '**/exception/**'
+            ])
+        }))
+    }
+}
+
+jacocoTestCoverageVerification {
+    violationRules {
+        rule {
+            limit {
+                minimum = 0.70 // 70% coverage required
+            }
+        }
+        rule {
+            element = 'CLASS'
+            excludes = [
+                'com.example.metadata.config.*',
+                'com.example.metadata.model.*',
+                'com.example.metadata.exception.*',
+                'com.example.metadata.MetadataServiceApplication'
+            ]
+            limit {
+                minimum = 0.60 // 60% coverage for classes
+            }
+        }
+    }
+}
+
+check.dependsOn jacocoTestCoverageVerification

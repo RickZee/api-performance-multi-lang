@@ -24,6 +24,20 @@ spring-boot:
   backup-enabled: ${SPRING_BOOT_YAML_BACKUP_ENABLED:true}
   backup-dir: ${SPRING_BOOT_YAML_BACKUP_DIR:/tmp/filters-yaml-backups}
 
+jenkins:
+  enabled: ${JENKINS_ENABLED:false}
+  base-url: ${JENKINS_BASE_URL:http://localhost:8080}
+  job-name: ${JENKINS_JOB_NAME:filter-integration-tests}
+  username: ${JENKINS_USERNAME:}
+  api-token: ${JENKINS_API_TOKEN:}
+  build-token: ${JENKINS_BUILD_TOKEN:}
+  trigger-on-create: ${JENKINS_TRIGGER_ON_CREATE:true}
+  trigger-on-update: ${JENKINS_TRIGGER_ON_UPDATE:true}
+  trigger-on-delete: ${JENKINS_TRIGGER_ON_DELETE:true}
+  trigger-on-deploy: ${JENKINS_TRIGGER_ON_DEPLOY:true}
+  trigger-on-approve: ${JENKINS_TRIGGER_ON_APPROVE:true}
+  timeout-seconds: ${JENKINS_TIMEOUT_SECONDS:30}
+
 logging:
   level:
     root: INFO

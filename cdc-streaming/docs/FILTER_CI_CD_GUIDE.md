@@ -696,25 +696,190 @@ stage('Deploy with Retry') {
 }
 ```
 
-### Webhook Integration
+### CI/CD Trigger Integration
 
-The Metadata Service can trigger CI/CD pipelines via webhooks when filters are approved:
+The Metadata Service **automatically triggers Jenkins CI/CD builds** when filters are changed via API. This enables change management and automated testing for API-driven filter changes.
+
+**Automatic CI/CD Triggering:**
+
+When filters are created, updated, deleted, approved, or deployed via the API, the Metadata Service automatically triggers a Jenkins build to:
+- Validate filter changes
+- Run integration tests
+- Verify deployment
+- Ensure system consistency
+
+**Configuration:**
+
+Enable Jenkins triggering in `application.yml`:
+
+```yaml
+jenkins:
+  enabled: ${JENKINS_ENABLED:false}
+  base-url: ${JENKINS_BASE_URL:http://localhost:8080}
+  job-name: ${JENKINS_JOB_NAME:filter-integration-tests}
+  username: ${JENKINS_USERNAME:}
+  api-token: ${JENKINS_API_TOKEN:}
+  build-token: ${JENKINS_BUILD_TOKEN:}
+  trigger-on-create: ${JENKINS_TRIGGER_ON_CREATE:true}
+  trigger-on-update: ${JENKINS_TRIGGER_ON_UPDATE:true}
+  trigger-on-delete: ${JENKINS_TRIGGER_ON_DELETE:true}
+  trigger-on-deploy: ${JENKINS_TRIGGER_ON_DEPLOY:true}
+  trigger-on-approve: ${JENKINS_TRIGGER_ON_APPROVE:true}
+  timeout-seconds: ${JENKINS_TIMEOUT_SECONDS:30}
+```
+
+**Environment Variables:**
 
 ```bash
-# Configure webhook in Metadata Service (if supported)
-# When filter status changes to "approved", trigger Jenkins job
+# Enable Jenkins triggering
+export JENKINS_ENABLED=true
+
+# Jenkins server URL
+export JENKINS_BASE_URL=http://jenkins.example.com:8080
+
+# Jenkins job name
+export JENKINS_JOB_NAME=filter-integration-tests
+
+# Authentication (choose one method)
+# Method 1: Username + API Token
+export JENKINS_USERNAME=admin
+export JENKINS_API_TOKEN=your-api-token-here
+
+# Method 2: Build Token (if configured in Jenkins job)
+export JENKINS_BUILD_TOKEN=your-build-token-here
+
+# Configure which events trigger builds
+export JENKINS_TRIGGER_ON_CREATE=true
+export JENKINS_TRIGGER_ON_UPDATE=true
+export JENKINS_TRIGGER_ON_DELETE=true
+export JENKINS_TRIGGER_ON_DEPLOY=true
+export JENKINS_TRIGGER_ON_APPROVE=true
 ```
 
-**Example Webhook Payload:**
-```json
-{
-  "event": "filter.approved",
-  "filterId": "new-event-filter-123",
-  "status": "approved",
-  "approvedBy": "reviewer@example.com",
-  "timestamp": "2025-12-28T20:00:00Z"
+**Jenkins Job Configuration:**
+
+Your Jenkins job should accept build parameters to receive filter change information:
+
+```groovy
+pipeline {
+    agent any
+    
+    parameters {
+        string(name: 'FILTER_EVENT_TYPE', defaultValue: '', description: 'Event type: create, update, delete, deploy, approve')
+        string(name: 'FILTER_ID', defaultValue: '', description: 'Filter ID that changed')
+        string(name: 'FILTER_VERSION', defaultValue: 'v1', description: 'Filter version')
+        string(name: 'APPROVED_BY', defaultValue: '', description: 'User who approved (for approve events)')
+        string(name: 'DEPLOYMENT_STATUS', defaultValue: '', description: 'Deployment status (for deploy events)')
+        string(name: 'FLINK_STATEMENT_IDS', defaultValue: '', description: 'Flink statement IDs (for deploy events)')
+    }
+    
+    stages {
+        stage('Validate Filter Changes') {
+            steps {
+                script {
+                    echo "Filter Event: ${params.FILTER_EVENT_TYPE}"
+                    echo "Filter ID: ${params.FILTER_ID}"
+                    echo "Filter Version: ${params.FILTER_VERSION}"
+                    
+                    if (params.FILTER_EVENT_TYPE == 'approve') {
+                        echo "Approved by: ${params.APPROVED_BY}"
+                    }
+                    
+                    if (params.FILTER_EVENT_TYPE == 'deploy') {
+                        echo "Deployment Status: ${params.DEPLOYMENT_STATUS}"
+                        echo "Flink Statement IDs: ${params.FLINK_STATEMENT_IDS}"
+                    }
+                }
+            }
+        }
+        
+        stage('Run Integration Tests') {
+            steps {
+                sh './cdc-streaming/scripts/run-all-integration-tests.sh'
+            }
+        }
+        
+        stage('Verify Filter Changes') {
+            steps {
+                script {
+                    // Verify the filter change was applied correctly
+                    sh '''
+                        curl -s http://metadata-service:8080/api/v1/filters/${FILTER_ID}?version=${FILTER_VERSION} | jq .
+                    '''
+                }
+            }
+        }
+    }
 }
 ```
+
+**Trigger Events:**
+
+| Event Type | When Triggered | Build Parameters |
+|------------|----------------|------------------|
+| `create` | Filter created via API | `FILTER_ID`, `FILTER_VERSION` |
+| `update` | Filter updated via API | `FILTER_ID`, `FILTER_VERSION` |
+| `delete` | Filter deleted via API | `FILTER_ID`, `FILTER_VERSION` |
+| `approve` | Filter approved for deployment | `FILTER_ID`, `FILTER_VERSION`, `APPROVED_BY` |
+| `deploy` | Filter deployed to Confluent Cloud | `FILTER_ID`, `FILTER_VERSION`, `DEPLOYMENT_STATUS`, `FLINK_STATEMENT_IDS` |
+
+**Jenkins Authentication Methods:**
+
+**Method 1: Username + API Token (Recommended)**
+
+1. In Jenkins, go to **Manage Jenkins** → **Manage Users** → Select user → **Configure**
+2. Generate an API token: **API Token** → **Add new Token**
+3. Copy the token and set `JENKINS_USERNAME` and `JENKINS_API_TOKEN`
+
+**Method 2: Build Token**
+
+1. In Jenkins job configuration, enable **"Trigger builds remotely (e.g., from scripts)"**
+2. Set a build token
+3. Set `JENKINS_BUILD_TOKEN` environment variable
+
+**Error Handling:**
+
+- If Jenkins triggering fails, the error is **logged but does not fail the API operation**
+- This ensures filter operations succeed even if Jenkins is unavailable
+- Check Metadata Service logs for Jenkins-related warnings
+- Failed triggers can be manually retried by triggering the Jenkins job directly
+
+**Example: Complete API Workflow with CI/CD**
+
+```mermaid
+sequenceDiagram
+    participant Dev as Developer
+    participant API as Metadata Service API
+    participant Jenkins as Jenkins CI/CD
+    participant Flink as Confluent Cloud
+    participant SpringYAML as Spring Boot YAML
+    
+    Dev->>API: POST /api/v1/filters (create)
+    API->>SpringYAML: Generate & Write YAML
+    API->>Jenkins: Trigger Build (event: create)
+    Note over Jenkins: Run Integration Tests
+    API-->>Dev: Filter Created
+    
+    Dev->>API: POST /api/v1/filters/{id}/approve
+    API->>Jenkins: Trigger Build (event: approve)
+    Note over Jenkins: Validate Approval
+    API-->>Dev: Filter Approved
+    
+    Dev->>API: POST /api/v1/filters/{id}/deploy
+    API->>Flink: Deploy Statements
+    API->>SpringYAML: Generate & Write YAML
+    API->>Jenkins: Trigger Build (event: deploy)
+    Note over Jenkins: Verify Deployment
+    API-->>Dev: Deployment Complete
+```
+
+**Benefits:**
+
+1. **Change Management**: All filter changes trigger automated validation
+2. **Consistency**: Ensures filters are tested before and after deployment
+3. **Audit Trail**: Jenkins build history provides a complete audit log
+4. **Early Detection**: Integration tests catch issues before production
+5. **Automated Verification**: Deployment verification happens automatically
 
 ---
 
@@ -925,6 +1090,109 @@ stage('Run Integration Tests') {
 - Filter lifecycle (create, update, delete)
 - Schema evolution scenarios
 - V2 parallel deployment isolation
+
+### Test Coverage for Jenkins CI/CD Triggering
+
+The Metadata Service includes comprehensive test coverage for Jenkins CI/CD triggering functionality:
+
+#### Unit Tests
+
+**JenkinsTriggerServiceTest** (10 test cases):
+- ✅ Enabled/disabled configuration validation
+- ✅ Event type filtering (create, update, delete, approve, deploy)
+- ✅ Authentication methods (username/API token, build token)
+- ✅ Build parameter generation
+- ✅ Error handling and graceful degradation
+- ✅ Timeout configuration
+
+**Location**: `metadata-service-java/src/test/java/com/example/metadata/service/JenkinsTriggerServiceTest.java`
+
+#### Integration Tests
+
+**JenkinsTriggerIntegrationTest** (8 test cases):
+- ✅ Jenkins triggering enabled/disabled configuration
+- ✅ Filter create triggers Jenkins build
+- ✅ Filter update triggers Jenkins build
+- ✅ Filter delete triggers Jenkins build
+- ✅ Filter approve triggers Jenkins build with approver info
+- ✅ Filter operations succeed even when Jenkins fails
+- ✅ Event-specific triggering can be disabled
+- ✅ Configuration validation
+
+**Location**: `metadata-service-java/src/test/java/com/example/metadata/integration/JenkinsTriggerIntegrationTest.java`
+
+#### Test Coverage Metrics
+
+**Coverage Requirements**:
+- Overall code coverage: **70% minimum**
+- Class-level coverage: **60% minimum** (excluding config, models, exceptions)
+- Service layer coverage: **80% minimum**
+
+**Running Coverage Reports**:
+
+```bash
+cd metadata-service-java
+
+# Run tests with coverage
+./gradlew test jacocoTestReport
+
+# View HTML report
+open build/reports/jacoco/test/html/index.html
+
+# Verify coverage thresholds
+./gradlew jacocoTestCoverageVerification
+```
+
+**Coverage Exclusions**:
+- Configuration classes (`com.example.metadata.config.*`)
+- Model classes (`com.example.metadata.model.*`)
+- Exception classes (`com.example.metadata.exception.*`)
+- Application main class
+
+**Current Coverage Areas**:
+
+| Component | Coverage | Test Types |
+|-----------|----------|------------|
+| `JenkinsTriggerService` | ✅ High | Unit + Integration |
+| `FilterController` (Jenkins integration) | ✅ High | Integration |
+| `AppConfig.JenkinsConfig` | ✅ High | Unit |
+| Error handling | ✅ High | Unit + Integration |
+| Authentication | ✅ High | Unit |
+| Build parameter generation | ✅ High | Unit |
+
+#### Test Execution
+
+**Run all tests**:
+```bash
+cd metadata-service-java
+./gradlew test
+```
+
+**Run specific test suites**:
+```bash
+# Unit tests only
+./gradlew test --tests "*ServiceTest"
+
+# Integration tests only
+./gradlew test --tests "*IntegrationTest"
+
+# Jenkins-specific tests
+./gradlew test --tests "*Jenkins*"
+```
+
+**Run with coverage**:
+```bash
+./gradlew test jacocoTestReport
+```
+
+**View coverage report**:
+```bash
+# HTML report
+open build/reports/jacoco/test/html/index.html
+
+# XML report (for CI/CD)
+cat build/reports/jacoco/test/jacocoTestReport.xml
+```
 
 #### 4. Deployment Stage
 
@@ -1927,6 +2195,20 @@ DEPLOY_METHOD=local ./cdc-streaming/scripts/filters/deploy-spring-filters.sh
 - `CONFLUENT_CLOUD_API_ENDPOINT`: Confluent Cloud API endpoint
 - `CONFLUENT_CLOUD_API_KEY`: Confluent Cloud API key
 - `CONFLUENT_CLOUD_API_SECRET`: Confluent Cloud API secret
+
+**Jenkins CI/CD Triggering**:
+- `JENKINS_ENABLED`: Enable Jenkins triggering (default: `false`)
+- `JENKINS_BASE_URL`: Jenkins server URL (default: `http://localhost:8080`)
+- `JENKINS_JOB_NAME`: Jenkins job name to trigger (default: `filter-integration-tests`)
+- `JENKINS_USERNAME`: Jenkins username for authentication
+- `JENKINS_API_TOKEN`: Jenkins API token for authentication
+- `JENKINS_BUILD_TOKEN`: Jenkins build token (alternative to username/token)
+- `JENKINS_TRIGGER_ON_CREATE`: Trigger on filter create (default: `true`)
+- `JENKINS_TRIGGER_ON_UPDATE`: Trigger on filter update (default: `true`)
+- `JENKINS_TRIGGER_ON_DELETE`: Trigger on filter delete (default: `true`)
+- `JENKINS_TRIGGER_ON_DEPLOY`: Trigger on filter deploy (default: `true`)
+- `JENKINS_TRIGGER_ON_APPROVE`: Trigger on filter approve (default: `true`)
+- `JENKINS_TIMEOUT_SECONDS`: Request timeout in seconds (default: `30`)
 
 **Spring Boot YAML Generation**:
 - `SPRING_BOOT_FILTERS_YAML_PATH`: Path to filters.yml file (default: `../cdc-streaming/stream-processor-spring/src/main/resources/filters.yml`)

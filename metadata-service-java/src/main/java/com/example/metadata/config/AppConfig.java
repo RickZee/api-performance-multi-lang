@@ -12,6 +12,7 @@ public class AppConfig {
     private ValidationConfig validation = new ValidationConfig();
     private ConfluentConfig confluent = new ConfluentConfig();
     private SpringBootConfig springBoot = new SpringBootConfig();
+    private JenkinsConfig jenkins = new JenkinsConfig();
 
     @Data
     public static class GitConfig {
@@ -46,5 +47,21 @@ public class AppConfig {
         private String filtersYamlPath;
         private boolean backupEnabled = true;
         private String backupDir = "/tmp/filters-yaml-backups";
+    }
+
+    @Data
+    public static class JenkinsConfig {
+        private boolean enabled = false;
+        private String baseUrl = "http://localhost:8080";
+        private String jobName = "filter-integration-tests";
+        private String username;
+        private String apiToken;
+        private String buildToken;
+        private boolean triggerOnCreate = true;
+        private boolean triggerOnUpdate = true;
+        private boolean triggerOnDelete = true;
+        private boolean triggerOnDeploy = true;
+        private boolean triggerOnApprove = true;
+        private int timeoutSeconds = 30;
     }
 }

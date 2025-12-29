@@ -6,6 +6,7 @@ import com.example.metadata.model.*;
 import com.example.metadata.service.FilterDeployerService;
 import com.example.metadata.service.FilterGeneratorService;
 import com.example.metadata.service.FilterStorageService;
+import com.example.metadata.service.JenkinsTriggerService;
 import com.example.metadata.service.SpringYamlGeneratorService;
 import com.example.metadata.service.SpringYamlWriterService;
 import lombok.RequiredArgsConstructor;
@@ -27,6 +28,7 @@ public class FilterController {
     private final FilterDeployerService filterDeployerService;
     private final SpringYamlGeneratorService springYamlGeneratorService;
     private final SpringYamlWriterService springYamlWriterService;
+    private final JenkinsTriggerService jenkinsTriggerService;
     private final AppConfig config;
 
     @PostMapping
@@ -39,6 +41,9 @@ public class FilterController {
             
             // Update Spring Boot YAML file
             updateSpringYaml(version);
+            
+            // Trigger CI/CD for change management
+            jenkinsTriggerService.triggerSimpleBuild("create", filter.getId(), version);
             
             return ResponseEntity.status(HttpStatus.CREATED).body(filter);
         } catch (IOException e) {
@@ -95,6 +100,9 @@ public class FilterController {
             // Update Spring Boot YAML file
             updateSpringYaml(version);
             
+            // Trigger CI/CD for change management
+            jenkinsTriggerService.triggerSimpleBuild("update", id, version);
+            
             return ResponseEntity.ok(filter);
         } catch (FilterNotFoundException e) {
             return ResponseEntity.notFound().build();
@@ -113,6 +121,9 @@ public class FilterController {
             
             // Update Spring Boot YAML file
             updateSpringYaml(version);
+            
+            // Trigger CI/CD for change management
+            jenkinsTriggerService.triggerSimpleBuild("delete", id, version);
             
             return ResponseEntity.noContent().build();
         } catch (FilterNotFoundException e) {
@@ -182,6 +193,12 @@ public class FilterController {
         try {
             String approvedBy = request.getApprovedBy() != null ? request.getApprovedBy() : "system";
             Filter filter = filterStorageService.approve(version, id, approvedBy);
+            
+            // Trigger CI/CD for change management (approval may trigger validation pipeline)
+            java.util.Map<String, String> params = new java.util.HashMap<>();
+            params.put("APPROVED_BY", approvedBy);
+            jenkinsTriggerService.triggerBuild("approve", id, version, params);
+            
             return ResponseEntity.ok(filter);
         } catch (FilterNotFoundException e) {
             return ResponseEntity.notFound().build();
@@ -247,6 +264,12 @@ public class FilterController {
 
                 // Update Spring Boot YAML file after successful deployment
                 updateSpringYaml(version);
+
+                // Trigger CI/CD for change management (deployment verification pipeline)
+                java.util.Map<String, String> params = new java.util.HashMap<>();
+                params.put("DEPLOYMENT_STATUS", "success");
+                params.put("FLINK_STATEMENT_IDS", String.join(",", statementIds));
+                jenkinsTriggerService.triggerBuild("deploy", id, version, params);
 
                 return ResponseEntity.ok(DeployFilterResponse.builder()
                     .filterId(id)
