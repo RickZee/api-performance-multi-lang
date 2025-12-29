@@ -11,6 +11,7 @@ public class AppConfig {
     private GitConfig git = new GitConfig();
     private ValidationConfig validation = new ValidationConfig();
     private ConfluentConfig confluent = new ConfluentConfig();
+    private SpringBootConfig springBoot = new SpringBootConfig();
 
     @Data
     public static class GitConfig {
@@ -38,5 +39,12 @@ public class AppConfig {
             private String flinkComputePoolId;
             private String flinkApiEndpoint;
         }
+    }
+
+    @Data
+    public static class SpringBootConfig {
+        private String filtersYamlPath;
+        private boolean backupEnabled = true;
+        private String backupDir = "/tmp/filters-yaml-backups";
     }
 }

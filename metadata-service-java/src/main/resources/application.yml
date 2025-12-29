@@ -19,6 +19,11 @@ confluent:
     flink-compute-pool-id: ${CONFLUENT_FLINK_COMPUTE_POOL_ID:}
     flink-api-endpoint: ${CONFLUENT_FLINK_API_ENDPOINT:}
 
+spring-boot:
+  filters-yaml-path: ${SPRING_BOOT_FILTERS_YAML_PATH:../cdc-streaming/stream-processor-spring/src/main/resources/filters.yml}
+  backup-enabled: ${SPRING_BOOT_YAML_BACKUP_ENABLED:true}
+  backup-dir: ${SPRING_BOOT_YAML_BACKUP_DIR:/tmp/filters-yaml-backups}
+
 logging:
   level:
     root: INFO

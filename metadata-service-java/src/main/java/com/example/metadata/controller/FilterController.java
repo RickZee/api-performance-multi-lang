@@ -6,6 +6,8 @@ import com.example.metadata.model.*;
 import com.example.metadata.service.FilterDeployerService;
 import com.example.metadata.service.FilterGeneratorService;
 import com.example.metadata.service.FilterStorageService;
+import com.example.metadata.service.SpringYamlGeneratorService;
+import com.example.metadata.service.SpringYamlWriterService;
 import lombok.RequiredArgsConstructor;
 import jakarta.validation.Valid;
 import org.springframework.http.HttpStatus;
@@ -15,7 +17,6 @@ import org.springframework.web.bind.annotation.*;
 import java.io.IOException;
 import java.time.Instant;
 import java.util.List;
-import java.util.stream.Collectors;
 
 @RestController
 @RequestMapping("/api/v1/filters")
@@ -24,6 +25,8 @@ public class FilterController {
     private final FilterStorageService filterStorageService;
     private final FilterGeneratorService filterGeneratorService;
     private final FilterDeployerService filterDeployerService;
+    private final SpringYamlGeneratorService springYamlGeneratorService;
+    private final SpringYamlWriterService springYamlWriterService;
     private final AppConfig config;
 
     @PostMapping
@@ -33,6 +36,10 @@ public class FilterController {
     ) {
         try {
             Filter filter = filterStorageService.create(version, request);
+            
+            // Update Spring Boot YAML file
+            updateSpringYaml(version);
+            
             return ResponseEntity.status(HttpStatus.CREATED).body(filter);
         } catch (IOException e) {
             return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).build();
@@ -84,6 +91,10 @@ public class FilterController {
     ) {
         try {
             Filter filter = filterStorageService.update(version, id, request);
+            
+            // Update Spring Boot YAML file
+            updateSpringYaml(version);
+            
             return ResponseEntity.ok(filter);
         } catch (FilterNotFoundException e) {
             return ResponseEntity.notFound().build();
@@ -99,6 +110,10 @@ public class FilterController {
     ) {
         try {
             filterStorageService.delete(version, id);
+            
+            // Update Spring Boot YAML file
+            updateSpringYaml(version);
+            
             return ResponseEntity.noContent().build();
         } catch (FilterNotFoundException e) {
             return ResponseEntity.notFound().build();
@@ -230,6 +245,9 @@ public class FilterController {
                 // Update filter with deployment info
                 filterStorageService.updateDeployment(version, id, "deployed", statementIds, null);
 
+                // Update Spring Boot YAML file after successful deployment
+                updateSpringYaml(version);
+
                 return ResponseEntity.ok(DeployFilterResponse.builder()
                     .filterId(id)
                     .status("deployed")
@@ -274,6 +292,36 @@ public class FilterController {
             return ResponseEntity.notFound().build();
         } catch (IOException e) {
             return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).build();
+        }
+    }
+
+    /**
+     * Update Spring Boot filters.yml file with current filters.
+     * This method is called after create, update, delete, and deploy operations.
+     * Errors are logged but do not fail the API operation.
+     */
+    private void updateSpringYaml(String version) {
+        if (!springYamlWriterService.isEnabled()) {
+            return;
+        }
+
+        try {
+            // Get all filters for the version
+            List<Filter> filters = filterStorageService.list(version);
+            
+            // Generate YAML
+            String yaml = springYamlGeneratorService.generateYaml(filters);
+            
+            // Write to file
+            springYamlWriterService.writeFiltersYaml(yaml);
+        } catch (IOException e) {
+            // Log error but don't fail the API operation
+            org.slf4j.LoggerFactory.getLogger(FilterController.class)
+                .warn("Failed to update Spring Boot filters.yml: {}", e.getMessage());
+        } catch (Exception e) {
+            // Log any other errors
+            org.slf4j.LoggerFactory.getLogger(FilterController.class)
+                .warn("Unexpected error updating Spring Boot filters.yml: {}", e.getMessage(), e);
         }
     }
 }

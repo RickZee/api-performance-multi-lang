@@ -102,13 +102,18 @@ public class NonBreakingSchemaTest {
         String testId = "test-new-event-type-" + System.currentTimeMillis();
         EventHeader event = TestEventGenerator.generateCarCreatedEvent(testId);
         
-        kafkaUtils.publishTestEvent(sourceTopic, event);
-        
-        List<EventHeader> carEvents = kafkaUtils.consumeEvents(
-            "filtered-car-created-events-spring", 1, Duration.ofSeconds(30), "test-new-event-type-"
-        );
-        
-        assertThat(carEvents).hasSize(1);
+        String filteredTopic = "filtered-car-created-events-spring";
+        try (KafkaConsumer<String, byte[]> consumer = kafkaUtils.prepareConsumerForTopic(filteredTopic)) {
+            kafkaUtils.publishTestEvent(sourceTopic, event);
+            
+            Thread.sleep(5000);
+            
+            List<EventHeader> carEvents = kafkaUtils.consumeEventsWithConsumer(
+                consumer, 1, Duration.ofSeconds(30), "test-new-event-type-"
+            );
+            
+            assertThat(carEvents).hasSize(1);
+        }
     }
     
     @Test
@@ -121,10 +126,13 @@ public class NonBreakingSchemaTest {
         
         String filteredTopic = "filtered-loan-created-events-spring";
         try (KafkaConsumer<String, byte[]> consumer = kafkaUtils.prepareConsumerForTopic(filteredTopic)) {
+            // Publish the event
             kafkaUtils.publishTestEvent(sourceTopic, event);
             
+            // Wait for stream-processor to process the event
             Thread.sleep(5000);
             
+            // Consume the event
             List<EventHeader> loanEvents = kafkaUtils.consumeEventsWithConsumer(
                 consumer, 1, Duration.ofSeconds(30), testId
             );
@@ -140,14 +148,19 @@ public class NonBreakingSchemaTest {
         String testId = "test-backward-compat-" + System.currentTimeMillis();
         EventHeader event = TestEventGenerator.generateServiceEvent(testId);
         
-        kafkaUtils.publishTestEvent(sourceTopic, event);
-        
-        List<EventHeader> serviceEvents = kafkaUtils.consumeEvents(
-            "filtered-service-events-spring", 1, Duration.ofSeconds(30), "test-backward-compat-"
-        );
-        
-        assertThat(serviceEvents).hasSize(1);
-        assertThat(serviceEvents.get(0).getEventName()).isEqualTo("CarServiceDone");
+        String filteredTopic = "filtered-service-events-spring";
+        try (KafkaConsumer<String, byte[]> consumer = kafkaUtils.prepareConsumerForTopic(filteredTopic)) {
+            kafkaUtils.publishTestEvent(sourceTopic, event);
+            
+            Thread.sleep(5000);
+            
+            List<EventHeader> serviceEvents = kafkaUtils.consumeEventsWithConsumer(
+                consumer, 1, Duration.ofSeconds(30), "test-backward-compat-"
+            );
+            
+            assertThat(serviceEvents).hasSize(1);
+            assertThat(serviceEvents.get(0).getEventName()).isEqualTo("CarServiceDone");
+        }
     }
 }
 
