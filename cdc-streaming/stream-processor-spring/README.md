@@ -2,6 +2,12 @@
 
 Spring Boot application that replicates the Flink SQL filtering and routing functionality using Kafka Streams. This service reads from the `raw-event-headers` topic and routes events to filtered topics based on event type.
 
+**Key Features:**
+- Dynamic filter reloading from Metadata Service (no restart required)
+- Fallback to static `filters.yml` configuration
+- Exactly-once semantics for event processing
+- Support for complex filter conditions
+
 ## Functional Requirements
 
 The service replicates the exact filtering logic from the Flink SQL jobs:
@@ -66,8 +72,39 @@ docker-compose up stream-processor
 
 Configuration is managed via `application.yml` and environment variables:
 
+### Kafka Configuration
+
 - `KAFKA_BOOTSTRAP_SERVERS`: Kafka bootstrap servers (required)
 - `KAFKA_API_KEY`: Confluent Cloud API key (required for Confluent Cloud)
+- `KAFKA_API_SECRET`: Confluent Cloud API secret (required for Confluent Cloud)
+
+### Metadata Service Integration (Dynamic Filter Loading)
+
+The service supports dynamic filter reloading from the Metadata Service, eliminating the need for restarts when filters change.
+
+**Enable Dynamic Filter Loading:**
+```yaml
+metadata:
+  service:
+    enabled: true
+    url: http://localhost:8080
+    schema:
+      version: v1
+    poll:
+      interval: 30000  # Poll every 30 seconds
+```
+
+**Environment Variables:**
+- `METADATA_SERVICE_ENABLED`: Enable dynamic filter loading (default: `false`)
+- `METADATA_SERVICE_URL`: Metadata Service API URL (default: `http://localhost:8080`)
+- `METADATA_SERVICE_SCHEMA_VERSION`: Schema version to use (default: `v1`)
+- `METADATA_SERVICE_POLL_INTERVAL`: Polling interval in milliseconds (default: `30000`)
+- `METADATA_SERVICE_TIMEOUT_SECONDS`: Request timeout (default: `5`)
+- `METADATA_SERVICE_MAX_RETRIES`: Maximum retry attempts (default: `3`)
+
+**Fallback Behavior:**
+- If Metadata Service is unavailable, the service falls back to `filters.yml` file
+- If dynamic loading is disabled, filters are loaded from `filters.yml` at startup
 - `KAFKA_API_SECRET`: Confluent Cloud API secret (required for Confluent Cloud)
 - `SPRING_KAFKA_STREAMS_SOURCE_TOPIC`: Source topic name (default: `raw-event-headers`)
 

@@ -65,6 +65,27 @@ public class BreakingSchemaChangeTest {
         // Verify V2 topics exist
         // This test assumes V2 system is running (via --profile v2)
         
+        // Check if V2 stream processor is running
+        boolean v2Running = false;
+        try {
+            java.net.http.HttpClient client = java.net.http.HttpClient.newHttpClient();
+            java.net.http.HttpRequest request = java.net.http.HttpRequest.newBuilder()
+                    .uri(java.net.URI.create("http://localhost:8084/actuator/health"))
+                    .GET()
+                    .timeout(java.time.Duration.ofSeconds(2))
+                    .build();
+            java.net.http.HttpResponse<String> response = client.send(request, 
+                    java.net.http.HttpResponse.BodyHandlers.ofString());
+            v2Running = response.statusCode() == 200 && response.body().contains("UP");
+        } catch (Exception e) {
+            // V2 not running
+        }
+        
+        if (!v2Running) {
+            System.out.println("WARNING: V2 stream processor is not running. Start with: docker-compose --profile v2 up -d stream-processor-v2");
+            System.out.println("Skipping V2 assertions - V1 system will still be tested");
+        }
+        
         String testIdV1 = "test-v1-" + System.currentTimeMillis();
         String testIdV2 = "test-v2-" + System.currentTimeMillis();
         
@@ -81,21 +102,18 @@ public class BreakingSchemaChangeTest {
             "filtered-car-created-events-spring", 1, Duration.ofSeconds(30), "test-v1-"
         );
         
-        // Verify V2 processing
-        List<EventHeader> v2Events = kafkaUtils.consumeEvents(
-            "filtered-car-created-events-v2-spring", 1, Duration.ofSeconds(30), "test-v2-"
-        );
-        
         assertThat(v1Events).hasSize(1);
         assertThat(v1Events.get(0).getId()).startsWith("test-v1-");
         
-        // V2 events may not be processed if V2 system is not running
-        // This is expected behavior - test verifies isolation
-        if (!v2Events.isEmpty()) {
+        // Verify V2 processing only if V2 system is running
+        if (v2Running) {
+            List<EventHeader> v2Events = kafkaUtils.consumeEvents(
+                "filtered-car-created-events-v2-spring", 1, Duration.ofSeconds(30), "test-v2-"
+            );
+            assertThat(v2Events).as("V2 events should be processed when V2 system is running").hasSize(1);
             assertThat(v2Events.get(0).getId()).startsWith("test-v2-");
         } else {
-            // V2 system may not be running, which is acceptable for this test
-            // System.out.println("V2 system not running - this is acceptable for isolation test");
+            System.out.println("V2 system not running - skipping V2 event verification");
         }
     }
     
@@ -113,40 +131,58 @@ public class BreakingSchemaChangeTest {
         EventHeader eventV2 = TestEventGenerator.generateLoanCreatedEvent(testIdV2);
         kafkaUtils.publishTestEvent(sourceTopicV2, eventV2);
         
-        // Verify V1 events only in V1 topics
+        // Verify V1 events only in V1 topics (increased timeout for Kafka Streams processing)
         List<EventHeader> v1Events = kafkaUtils.consumeEvents(
-            "filtered-loan-created-events-spring", 1, Duration.ofSeconds(30), "test-isolation-v1-"
+            "filtered-loan-created-events-spring", 1, Duration.ofSeconds(45), "test-isolation-v1-"
         );
         
-        // Verify V2 events only in V2 topics (if V2 system running)
+        // Verify V2 events only in V2 topics (increased timeout for Kafka Streams processing)
         List<EventHeader> v2Events = kafkaUtils.consumeEvents(
-            "filtered-loan-created-events-v2-spring", 1, Duration.ofSeconds(30), "test-isolation-v2-"
+            "filtered-loan-created-events-v2-spring", 1, Duration.ofSeconds(45), "test-isolation-v2-"
         );
         
         // V1 events should not appear in V2 topics
-        assertThat(v1Events).hasSize(1);
+        assertThat(v1Events).hasSize(1)
+            .withFailMessage("Expected 1 V1 event but got " + v1Events.size());
         assertThat(v1Events.get(0).getId()).startsWith("test-isolation-v1-");
         
         // Verify no V1 events in V2 topics
         List<EventHeader> v2TopicCheck = kafkaUtils.consumeAllEvents(
-            "filtered-loan-created-events-v2-spring", 10, Duration.ofSeconds(5)
+            "filtered-loan-created-events-v2-spring", 10, Duration.ofSeconds(10)
         );
         long v1InV2 = v2TopicCheck.stream()
             .filter(e -> e.getId().startsWith("test-isolation-v1-"))
             .count();
         
-        assertThat(v1InV2).isEqualTo(0);
+        assertThat(v1InV2).isEqualTo(0)
+            .withFailMessage("Found " + v1InV2 + " V1 events in V2 topic");
         
         // Verify V2 events are isolated (if V2 system is running)
-        if (!v2Events.isEmpty()) {
-            assertThat(v2Events.get(0).getId()).startsWith("test-isolation-v2-");
-        }
+        assertThat(v2Events).hasSize(1)
+            .withFailMessage("Expected 1 V2 event but got " + v2Events.size() + ". V2 stream processor may not be running or processing events.");
+        assertThat(v2Events.get(0).getId()).startsWith("test-isolation-v2-");
     }
     
     @Test
     void testGradualMigrationFromV1ToV2() throws Exception {
         // Simulate gradual migration: both systems running, traffic shifting
         String testId = "test-migration-" + System.currentTimeMillis();
+        
+        // Check if V2 stream processor is running
+        boolean v2Running = false;
+        try {
+            java.net.http.HttpClient client = java.net.http.HttpClient.newHttpClient();
+            java.net.http.HttpRequest request = java.net.http.HttpRequest.newBuilder()
+                    .uri(java.net.URI.create("http://localhost:8084/actuator/health"))
+                    .GET()
+                    .timeout(java.time.Duration.ofSeconds(2))
+                    .build();
+            java.net.http.HttpResponse<String> response = client.send(request, 
+                    java.net.http.HttpResponse.BodyHandlers.ofString());
+            v2Running = response.statusCode() == 200 && response.body().contains("UP");
+        } catch (Exception e) {
+            // V2 not running
+        }
         
         // Publish to both V1 and V2 (simulating dual-write during migration)
         EventHeader event = TestEventGenerator.generateServiceEvent(testId);
@@ -157,19 +193,18 @@ public class BreakingSchemaChangeTest {
             "filtered-service-events-spring", 1, Duration.ofSeconds(30), "test-migration-"
         );
         
-        // V2 system (if running)
-        kafkaUtils.publishTestEvent(sourceTopicV2, event);
-        List<EventHeader> v2Events = kafkaUtils.consumeEvents(
-            "filtered-service-events-v2-spring", 1, Duration.ofSeconds(30), "test-migration-"
-        );
-        
-        // Verify both systems process events independently
+        // Verify V1 continues to work during migration
         assertThat(v1Events).hasSize(1);
         
-        // V2 may not be running, which is fine for this test
-        // The key is that V1 continues to work during migration
-        if (!v2Events.isEmpty()) {
-            assertThat(v2Events).hasSize(1);
+        // V2 system (if running)
+        if (v2Running) {
+            kafkaUtils.publishTestEvent(sourceTopicV2, event);
+            List<EventHeader> v2Events = kafkaUtils.consumeEvents(
+                "filtered-service-events-v2-spring", 1, Duration.ofSeconds(30), "test-migration-"
+            );
+            assertThat(v2Events).as("V2 events should be processed when V2 system is running").hasSize(1);
+        } else {
+            System.out.println("V2 system not running - V1 system verified to work independently");
         }
     }
 }

@@ -332,11 +332,49 @@ GET /api/v1/schemas/v1?type=car
 | GET | `/api/v1/filters/:id` | Get filter by ID |
 | PUT | `/api/v1/filters/:id` | Update filter |
 | DELETE | `/api/v1/filters/:id` | Delete filter |
+| GET | `/api/v1/filters/active` | Get active filters (for CDC Streaming Service) |
 | POST | `/api/v1/filters/:id/generate` | Generate Flink SQL |
 | POST | `/api/v1/filters/:id/validate` | Validate SQL syntax |
 | POST | `/api/v1/filters/:id/approve` | Approve filter for deployment |
 | POST | `/api/v1/filters/:id/deploy` | Deploy to Confluent Cloud |
 | GET | `/api/v1/filters/:id/status` | Get deployment status |
+
+#### 6.3.1 Active Filters Endpoint
+
+**GET `/api/v1/filters/active?schemaVersion={version}`**
+
+Returns only enabled, non-deleted filters for a specific schema version. This endpoint is optimized for CDC Streaming Service consumption and supports dynamic filter reloading.
+
+**Query Parameters:**
+- `schemaVersion` (optional, default: `v1`) - Schema version to retrieve filters for
+
+**Response Example:**
+```json
+[
+  {
+    "id": "service-events-for-dealer-001",
+    "name": "Service Events for Dealer 001",
+    "outputTopic": "service-events-dealer-001",
+    "enabled": true,
+    "status": "deployed",
+    "conditions": [
+      {
+        "field": "event_type",
+        "operator": "equals",
+        "value": "CarServiceDone",
+        "valueType": "string"
+      }
+    ],
+    "conditionLogic": "AND",
+    "version": 2
+  }
+]
+```
+
+**Use Cases:**
+- CDC Streaming Service dynamic filter loading
+- Filter monitoring and reporting
+- Integration with external systems
 
 **Filter Lifecycle States:**
 1. `pending_approval` - Initial state after creation
@@ -671,9 +709,124 @@ This demonstrates how the schema-defined fields (`event_type` from the event hea
 
 ---
 
-## 8. Configuration Reference
+## 8. Database Schema and Storage
 
-### 8.1 Environment Variables
+### 8.1 PostgreSQL Filter Storage
+
+The Metadata Service stores filter configurations in PostgreSQL for improved concurrency, querying capabilities, and production readiness. Filters are associated with schema versions (matching Git folder structure: v1, v2, etc.).
+
+#### 8.1.1 Filters Table Schema
+
+```sql
+CREATE TABLE filters (
+    id VARCHAR(255) PRIMARY KEY,
+    schema_version VARCHAR(50) NOT NULL,
+    name VARCHAR(255) NOT NULL,
+    description TEXT,
+    consumer_id VARCHAR(255),
+    output_topic VARCHAR(255) NOT NULL,
+    conditions JSONB NOT NULL,
+    enabled BOOLEAN NOT NULL DEFAULT true,
+    condition_logic VARCHAR(10) NOT NULL DEFAULT 'AND',
+    status VARCHAR(50) NOT NULL DEFAULT 'pending_approval',
+    version INTEGER NOT NULL DEFAULT 1,
+    created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    approved_at TIMESTAMP WITH TIME ZONE,
+    approved_by VARCHAR(255),
+    deployed_at TIMESTAMP WITH TIME ZONE,
+    deployment_error TEXT,
+    flink_statement_ids JSONB
+);
+```
+
+#### 8.1.2 Indexes
+
+The following indexes are created for optimal query performance:
+
+- `idx_filters_schema_version` - On `schema_version` column
+- `idx_filters_status` - On `status` column
+- `idx_filters_enabled` - On `enabled` column
+- `idx_filters_schema_version_enabled` - Composite index on `(schema_version, enabled)`
+- `idx_filters_schema_version_status` - Composite index on `(schema_version, status)`
+
+#### 8.1.3 JSONB Columns
+
+- **`conditions`**: Stores filter conditions array as JSONB for efficient querying and indexing
+- **`flink_statement_ids`**: Stores array of Flink statement IDs deployed for this filter
+
+#### 8.1.4 Database Migration
+
+Database schema is managed using Flyway. Migration scripts are located in `src/main/resources/db/migration/`:
+
+- `V1__create_filters_table.sql` - Creates the filters table and indexes
+
+Migrations run automatically on application startup when `spring.flyway.enabled=true`.
+
+### 8.2 Database Configuration
+
+#### 8.2.1 Connection Properties
+
+Configure PostgreSQL connection in `application.yml`:
+
+```yaml
+spring:
+  datasource:
+    url: ${DATABASE_URL:jdbc:postgresql://localhost:5432/metadata_service}
+    username: ${DATABASE_USERNAME:postgres}
+    password: ${DATABASE_PASSWORD:postgres}
+    driver-class-name: org.postgresql.Driver
+  jpa:
+    hibernate:
+      ddl-auto: validate
+    show-sql: ${JPA_SHOW_SQL:false}
+    properties:
+      hibernate:
+        dialect: org.hibernate.dialect.PostgreSQLDialect
+        format_sql: true
+        jdbc:
+          time_zone: UTC
+  flyway:
+    enabled: ${FLYWAY_ENABLED:true}
+    locations: classpath:db/migration
+    baseline-on-migrate: true
+    validate-on-migrate: true
+```
+
+#### 8.2.2 Environment Variables
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `DATABASE_URL` | `jdbc:postgresql://localhost:5432/metadata_service` | PostgreSQL connection URL |
+| `DATABASE_USERNAME` | `postgres` | Database username |
+| `DATABASE_PASSWORD` | `postgres` | Database password |
+| `FLYWAY_ENABLED` | `true` | Enable Flyway migrations |
+| `JPA_SHOW_SQL` | `false` | Log SQL queries (useful for debugging) |
+
+### 8.3 Filter Storage Architecture
+
+Filters are stored in PostgreSQL with the following characteristics:
+
+- **Schema Version Association**: Each filter is associated with a schema version (v1, v2, etc.) matching the Git folder structure
+- **Optimistic Locking**: Uses `version` field for optimistic locking to prevent concurrent update conflicts
+- **JSONB Storage**: Filter conditions stored as JSONB for flexibility and efficient querying
+- **Audit Trail**: Timestamps (`created_at`, `updated_at`, `approved_at`, `deployed_at`) track filter lifecycle
+- **Status Management**: Filter status (`pending_approval`, `approved`, `deployed`, `failed`, etc.) tracks deployment state
+
+### 8.4 Backward Compatibility
+
+During migration from file-based to database storage, the service supports:
+
+- **Dual-Write Mode**: Optionally write to both database and files (controlled by `filter.storage.dual-write`)
+- **Fallback to Files**: If database is empty, fall back to reading from files (controlled by `filter.storage.fallback-to-files`)
+
+These features ensure zero-downtime migration and rollback capability.
+
+---
+
+## 9. Configuration Reference
+
+### 9.1 Environment Variables
 
 | Variable | Default | Description |
 |----------|---------|-------------|
@@ -683,6 +836,13 @@ This demonstrates how the schema-defined fields (`event_type` from the event hea
 | `SERVER_PORT` | `8080` | HTTP server port |
 | `DEFAULT_VERSION` | `latest` | Default schema version |
 | `STRICT_MODE` | `true` | Reject invalid events with 422 |
+| `DATABASE_URL` | `jdbc:postgresql://localhost:5432/metadata_service` | PostgreSQL connection URL |
+| `DATABASE_USERNAME` | `postgres` | Database username |
+| `DATABASE_PASSWORD` | `postgres` | Database password |
+| `FLYWAY_ENABLED` | `true` | Enable Flyway migrations |
+| `JPA_SHOW_SQL` | `false` | Log SQL queries |
+| `filter.storage.dual-write` | `false` | Enable dual-write mode (database + files) |
+| `filter.storage.fallback-to-files` | `true` | Fallback to files if database is empty |
 | `CONFLUENT_CLOUD_API_KEY` | - | Confluent Cloud API key |
 | `CONFLUENT_CLOUD_API_SECRET` | - | Confluent Cloud API secret |
 | `CONFLUENT_FLINK_COMPUTE_POOL_ID` | - | Flink compute pool ID |

@@ -549,3 +549,14 @@ Backups are created automatically before deployments:
 | `cleanup-filters.sh` | Identify and remove orphaned resources (topics, Flink statements) |
 
 All scripts are located in `cdc-streaming/scripts/filters/`.
+
+---
+
+**Document Version:** 1.0  
+**Last Updated:** December 30, 2025  
+**Maintained By:** Platform Engineering Team
+
+**Recent Updates:**
+- Added support for Metadata Service API-based filter management
+- Enhanced documentation for Spring Boot YAML generation
+- Updated CI/CD integration examples

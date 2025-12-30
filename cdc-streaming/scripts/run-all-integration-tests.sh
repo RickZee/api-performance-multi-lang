@@ -182,7 +182,7 @@ if command -v confluent &>/dev/null && confluent environment list &>/dev/null; t
         info "Using Kafka cluster: $CLUSTER_ID"
         # Create topics if they don't exist
         info "Creating topics in Confluent Cloud if needed..."
-        for topic in raw-event-headers filtered-car-created-events-spring filtered-loan-created-events-spring filtered-loan-payment-submitted-events-spring filtered-service-events-spring; do
+        for topic in raw-event-headers raw-event-headers-v2 filtered-car-created-events-spring filtered-car-created-events-v2-spring filtered-loan-created-events-spring filtered-loan-created-events-v2-spring filtered-loan-payment-submitted-events-spring filtered-loan-payment-submitted-events-v2-spring filtered-service-events-spring filtered-service-events-v2-spring; do
             if ! confluent kafka topic describe "$topic" --cluster "$CLUSTER_ID" &>/dev/null 2>&1; then
                 info "Creating topic: $topic"
                 confluent kafka topic create "$topic" --cluster "$CLUSTER_ID" --partitions 3 2>&1 | grep -v "already exists\|Topic.*already exists" || true
@@ -207,8 +207,12 @@ cleanup() {
 trap cleanup EXIT
 
 info "Starting Metadata Service and Stream Processor (connecting to Confluent Cloud)..."
-docker-compose -f "$COMPOSE_FILE" build metadata-service stream-processor
+docker-compose -f "$COMPOSE_FILE" build metadata-service stream-processor stream-processor-v2
 docker-compose -f "$COMPOSE_FILE" up -d metadata-service stream-processor
+
+# Start V2 stream processor for breaking schema change tests
+info "Starting V2 Stream Processor for parallel deployment tests..."
+docker-compose -f "$COMPOSE_FILE" --profile v2 up -d stream-processor-v2
 
 info "Waiting for services to be healthy..."
 max_wait=60
@@ -225,6 +229,14 @@ done
 
 if [ $elapsed -ge $max_wait ]; then
     warn "Some services may not be fully healthy, but continuing with tests..."
+fi
+
+# Seed V2 filters into Metadata Service if V2 tests will run
+info "Seeding V2 filters into Metadata Service..."
+if [ -f "$CDC_STREAMING_DIR/scripts/seed-v2-filters.sh" ]; then
+    "$CDC_STREAMING_DIR/scripts/seed-v2-filters.sh" || warn "Failed to seed V2 filters - V2 tests may fail"
+else
+    warn "seed-v2-filters.sh not found - V2 filters may not be available"
 fi
 
 # Continue with test execution
@@ -259,6 +271,9 @@ section "Running Schema Evolution Tests"
 
 info "Running NonBreakingSchemaTest..."
 ./gradlew test --tests "com.example.e2e.schema.NonBreakingSchemaTest" --no-daemon --info 2>&1 | tee /tmp/test-non-breaking-schema.log || warn "Some NonBreakingSchemaTest tests failed"
+
+info "Running V2SystemDiagnosticsTest (diagnostic tests)..."
+./gradlew test --tests "com.example.e2e.schema.V2SystemDiagnosticsTest" --no-daemon --info 2>&1 | tee /tmp/test-v2-diagnostics.log || warn "Some V2SystemDiagnosticsTest tests failed"
 
 info "Running BreakingSchemaChangeTest (V2 system)..."
 # Create V2 topics in Confluent Cloud

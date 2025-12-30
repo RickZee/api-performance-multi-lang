@@ -17,6 +17,7 @@ A Spring Boot-based metadata service that provides centralized schema validation
 
 - Java 17+
 - Gradle 7+
+- PostgreSQL 12+ (for filter storage)
 - Docker (optional, for containerized deployment)
 
 ### Configuration
@@ -31,16 +32,24 @@ The service can be configured via environment variables or `application.yml`:
 - `SERVER_PORT` - HTTP server port (default: `8080`)
 - `DEFAULT_VERSION` - Default schema version to use (default: `latest`)
 - `STRICT_MODE` - Enable strict validation mode (default: `true`)
+- `DATABASE_URL` - PostgreSQL connection URL (default: `jdbc:postgresql://localhost:5432/metadata_service`)
+- `DATABASE_USERNAME` - Database username (default: `postgres`)
+- `DATABASE_PASSWORD` - Database password (default: `postgres`)
 
 ### Running Locally
 
 ```bash
 # Set required environment variables
 export GIT_REPOSITORY=file:///path/to/data
+export DATABASE_URL=jdbc:postgresql://localhost:5432/metadata_service
+export DATABASE_USERNAME=postgres
+export DATABASE_PASSWORD=postgres
 
 # Run the service
 ./gradlew bootRun
 ```
+
+**Note:** The service requires PostgreSQL for filter storage. Database schema is automatically created on first startup using Flyway migrations.
 
 ### Running with Docker
 
@@ -72,6 +81,7 @@ docker-compose --profile metadata-service-java up -d
 - `POST /api/v1/filters/:id/approve` - Approve filter
 - `POST /api/v1/filters/:id/deploy` - Deploy filter
 - `GET /api/v1/filters/:id/status` - Get filter status
+- `GET /api/v1/filters/active` - Get active filters (for CDC Streaming Service)
 
 ### Health
 

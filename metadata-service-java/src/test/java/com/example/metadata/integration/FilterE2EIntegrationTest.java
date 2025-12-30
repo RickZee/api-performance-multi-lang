@@ -12,6 +12,7 @@ import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.test.web.server.LocalServerPort;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
+import org.springframework.test.context.jdbc.Sql;
 import org.springframework.test.web.reactive.server.WebTestClient;
 
 import java.io.IOException;
@@ -64,6 +65,15 @@ public class FilterE2EIntegrationTest {
         // Set test mode to skip GitSync startup
         System.setProperty("test.mode", "true");
         
+        // Configure H2 in-memory database for tests
+        registry.add("spring.datasource.url", () -> "jdbc:h2:mem:testdb;DB_CLOSE_DELAY=-1;DB_CLOSE_ON_EXIT=FALSE");
+        registry.add("spring.datasource.driver-class-name", () -> "org.h2.Driver");
+        registry.add("spring.datasource.username", () -> "sa");
+        registry.add("spring.datasource.password", () -> "");
+        registry.add("spring.jpa.hibernate.ddl-auto", () -> "create-drop");
+        registry.add("spring.jpa.database-platform", () -> "org.hibernate.dialect.H2Dialect");
+        registry.add("spring.flyway.enabled", () -> "false");
+        
         registry.add("git.repository", () -> "file://" + testRepoDir);
         registry.add("git.branch", () -> "main");
         registry.add("git.local-cache-dir", () -> testCacheDir);
@@ -72,6 +82,8 @@ public class FilterE2EIntegrationTest {
         registry.add("validation.strict-mode", () -> "true");
         registry.add("test.mode", () -> "true");
     }
+    
+    @Sql(scripts = "/schema-test.sql", executionPhase = Sql.ExecutionPhase.BEFORE_TEST_METHOD)
     
     @BeforeEach
     void setUp() throws IOException {

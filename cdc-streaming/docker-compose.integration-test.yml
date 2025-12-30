@@ -4,6 +4,27 @@ services:
   # Note: Using Confluent Cloud for Kafka and Schema Registry
   # No local Kafka or Schema Registry containers needed
 
+  # PostgreSQL database for Metadata Service
+  # Note: Metadata Service uses local postgres for integration tests
+  # CDC pipeline/producer APIs use Aurora (configured via .env.aurora)
+  postgres:
+    image: postgres:15-alpine
+    container_name: int-test-postgres
+    environment:
+      POSTGRES_DB: metadata_service
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 5s
+      retries: 10
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    profiles:
+      - local-db  # Only start local postgres if not using Aurora
+
   # Mock Confluent Flink API (for deployment testing)
   mock-confluent-api:
     build:
@@ -22,6 +43,9 @@ services:
       dockerfile: Dockerfile
     container_name: int-test-metadata-service
     depends_on:
+      postgres:
+        condition: service_healthy
+        required: false  # Not required if using Aurora
       mock-confluent-api:
         condition: service_started
     ports:
@@ -31,6 +55,10 @@ services:
       CONFLUENT_CLOUD_API_ENDPOINT: http://mock-confluent-api:8082
       CONFLUENT_CLOUD_API_KEY: test-key
       CONFLUENT_CLOUD_API_SECRET: test-secret
+      # Database configuration - use Aurora if available, otherwise local postgres
+      DATABASE_URL: ${DATABASE_URL:-jdbc:postgresql://postgres:5432/metadata_service}
+      DATABASE_USERNAME: ${DATABASE_USERNAME:-postgres}
+      DATABASE_PASSWORD: ${DATABASE_PASSWORD:-postgres}
       # Confluent Cloud configuration (from environment variables)
       KAFKA_BOOTSTRAP_SERVERS: ${KAFKA_BOOTSTRAP_SERVERS}
       KAFKA_API_KEY: ${KAFKA_API_KEY:-}
@@ -74,6 +102,9 @@ services:
       dockerfile: Dockerfile
     container_name: int-test-stream-processor-v2
     profiles: ["v2"]
+    depends_on:
+      metadata-service:
+        condition: service_healthy
     ports:
       - "8084:8080"
     environment:
@@ -83,12 +114,22 @@ services:
       KAFKA_SECURITY_PROTOCOL: ${KAFKA_SECURITY_PROTOCOL:-SASL_SSL}
       KAFKA_SASL_MECHANISM: ${KAFKA_SASL_MECHANISM:-PLAIN}
       SPRING_KAFKA_STREAMS_SOURCE_TOPIC: raw-event-headers-v2
+      SPRING_KAFKA_STREAMS_APPLICATION_ID: event-stream-processor-v2
       FILTER_CONFIG_PATH: /app/config/filters-v2.json
       FILTER_VERSION: v2
       OUTPUT_TOPIC_SUFFIX: -v2
+      # Enable Metadata Service integration for V2
+      METADATA_SERVICE_ENABLED: "true"
+      METADATA_SERVICE_URL: http://metadata-service:8080
+      METADATA_SERVICE_SCHEMA_VERSION: v2
+      METADATA_SERVICE_POLL_INTERVAL: 30000
     volumes:
       - ./config:/app/config:ro
       - ./stream-processor-spring/src/main/resources/filters.yml:/app/filters.yml:ro
+    healthcheck:
+      test: curl -f http://localhost:8080/actuator/health || exit 1
+      interval: 5s
+      retries: 10
 
   # Consumers (Spring variant - reads from -spring topics)
   car-consumer:
@@ -187,4 +228,7 @@ services:
 
   # Note: Topics are created in Confluent Cloud using Confluent CLI
   # See run-all-integration-tests.sh for topic creation via confluent kafka topic create
+
+volumes:
+  postgres-data:
 

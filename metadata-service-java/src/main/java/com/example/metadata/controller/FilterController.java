@@ -319,6 +319,29 @@ public class FilterController {
     }
 
     /**
+     * Get active filters (enabled and not deleted) for a specific schema version.
+     * This endpoint is optimized for CDC Streaming Service consumption.
+     * Returns only filters that should be actively used for event routing.
+     * 
+     * @param schemaVersion Schema version (e.g., "v1", "v2")
+     * @return List of active filters
+     */
+    @GetMapping("/active")
+    public ResponseEntity<List<Filter>> getActiveFilters(
+            @RequestParam(value = "version", required = false, defaultValue = "v1") String schemaVersion
+    ) {
+        try {
+            List<Filter> activeFilters = filterStorageService.getActiveFilters(schemaVersion);
+            return ResponseEntity.ok(activeFilters);
+        } catch (Exception e) {
+            org.slf4j.LoggerFactory.getLogger(FilterController.class)
+                .error("Error retrieving active filters for schema version {}: {}", 
+                    schemaVersion, e.getMessage(), e);
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).build();
+        }
+    }
+
+    /**
      * Update Spring Boot filters.yml file with current filters.
      * This method is called after create, update, delete, and deploy operations.
      * Errors are logged but do not fail the API operation.

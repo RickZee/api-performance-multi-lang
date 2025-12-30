@@ -214,24 +214,51 @@ public class KafkaTestUtils {
             // This ensures we don't read old events from previous test runs
             consumer.seekToEnd(consumer.assignment());
             
-            // Poll once to ensure we're at the end
+            // Poll once to ensure we're at the end and get current position
             consumer.poll(Duration.ofMillis(100));
             
-            // Wait a bit for exactly-once semantics - Kafka Streams commits in transactions
-            // which can take a few seconds to become visible
-            Thread.sleep(3000);
+            // Wait for Kafka Streams to process and commit events
+            // Kafka Streams uses transactions which can take 5-10 seconds to become visible
+            // Also account for network latency and processing time
+            Thread.sleep(5000);
             
             long startTime = System.currentTimeMillis();
+            long lastPollTime = startTime;
+            int consecutiveEmptyPolls = 0;
+            
             while (events.size() < expectedCount && (System.currentTimeMillis() - startTime) < timeout.toMillis()) {
                 ConsumerRecords<String, byte[]> records = consumer.poll(Duration.ofSeconds(2));
-                for (ConsumerRecord<String, byte[]> record : records) {
-                    String jsonValue = stripSchemaRegistryHeader(record.value());
-                    EventHeader event = objectMapper.readValue(jsonValue, EventHeader.class);
-                    
-                    // Filter by event ID prefix if provided
-                    if (eventIdPrefix == null || (event.getId() != null && event.getId().startsWith(eventIdPrefix))) {
-                        events.add(event);
+                
+                if (records.isEmpty()) {
+                    consecutiveEmptyPolls++;
+                    // If we've had multiple empty polls, wait a bit longer for Kafka Streams
+                    if (consecutiveEmptyPolls > 3 && (System.currentTimeMillis() - lastPollTime) < 10000) {
+                        Thread.sleep(2000); // Additional wait for Kafka Streams processing
                     }
+                    continue;
+                }
+                
+                consecutiveEmptyPolls = 0;
+                lastPollTime = System.currentTimeMillis();
+                
+                for (ConsumerRecord<String, byte[]> record : records) {
+                    try {
+                        String jsonValue = stripSchemaRegistryHeader(record.value());
+                        EventHeader event = objectMapper.readValue(jsonValue, EventHeader.class);
+                        
+                        // Filter by event ID prefix if provided
+                        if (eventIdPrefix == null || (event.getId() != null && event.getId().startsWith(eventIdPrefix))) {
+                            events.add(event);
+                        }
+                    } catch (Exception e) {
+                        // Skip malformed events, but log for debugging
+                        System.err.println("Failed to parse event from topic " + topic + ": " + e.getMessage());
+                    }
+                }
+                
+                // If we found events matching our prefix, we can break early if we have enough
+                if (events.size() >= expectedCount) {
+                    break;
                 }
             }
         }
@@ -246,21 +273,47 @@ public class KafkaTestUtils {
     public List<EventHeader> consumeEventsWithConsumer(KafkaConsumer<String, byte[]> consumer, int expectedCount, Duration timeout, String eventIdPrefix) throws Exception {
         List<EventHeader> events = new ArrayList<>();
         
-        // Wait for exactly-once semantics - Kafka Streams commits in transactions
-        // which can take a few seconds to become visible
+        // Wait for Kafka Streams to process and commit events
+        // Kafka Streams uses transactions which can take 5-10 seconds to become visible
         Thread.sleep(5000);
         
         long startTime = System.currentTimeMillis();
+        long lastPollTime = startTime;
+        int consecutiveEmptyPolls = 0;
+        
         while (events.size() < expectedCount && (System.currentTimeMillis() - startTime) < timeout.toMillis()) {
             ConsumerRecords<String, byte[]> records = consumer.poll(Duration.ofSeconds(2));
-            for (ConsumerRecord<String, byte[]> record : records) {
-                String jsonValue = stripSchemaRegistryHeader(record.value());
-                EventHeader event = objectMapper.readValue(jsonValue, EventHeader.class);
-                
-                // Filter by event ID prefix if provided
-                if (eventIdPrefix == null || (event.getId() != null && event.getId().startsWith(eventIdPrefix))) {
-                    events.add(event);
+            
+            if (records.isEmpty()) {
+                consecutiveEmptyPolls++;
+                // If we've had multiple empty polls, wait a bit longer for Kafka Streams
+                if (consecutiveEmptyPolls > 3 && (System.currentTimeMillis() - lastPollTime) < 10000) {
+                    Thread.sleep(2000); // Additional wait for Kafka Streams processing
                 }
+                continue;
+            }
+            
+            consecutiveEmptyPolls = 0;
+            lastPollTime = System.currentTimeMillis();
+            
+            for (ConsumerRecord<String, byte[]> record : records) {
+                try {
+                    String jsonValue = stripSchemaRegistryHeader(record.value());
+                    EventHeader event = objectMapper.readValue(jsonValue, EventHeader.class);
+                    
+                    // Filter by event ID prefix if provided
+                    if (eventIdPrefix == null || (event.getId() != null && event.getId().startsWith(eventIdPrefix))) {
+                        events.add(event);
+                    }
+                } catch (Exception e) {
+                    // Skip malformed events, but log for debugging
+                    System.err.println("Failed to parse event: " + e.getMessage());
+                }
+            }
+            
+            // If we found events matching our prefix, we can break early if we have enough
+            if (events.size() >= expectedCount) {
+                break;
             }
         }
         

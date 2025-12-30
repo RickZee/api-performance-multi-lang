@@ -908,3 +908,14 @@ The Spring Boot Stream Processor is a dynamic, configurable event filtering and 
 
 The service is designed for operational simplicity while providing the flexibility to adapt to changing business requirements through configuration changes rather than code modifications.
 
+---
+
+**Document Version:** 1.0  
+**Last Updated:** December 30, 2025  
+**Maintained By:** Platform Engineering Team
+
+**Recent Updates:**
+- Added automatic YAML generation via Metadata Service API
+- Enhanced filter configuration loading from `filters.yml`
+- Updated deployment procedures for CI/CD integration
+

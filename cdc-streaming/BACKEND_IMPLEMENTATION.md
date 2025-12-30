@@ -547,3 +547,9 @@ All back-end infrastructure is managed via Terraform:
 - [ARCHITECTURE.md](ARCHITECTURE.md): Overall system architecture
 - [CONFLUENT_CLOUD_SETUP_GUIDE.md](CONFLUENT_CLOUD_SETUP_GUIDE.md): Confluent Cloud setup and Flink configuration
 - [README.md](README.md): Main documentation and quick start guide
+
+---
+
+**Document Version:** 1.0  
+**Last Updated:** December 30, 2025  
+**Maintained By:** Platform Engineering Team
