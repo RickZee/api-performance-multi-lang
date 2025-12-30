@@ -28,7 +28,9 @@ import static org.assertj.core.api.Assertions.assertThat;
  * - Jenkins triggering is configurable and can be disabled
  * - Errors in Jenkins triggering don't fail filter operations
  */
-@SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
+@SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT, properties = {
+    "spring.main.lazy-initialization=true"
+})
 @TestMethodOrder(MethodOrderer.OrderAnnotation.class)
 class JenkinsTriggerIntegrationTest {
 

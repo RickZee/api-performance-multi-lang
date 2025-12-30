@@ -183,14 +183,15 @@ public class SpringYamlWriterService {
                 String varValue = System.getenv(varName);
                 if (varValue != null) {
                     result = result.substring(0, start) + varValue + result.substring(end + 1);
+                    // After substitution, search from the beginning again to catch nested/overlapping patterns
+                    start = result.indexOf("${");
                 } else {
-                    // Variable not found, leave as is
-                    start = result.indexOf("${", end);
+                    // Variable not found, skip past this ${} pattern
+                    start = result.indexOf("${", end + 1);
                 }
             } else {
                 break;
             }
-            start = result.indexOf("${");
         }
         return result;
     }

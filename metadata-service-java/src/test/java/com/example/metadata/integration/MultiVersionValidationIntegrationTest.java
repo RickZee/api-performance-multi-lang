@@ -19,7 +19,8 @@ import java.nio.file.StandardCopyOption;
 import java.util.Map;
 
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT, properties = {
-    "spring.main.allow-bean-definition-overriding=true"
+    "spring.main.allow-bean-definition-overriding=true",
+    "spring.main.lazy-initialization=true"
 })
 public class MultiVersionValidationIntegrationTest {
     

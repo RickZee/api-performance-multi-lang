@@ -1040,13 +1040,44 @@ stage('Generate Filters') {
 **Purpose**: Validate filter changes through integration tests
 
 **Test Suites**:
-- `LocalKafkaIntegrationTest`: Tests event routing and filtering (5 tests)
-- `FilterLifecycleLocalTest`: Tests filter CRUD operations (3 tests)
-- `StreamProcessorLocalTest`: Tests stream processor functionality (4 tests)
-- `NonBreakingSchemaTest`: Tests backward compatibility (4 tests)
-- `BreakingSchemaChangeTest`: Tests V2 parallel deployment (3 tests)
 
-**Total**: 19 integration tests covering all filter change scenarios
+**E2E Integration Tests** (cdc-streaming/e2e-tests) - **94 tests total**:
+
+*Filter Change Scenarios* (26 tests):
+- `LocalKafkaIntegrationTest`: Tests event routing and filtering (6 tests)
+- `FilterLifecycleLocalTest`: Tests filter CRUD operations and Spring YAML updates (6 tests)
+- `StreamProcessorLocalTest`: Tests stream processor functionality (5 tests)
+- `NonBreakingSchemaTest`: Tests backward compatibility (5 tests)
+- `BreakingSchemaChangeTest`: Tests V2 parallel deployment (4 tests)
+
+*Full Pipeline Tests* (68 tests):
+- `FullPipelineTest`: End-to-end flow validation (8 tests)
+- `FunctionalParityTest`: Flink/Spring Boot output parity (9 tests)
+- `SchemaEvolutionTest`: Schema compatibility testing (6 tests)
+- `EdgeCaseTest`: Boundary conditions and edge cases (9 tests)
+- `ErrorHandlingTest`: Error scenarios and recovery (4 tests)
+- `PerformanceComparisonTest`: Throughput and latency comparison (5 tests)
+- `LatencyBenchmarkTest`: Latency percentile testing (5 tests)
+- `LoadTest`: Sustained load testing (6 tests)
+- `ResilienceTest`: Recovery and resilience scenarios (6 tests)
+- `MetricsValidationTest`: Metrics and observability validation (10 tests)
+
+**Metadata Service Integration Tests** (metadata-service-java) - **60 tests total**:
+- `FilterE2EIntegrationTest`: Complete filter lifecycle via API (9 tests)
+- `JenkinsTriggerIntegrationTest`: CI/CD triggering validation (9 tests)
+- `SpringYamlUpdateIntegrationTest`: Spring YAML generation and updates (5 tests)
+- `ValidationIntegrationTest`: Schema validation via API (7 tests)
+- `ApiErrorHandlingIntegrationTest`: API error handling (18 tests)
+- `MultiVersionValidationIntegrationTest`: Multi-version schema validation (4 tests)
+- `GitSyncIntegrationTest`: Git repository synchronization (4 tests)
+- `GitSyncEdgeCasesIntegrationTest`: Git sync edge cases (4 tests)
+
+**Total Test Coverage**:
+- **E2E Tests**: **94 tests** covering full pipeline, performance, resilience, and edge cases
+- **Metadata Service Integration Tests**: **60 tests** covering API functionality and CI/CD integration
+- **Grand Total**: **154 integration tests** covering all filter change scenarios, API operations, and system behavior
+
+> **Note**: For detailed test coverage analysis, see [INTEGRATION_TEST_COVERAGE_REPORT.md](../../INTEGRATION_TEST_COVERAGE_REPORT.md)
 
 **Test Execution**:
 ```bash
@@ -1083,13 +1114,65 @@ stage('Run Integration Tests') {
 }
 ```
 
-**Test Coverage**:
-- Event publishing and consumption
-- Filter matching and routing
-- Multiple event types
-- Filter lifecycle (create, update, delete)
-- Schema evolution scenarios
-- V2 parallel deployment isolation
+**Test Coverage Areas**:
+
+**Filter Change Scenarios**:
+- ✅ Event publishing and consumption
+- ✅ Filter matching and routing
+- ✅ Multiple event types
+- ✅ Filter lifecycle (create, update, delete, approve, deploy)
+- ✅ Schema evolution scenarios (non-breaking and breaking)
+- ✅ V2 parallel deployment isolation
+- ✅ Spring Boot YAML generation and updates
+- ✅ API-driven filter management
+
+**Full Pipeline Testing**:
+- ✅ End-to-end flow from Producer API → CDC → Kafka → Stream Processor → Filtered Topics
+- ✅ Functional parity between Flink and Spring Boot processors
+- ✅ Bulk event processing
+- ✅ Event ordering and idempotency
+- ✅ Complete event structure preservation
+
+**Performance and Load**:
+- ✅ Throughput comparison (Flink vs Spring Boot)
+- ✅ Latency percentiles (P50, P95, P99)
+- ✅ Concurrent processing
+- ✅ Backpressure handling
+- ✅ Sustained load testing
+- ✅ Spike load scenarios
+- ✅ Endurance testing
+
+**Resilience and Error Handling**:
+- ✅ Service restart and recovery
+- ✅ State recovery after failures
+- ✅ Network partition scenarios
+- ✅ Recovery time objectives (RTO)
+- ✅ Dead letter queue handling
+- ✅ Malformed event handling
+- ✅ Offset management
+- ✅ Error propagation
+
+**Edge Cases and Boundary Conditions**:
+- ✅ Null and empty values
+- ✅ Large payloads
+- ✅ Special characters
+- ✅ Unknown fields
+- ✅ Missing required fields
+- ✅ Invalid data types
+- ✅ Boundary value testing
+
+**CI/CD Integration**:
+- ✅ Jenkins build triggering on filter changes
+- ✅ Build parameter passing
+- ✅ Authentication methods
+- ✅ Error handling and graceful degradation
+- ✅ Event-specific triggering configuration
+
+**Observability**:
+- ✅ Metrics validation
+- ✅ Health check endpoints
+- ✅ Logging verification
+- ✅ Trace correlation
 
 ### Test Coverage for Jenkins CI/CD Triggering
 
@@ -1109,7 +1192,7 @@ The Metadata Service includes comprehensive test coverage for Jenkins CI/CD trig
 
 #### Integration Tests
 
-**JenkinsTriggerIntegrationTest** (8 test cases):
+**JenkinsTriggerIntegrationTest** (9 test cases):
 - ✅ Jenkins triggering enabled/disabled configuration
 - ✅ Filter create triggers Jenkins build
 - ✅ Filter update triggers Jenkins build
@@ -1118,6 +1201,7 @@ The Metadata Service includes comprehensive test coverage for Jenkins CI/CD trig
 - ✅ Filter operations succeed even when Jenkins fails
 - ✅ Event-specific triggering can be disabled
 - ✅ Configuration validation
+- ✅ Complete filter lifecycle with Jenkins integration
 
 **Location**: `metadata-service-java/src/test/java/com/example/metadata/integration/JenkinsTriggerIntegrationTest.java`
 
@@ -2221,6 +2305,8 @@ DEPLOY_METHOD=local ./cdc-streaming/scripts/filters/deploy-spring-filters.sh
 - [Metadata Service Documentation](../../metadata-service-java/METADATA_SERVICE_DOCUMENTATION.md) - API reference
 - [Jenkins Setup Guide](../../JENKINS_SETUP.md) - Jenkins configuration
 - [Integration Test Guide](../e2e-tests/README.md) - Test execution guide
+- [Integration Test Coverage Report](../../INTEGRATION_TEST_COVERAGE_REPORT.md) - Comprehensive test coverage analysis
+- [Test Coverage Report](../../metadata-service-java/TEST_COVERAGE.md) - Metadata Service test coverage details
 - [Spring Boot Stream Processor Guide](../SPRING_BOOT_STREAM_PROCESSOR_GUIDE.md) - Stream processor details
 - [Confluent Cloud Setup Guide](../CONFLUENT_CLOUD_SETUP_GUIDE.md) - Confluent Cloud configuration
 
@@ -2292,4 +2378,5 @@ cd cdc-streaming/e2e-tests
 | Date | Version | Changes | Author |
 |------|---------|---------|--------|
 | 2025-12-28 | 1.0 | Initial comprehensive documentation | CI/CD Team |
+| 2025-12-30 | 1.1 | Updated test coverage counts (154 total tests), added Jenkins CI/CD triggering details, added Spring Boot YAML generation section, created comprehensive test coverage report | CI/CD Team |
 

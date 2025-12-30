@@ -23,7 +23,8 @@ import java.util.List;
 import java.util.Map;
 
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT, properties = {
-    "spring.main.allow-bean-definition-overriding=true"
+    "spring.main.allow-bean-definition-overriding=true",
+    "spring.main.lazy-initialization=true"
 })
 @TestMethodOrder(MethodOrderer.OrderAnnotation.class)
 public class FilterE2EIntegrationTest {

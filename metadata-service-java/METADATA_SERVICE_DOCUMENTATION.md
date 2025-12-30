@@ -8,7 +8,7 @@ The Metadata Service is a centralized microservice providing schema validation, 
 
 ## 1. Service Purpose and Core Capabilities
 
-The Metadata Service provides four primary capabilities:
+The Metadata Service provides six primary capabilities:
 
 | Capability | Description |
 |------------|-------------|
@@ -16,6 +16,8 @@ The Metadata Service provides four primary capabilities:
 | **Schema Management** | Git-based versioned schema storage with periodic sync |
 | **Compatibility Checking** | Detects breaking vs non-breaking schema changes |
 | **Filter Management** | CRUD operations for Flink SQL filter configurations with deployment to Confluent Cloud |
+| **Spring Boot YAML Generation** | Automatically generates and updates `filters.yml` for Spring Boot stream processor |
+| **CI/CD Integration** | Triggers Jenkins builds on filter lifecycle events for change management |
 
 ---
 
@@ -38,6 +40,9 @@ graph TB
         FilterGen[Filter Generator]
         FilterDeploy[Filter Deployer]
         CompatCheck[Compatibility Checker]
+        SpringYamlGen[Spring YAML Generator]
+        SpringYamlWriter[Spring YAML Writer]
+        JenkinsTrigger[Jenkins CI/CD Trigger]
     end
 
     subgraph External [External Systems]
@@ -60,6 +65,11 @@ graph TB
     FilterGen --> FilterDeploy
     FilterDeploy -->|Deploy SQL| Confluent
     Validator --> CompatCheck
+    API --> SpringYamlGen
+    SpringYamlGen --> SpringYamlWriter
+    SpringYamlWriter -->|Write| LocalFS
+    API --> JenkinsTrigger
+    JenkinsTrigger -->|Trigger Build| Jenkins[Jenkins CI/CD]
 ```
 
 ---
@@ -89,6 +99,9 @@ graph LR
         StorageSvc[FilterStorageService]
         GenSvc[FilterGeneratorService]
         DeploySvc[FilterDeployerService]
+        SpringYamlGenSvc[SpringYamlGeneratorService]
+        SpringYamlWriterSvc[SpringYamlWriterService]
+        JenkinsTriggerSvc[JenkinsTriggerService]
     end
 
     subgraph config [Config]
@@ -103,6 +116,9 @@ graph LR
     FilterCtrl --> StorageSvc
     FilterCtrl --> GenSvc
     FilterCtrl --> DeploySvc
+    FilterCtrl --> SpringYamlGenSvc
+    FilterCtrl --> SpringYamlWriterSvc
+    FilterCtrl --> JenkinsTriggerSvc
     ValidationSvc --> CompatSvc
 ```
 
@@ -192,6 +208,12 @@ sequenceDiagram
     Deploy-->>API: Deployment result
 
     API->>Storage: UpdateDeployment(status: deployed)
+    API->>SpringYamlGen: GenerateYaml(allFilters)
+    SpringYamlGen-->>API: YAML content
+    API->>SpringYamlWriter: WriteFiltersYaml(yaml)
+    SpringYamlWriter-->>API: Success
+    API->>JenkinsTrigger: TriggerBuild("deploy", filterId, version)
+    JenkinsTrigger-->>API: Build triggered
     API-->>User: DeployFilterResponse
 ```
 
@@ -229,6 +251,7 @@ graph TB
     subgraph external [External Services]
         GitHub[(GitHub/GitLab)]
         ConfluentAPI[Confluent Cloud API]
+        Jenkins[Jenkins CI/CD]
     end
 
     GoREST -->|HTTP :8081| MetaJava
@@ -237,8 +260,10 @@ graph TB
     
     MetaJava -->|git clone/pull| GitHub
     MetaJava -->|read schemas| DataVol
+    MetaJava -->|write filters.yml| DataVol
     
     MetaJava -->|Deploy Flink SQL| ConfluentAPI
+    MetaJava -->|Trigger builds| Jenkins
 
     GoREST --> Postgres
     JavaREST --> Postgres
@@ -662,6 +687,21 @@ This demonstrates how the schema-defined fields (`event_type` from the event hea
 | `CONFLUENT_CLOUD_API_SECRET` | - | Confluent Cloud API secret |
 | `CONFLUENT_FLINK_COMPUTE_POOL_ID` | - | Flink compute pool ID |
 | `CONFLUENT_FLINK_API_ENDPOINT` | - | Flink API endpoint |
+| `SPRING_BOOT_FILTERS_YAML_PATH` | `../cdc-streaming/stream-processor-spring/src/main/resources/filters.yml` | Path to Spring Boot filters.yml file |
+| `SPRING_BOOT_YAML_BACKUP_ENABLED` | `true` | Enable automatic backups of filters.yml before updates |
+| `SPRING_BOOT_YAML_BACKUP_DIR` | `/tmp/filters-yaml-backups` | Directory for filters.yml backups |
+| `JENKINS_ENABLED` | `false` | Enable Jenkins CI/CD triggering |
+| `JENKINS_BASE_URL` | `http://localhost:8080` | Jenkins server base URL |
+| `JENKINS_JOB_NAME` | `filter-integration-tests` | Jenkins job name to trigger |
+| `JENKINS_USERNAME` | - | Jenkins username for authentication |
+| `JENKINS_API_TOKEN` | - | Jenkins API token for authentication |
+| `JENKINS_BUILD_TOKEN` | - | Jenkins build token (alternative to username/token) |
+| `JENKINS_TRIGGER_ON_CREATE` | `true` | Trigger build on filter create |
+| `JENKINS_TRIGGER_ON_UPDATE` | `true` | Trigger build on filter update |
+| `JENKINS_TRIGGER_ON_DELETE` | `true` | Trigger build on filter delete |
+| `JENKINS_TRIGGER_ON_DEPLOY` | `true` | Trigger build on filter deploy |
+| `JENKINS_TRIGGER_ON_APPROVE` | `true` | Trigger build on filter approve |
+| `JENKINS_TIMEOUT_SECONDS` | `30` | Timeout for Jenkins build trigger requests |
 
 ### 8.2 Configuration File (Java Implementation)
 
@@ -688,6 +728,25 @@ confluent:
     api-secret: ${CONFLUENT_CLOUD_API_SECRET:}
     flink-compute-pool-id: ${CONFLUENT_FLINK_COMPUTE_POOL_ID:}
     flink-api-endpoint: ${CONFLUENT_FLINK_API_ENDPOINT:}
+
+spring-boot:
+  filters-yaml-path: ${SPRING_BOOT_FILTERS_YAML_PATH:../cdc-streaming/stream-processor-spring/src/main/resources/filters.yml}
+  backup-enabled: ${SPRING_BOOT_YAML_BACKUP_ENABLED:true}
+  backup-dir: ${SPRING_BOOT_YAML_BACKUP_DIR:/tmp/filters-yaml-backups}
+
+jenkins:
+  enabled: ${JENKINS_ENABLED:false}
+  base-url: ${JENKINS_BASE_URL:http://localhost:8080}
+  job-name: ${JENKINS_JOB_NAME:filter-integration-tests}
+  username: ${JENKINS_USERNAME:}
+  api-token: ${JENKINS_API_TOKEN:}
+  build-token: ${JENKINS_BUILD_TOKEN:}
+  trigger-on-create: ${JENKINS_TRIGGER_ON_CREATE:true}
+  trigger-on-update: ${JENKINS_TRIGGER_ON_UPDATE:true}
+  trigger-on-delete: ${JENKINS_TRIGGER_ON_DELETE:true}
+  trigger-on-deploy: ${JENKINS_TRIGGER_ON_DEPLOY:true}
+  trigger-on-approve: ${JENKINS_TRIGGER_ON_APPROVE:true}
+  timeout-seconds: ${JENKINS_TIMEOUT_SECONDS:30}
 ```
 
 ---
@@ -814,6 +873,9 @@ export SERVER_PORT=8080
 | [`service/FilterStorageService.java`](metadata-service-java/src/main/java/com/example/metadata/service/FilterStorageService.java) | Filter persistence service |
 | [`service/FilterGeneratorService.java`](metadata-service-java/src/main/java/com/example/metadata/service/FilterGeneratorService.java) | Flink SQL generation service |
 | [`service/FilterDeployerService.java`](metadata-service-java/src/main/java/com/example/metadata/service/FilterDeployerService.java) | Confluent Cloud deployment service |
+| [`service/SpringYamlGeneratorService.java`](metadata-service-java/src/main/java/com/example/metadata/service/SpringYamlGeneratorService.java) | Spring Boot YAML generation service |
+| [`service/SpringYamlWriterService.java`](metadata-service-java/src/main/java/com/example/metadata/service/SpringYamlWriterService.java) | Spring Boot YAML file writing service |
+| [`service/JenkinsTriggerService.java`](metadata-service-java/src/main/java/com/example/metadata/service/JenkinsTriggerService.java) | Jenkins CI/CD triggering service |
 | [`config/AppConfig.java`](metadata-service-java/src/main/java/com/example/metadata/config/AppConfig.java) | Application configuration |
 
 ---
@@ -1091,24 +1153,265 @@ stateDiagram-v2
 
 ---
 
-## 15. Testing and Validation
+## 15. Spring Boot YAML Generation
 
-### 15.1 Unit Testing
+The Metadata Service automatically generates and updates a `filters.yml` file for the Spring Boot stream processor whenever filters are created, updated, deleted, or deployed via the API. This ensures synchronization between Flink SQL filters and the Spring Boot Kafka Streams implementation.
+
+### 15.1 Automatic YAML Updates
+
+The `filters.yml` file is automatically updated when:
+- A filter is **created** via `POST /api/v1/filters`
+- A filter is **updated** via `PUT /api/v1/filters/:id`
+- A filter is **deleted** via `DELETE /api/v1/filters/:id`
+- A filter is **deployed** via `POST /api/v1/filters/:id/deploy`
+
+### 15.2 YAML File Format
+
+The generated YAML follows this structure:
+
+```yaml
+filters:
+  - id: service-events-for-dealer-001
+    name: Service Events for Dealer 001
+    outputTopic: service-events-dealer-001-spring
+    enabled: true
+    conditions:
+      - field: event_type
+        operator: equals
+        value: CarServiceDone
+        valueType: string
+      - field: header_data.dealerId
+        operator: equals
+        value: DEALER-001
+        valueType: string
+    conditionLogic: AND
+  - id: car-created-events
+    name: Car Created Events
+    outputTopic: car-created-events-spring
+    enabled: true
+    conditions:
+      - field: event_type
+        operator: equals
+        value: CarCreated
+        valueType: string
+    conditionLogic: AND
+```
+
+**Key Features:**
+- Output topics automatically get the `-spring` suffix to distinguish from Flink topics
+- Disabled or deleted filters are marked with `enabled: false` or removed
+- Deprecated filters include comments indicating their status
+- Atomic file writes ensure data consistency (writes to temp file, then renames)
+
+### 15.3 Backup Management
+
+Before updating `filters.yml`, the service creates a timestamped backup if `backup-enabled` is `true`:
+
+```
+/tmp/filters-yaml-backups/
+├── filters.yml.2025-12-30T10-15-30.backup
+├── filters.yml.2025-12-30T10-20-45.backup
+└── filters.yml.2025-12-30T10-25-12.backup
+```
+
+Old backups are automatically cleaned up (default: keeps last 10 backups).
+
+### 15.4 Configuration
+
+Configure the YAML generation in `application.yml`:
+
+```yaml
+spring-boot:
+  filters-yaml-path: ${SPRING_BOOT_FILTERS_YAML_PATH:../cdc-streaming/stream-processor-spring/src/main/resources/filters.yml}
+  backup-enabled: ${SPRING_BOOT_YAML_BACKUP_ENABLED:true}
+  backup-dir: ${SPRING_BOOT_YAML_BACKUP_DIR:/tmp/filters-yaml-backups}
+```
+
+**Environment Variables:**
+- `SPRING_BOOT_FILTERS_YAML_PATH` - Path to the `filters.yml` file
+- `SPRING_BOOT_YAML_BACKUP_ENABLED` - Enable/disable backups (default: `true`)
+- `SPRING_BOOT_YAML_BACKUP_DIR` - Directory for backups (default: `/tmp/filters-yaml-backups`)
+
+### 15.5 Error Handling
+
+If YAML generation or writing fails:
+- The error is logged but does **not** fail the API operation
+- The filter operation (create/update/delete/deploy) still succeeds
+- Previous `filters.yml` content is preserved
+- Administrators are notified via logs
+
+---
+
+## 16. Jenkins CI/CD Integration
+
+The Metadata Service can automatically trigger Jenkins CI/CD builds when filters are created, updated, deleted, approved, or deployed. This enables automated change management and integration testing.
+
+### 16.1 Automatic Build Triggering
+
+Jenkins builds are triggered on the following filter lifecycle events:
+
+| Event | Triggered When | Default |
+|-------|----------------|---------|
+| `create` | Filter is created | ✅ Enabled |
+| `update` | Filter is updated | ✅ Enabled |
+| `delete` | Filter is deleted | ✅ Enabled |
+| `approve` | Filter is approved | ✅ Enabled |
+| `deploy` | Filter is deployed | ✅ Enabled |
+
+Each event type can be individually enabled/disabled via configuration.
+
+### 16.2 Build Parameters
+
+When triggering a Jenkins build, the following parameters are passed:
+
+| Parameter | Description | Example |
+|-----------|-------------|---------|
+| `FILTER_EVENT_TYPE` | Type of event that triggered the build | `create`, `update`, `delete`, `approve`, `deploy` |
+| `FILTER_ID` | ID of the filter that changed | `service-events-for-dealer-001` |
+| `FILTER_VERSION` | Version of the filter | `v1`, `v2` |
+
+Additional parameters can be passed via the API for custom workflows.
+
+### 16.3 Authentication
+
+Jenkins authentication supports two methods:
+
+**Method 1: Username and API Token**
+```yaml
+jenkins:
+  username: ${JENKINS_USERNAME:admin}
+  api-token: ${JENKINS_API_TOKEN:your-api-token}
+```
+
+**Method 2: Build Token**
+```yaml
+jenkins:
+  build-token: ${JENKINS_BUILD_TOKEN:your-build-token}
+```
+
+### 16.4 Configuration
+
+Configure Jenkins integration in `application.yml`:
+
+```yaml
+jenkins:
+  enabled: ${JENKINS_ENABLED:false}
+  base-url: ${JENKINS_BASE_URL:http://localhost:8080}
+  job-name: ${JENKINS_JOB_NAME:filter-integration-tests}
+  username: ${JENKINS_USERNAME:}
+  api-token: ${JENKINS_API_TOKEN:}
+  build-token: ${JENKINS_BUILD_TOKEN:}
+  trigger-on-create: ${JENKINS_TRIGGER_ON_CREATE:true}
+  trigger-on-update: ${JENKINS_TRIGGER_ON_UPDATE:true}
+  trigger-on-delete: ${JENKINS_TRIGGER_ON_DELETE:true}
+  trigger-on-deploy: ${JENKINS_TRIGGER_ON_DEPLOY:true}
+  trigger-on-approve: ${JENKINS_TRIGGER_ON_APPROVE:true}
+  timeout-seconds: ${JENKINS_TIMEOUT_SECONDS:30}
+```
+
+**Environment Variables:**
+- `JENKINS_ENABLED` - Enable/disable Jenkins triggering (default: `false`)
+- `JENKINS_BASE_URL` - Jenkins server URL (default: `http://localhost:8080`)
+- `JENKINS_JOB_NAME` - Jenkins job name to trigger (default: `filter-integration-tests`)
+- `JENKINS_USERNAME` - Jenkins username for authentication
+- `JENKINS_API_TOKEN` - Jenkins API token for authentication
+- `JENKINS_BUILD_TOKEN` - Jenkins build token (alternative to username/token)
+- `JENKINS_TRIGGER_ON_*` - Enable/disable triggering for specific events
+- `JENKINS_TIMEOUT_SECONDS` - Request timeout (default: `30` seconds)
+
+### 16.5 Jenkins Job Setup
+
+Your Jenkins job should be configured as a **parameterized build** that accepts:
+
+- `FILTER_EVENT_TYPE` (String)
+- `FILTER_ID` (String)
+- `FILTER_VERSION` (String)
+
+**Example Jenkinsfile:**
+```groovy
+pipeline {
+    agent any
+    parameters {
+        string(name: 'FILTER_EVENT_TYPE', defaultValue: 'create', description: 'Filter event type')
+        string(name: 'FILTER_ID', defaultValue: '', description: 'Filter ID')
+        string(name: 'FILTER_VERSION', defaultValue: 'v1', description: 'Filter version')
+    }
+    stages {
+        stage('Run Integration Tests') {
+            steps {
+                echo "Running tests for filter: ${params.FILTER_ID} (${params.FILTER_EVENT_TYPE})"
+                sh './scripts/run-all-integration-tests.sh'
+            }
+        }
+    }
+}
+```
+
+### 16.6 Error Handling
+
+If Jenkins build triggering fails:
+- The error is logged but does **not** fail the filter operation
+- The filter operation (create/update/delete/approve/deploy) still succeeds
+- Retry logic is applied for transient failures (5xx errors)
+- Timeout is configurable (default: 30 seconds)
+
+### 16.7 Workflow Example
+
+```mermaid
+sequenceDiagram
+    participant User as API User
+    participant API as Filter Controller
+    participant Storage as Filter Storage
+    participant SpringYaml as Spring YAML Service
+    participant Jenkins as Jenkins CI/CD
+
+    User->>API: POST /filters (create filter)
+    API->>Storage: Create filter
+    Storage-->>API: Filter created
+    API->>SpringYaml: Update filters.yml
+    SpringYaml-->>API: YAML updated
+    API->>Jenkins: Trigger build (FILTER_EVENT_TYPE=create, FILTER_ID=...)
+    Jenkins-->>API: Build triggered
+    API-->>User: Filter created (201)
+```
+
+---
+
+## 17. Testing and Validation
+
+### 17.1 Unit Testing
 
 The Java implementation includes comprehensive unit tests:
 - `FilterControllerTest.java` - Controller unit tests
 - `SchemaValidationServiceTest.java` - Validation service tests
 - `FilterGeneratorServiceTest.java` - SQL generation tests
-- `FilterE2EIntegrationTest.java` - End-to-end filter tests
+- `SpringYamlGeneratorServiceTest.java` - Spring YAML generation tests
+- `SpringYamlWriterServiceTest.java` - Spring YAML file writing tests
+- `JenkinsTriggerServiceTest.java` - Jenkins CI/CD triggering tests
 
-### 15.2 Test Coverage
+### 17.2 Integration Testing
+
+Integration tests verify end-to-end functionality:
+- `FilterE2EIntegrationTest.java` - End-to-end filter lifecycle tests
+- `SpringYamlUpdateIntegrationTest.java` - Spring YAML update integration tests
+- `JenkinsTriggerIntegrationTest.java` - Jenkins triggering integration tests
+- `ValidationIntegrationTest.java` - Schema validation integration tests
+- `ApiErrorHandlingIntegrationTest.java` - API error handling tests
+- `MultiVersionValidationIntegrationTest.java` - Multi-version schema tests
+- `GitSyncIntegrationTest.java` - Git synchronization tests
+
+### 17.3 Test Coverage
 
 - Schema validation: 95%+ coverage
 - Filter generation: 90%+ coverage
 - Git sync: 85%+ coverage
 - Compatibility checking: 90%+ coverage
+- Spring YAML generation: 90%+ coverage
+- Jenkins triggering: 85%+ coverage
 
-### 15.3 Manual Testing
+**Total Integration Tests**: 60 tests (see `TEST_COVERAGE.md` for details)
+
+### 17.4 Manual Testing
 
 **Validation Test:**
 ```bash
@@ -1136,7 +1439,7 @@ curl -X POST http://localhost:8080/api/v1/filters \
 
 ---
 
-## 16. Future Enhancements
+## 18. Future Enhancements
 
 Potential improvements for future versions:
 
@@ -1185,6 +1488,13 @@ Potential improvements for future versions:
 
 ---
 
-**Document Version:** 1.0  
-**Last Updated:** December 14, 2025  
+**Document Version:** 2.0  
+**Last Updated:** December 30, 2025  
 **Maintained By:** Platform Engineering Team
+
+**Recent Updates:**
+- Added Spring Boot YAML generation and automatic updates
+- Added Jenkins CI/CD integration for filter lifecycle events
+- Updated architecture diagrams to include new services
+- Expanded configuration reference with Spring Boot and Jenkins settings
+- Updated test coverage information

@@ -17,7 +17,8 @@ import java.nio.file.StandardOpenOption;
 import static org.junit.jupiter.api.Assertions.*;
 
 @SpringBootTest(properties = {
-    "spring.main.allow-bean-definition-overriding=true"
+    "spring.main.allow-bean-definition-overriding=true",
+    "spring.main.lazy-initialization=true"
 })
 public class GitSyncEdgeCasesIntegrationTest {
     

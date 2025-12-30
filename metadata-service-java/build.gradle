@@ -53,6 +53,12 @@ tasks.named('test') {
     useJUnitPlatform()
     finalizedBy jacocoTestReport
     
+    // Enable parallel test execution
+    maxParallelForks = Runtime.runtime.availableProcessors().intdiv(2) ?: 1
+    
+    // Fork test JVM for better isolation and performance
+    forkEvery = 10
+    
     // Show test output in console
     testLogging {
         events "passed", "skipped", "failed"

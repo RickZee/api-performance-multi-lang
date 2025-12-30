@@ -24,7 +24,9 @@ import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
-@SpringBootTest
+@SpringBootTest(properties = {
+    "spring.main.lazy-initialization=true"
+})
 class SpringYamlUpdateIntegrationTest {
 
     @TempDir
@@ -61,6 +63,29 @@ class SpringYamlUpdateIntegrationTest {
 
     @BeforeEach
     void setUp() throws IOException {
+        // Set up cache directory structure (required for FilterStorageService)
+        Path cachePath = Path.of(testCacheDir);
+        Path v1Path = cachePath.resolve("v1");
+        Path schemasPath = v1Path.resolve("schemas");
+        Files.createDirectories(schemasPath);
+        
+        // Copy schemas from test repo to cache if they exist
+        Path repoSchemasPath = Path.of(testRepoDir).resolve("schemas");
+        if (Files.exists(repoSchemasPath)) {
+            Files.walk(repoSchemasPath).forEach(source -> {
+                try {
+                    Path dest = schemasPath.resolve(repoSchemasPath.relativize(source));
+                    if (Files.isDirectory(source)) {
+                        Files.createDirectories(dest);
+                    } else {
+                        Files.copy(source, dest, java.nio.file.StandardCopyOption.REPLACE_EXISTING);
+                    }
+                } catch (IOException e) {
+                    throw new RuntimeException(e);
+                }
+            });
+        }
+        
         // Set YAML file path in config
         yamlFile = tempDir.resolve("filters.yml");
         appConfig.getSpringBoot().setFiltersYamlPath(yamlFile.toString());

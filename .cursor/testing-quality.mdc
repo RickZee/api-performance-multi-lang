@@ -1,0 +1,40 @@
+---
+description: Testing and quality gates standards
+globs: ["**/*"]
+alwaysApply: true
+---
+
+Testing and quality standards for this project:
+
+## Test Coverage Requirements
+- Require unit tests for ALL new business logic (minimum 80% code coverage)
+- Use Test-Driven Development (TDD) for domain logic and core algorithms
+- Use Behavior-Driven Development (BDD) for API contracts and user stories
+- Integration tests required for all database operations and external service calls
+- End-to-end (E2E) tests required for critical user journeys
+- Mutation testing recommended for critical scientific calculations
+
+## Unit Testing
+- Test one thing per test (single responsibility)
+- Use descriptive test names: `test_should_calculate_molecular_weight_given_valid_smiles`
+- Follow AAA pattern: Arrange, Act, Assert
+- Test both happy paths and error paths
+- Test edge cases (null, empty, boundary values)
+- Mock external dependencies (AWS services, databases, HTTP clients)
+
+## Mocking and Test Doubles
+- Use `moto` for AWS service mocking (S3, Lambda, DynamoDB, etc.)
+- Use `WireMock` or `MockServer` for HTTP service mocking
+- Use in-memory databases for integration tests (H2, SQLite, MongoDB Memory Server)
+- Mock time-dependent operations (use `freezegun` in Python, `java.time.Clock` in Java)
+- Never mock what you don't own (prefer real implementations for internal code)
+
+## Integration Testing
+- Test database operations with real database instances (Docker containers)
+- Test API endpoints with real HTTP requests (use TestContainers for services)
+- Test event-driven flows with in-memory message brokers
+- Use test fixtures and factories for consistent test data
+- Clean up test data after each test (use transactions or cleanup methods)
+
+## Running Tests
+- Run all tests ensuring they output the progress to console to monitor progress

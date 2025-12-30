@@ -423,3 +423,16 @@ For detailed architecture documentation, see [ARCHITECTURE.md](ARCHITECTURE.md).
 - **[BACKEND_IMPLEMENTATION.md](BACKEND_IMPLEMENTATION.md)**: Back-end infrastructure details
 - **[ADVANCED_USE_CASES.md](ADVANCED_USE_CASES.md)**: Advanced monitoring, testing, and configuration
 - **[DISASTER_RECOVERY.md](DISASTER_RECOVERY.md)**: Disaster recovery procedures
+- **[docs/FILTER_CI_CD_GUIDE.md](docs/FILTER_CI_CD_GUIDE.md)**: Comprehensive guide for filter changes driven by CI/CD
+
+---
+
+**Document Version:** 2.0  
+**Last Updated:** December 30, 2025  
+**Maintained By:** Platform Engineering Team
+
+**Recent Updates:**
+- Added Spring Boot YAML automatic generation via Metadata Service API
+- Added Jenkins CI/CD integration for filter lifecycle events
+- Updated integration test coverage documentation (154 total tests)
+- Enhanced filter management with API-based workflows
