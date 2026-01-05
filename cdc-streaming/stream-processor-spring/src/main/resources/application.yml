@@ -31,10 +31,10 @@ spring:
         enable.idempotence: true
         # State store settings
         state.dir: /tmp/kafka-streams
-        # Replication factor for internal topics (Confluent Cloud uses 3 by default)
-        # Note: These are for internal Kafka Streams topics, not the source topic
-        replication.factor: 3
-        min.insync.replicas: 2
+        # Replication factor for internal topics
+        # For local Redpanda (single node): use 1, for Confluent Cloud: use 3
+        replication.factor: ${KAFKA_REPLICATION_FACTOR:1}
+        min.insync.replicas: ${KAFKA_MIN_INSYNC_REPLICAS:1}
         # Consumer settings for Confluent Cloud
         consumer.auto.offset.reset: earliest
 

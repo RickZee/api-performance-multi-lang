@@ -138,9 +138,9 @@ public class KafkaStreamsConfig {
             }
         });
 
-        // Apply filters - use dynamic filters if available, otherwise fall back to static filters
-        if (dynamicFilterManager != null) {
-            // Use dynamic filter manager for runtime filter updates
+        // Apply filters - use dynamic filters if available and has filters, otherwise fall back to static filters
+        if (dynamicFilterManager != null && !dynamicFilterManager.getOutputTopics().isEmpty()) {
+            // Use dynamic filter manager for runtime filter updates (only if it has active filters)
             applyDynamicFilters(source);
         } else if (filtersConfig != null && filtersConfig.getFilters() != null) {
             // Fall back to static filters from filters.yml

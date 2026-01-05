@@ -1,0 +1,49 @@
+{
+  "name": "postgres-debezium-event-headers-local",
+  "config": {
+    "connector.class": "io.debezium.connector.postgresql.PostgresConnector",
+    "tasks.max": "1",
+    
+    "database.hostname": "postgres-large",
+    "database.port": "5432",
+    "database.user": "postgres",
+    "database.password": "password",
+    "database.dbname": "car_entities",
+    "database.server.name": "postgres-cdc",
+    
+    "topic.prefix": "postgres-cdc",
+    "table.include.list": "public.event_headers",
+    
+    "plugin.name": "pgoutput",
+    "slot.name": "event_headers_debezium_slot",
+    "publication.name": "event_headers_debezium_publication",
+    "publication.autocreate.mode": "filtered",
+    
+    "key.converter": "org.apache.kafka.connect.json.JsonConverter",
+    "key.converter.schemas.enable": "false",
+    
+    "value.converter": "org.apache.kafka.connect.json.JsonConverter",
+    "value.converter.schemas.enable": "false",
+    
+    "transforms": "unwrap,route",
+    "transforms.unwrap.type": "io.debezium.transforms.ExtractNewRecordState",
+    "transforms.unwrap.drop.tombstones": "false",
+    "transforms.unwrap.add.fields": "op,table,ts_ms",
+    "transforms.unwrap.add.fields.prefix": "__",
+    "transforms.route.type": "org.apache.kafka.connect.transforms.RegexRouter",
+    "transforms.route.regex": "postgres-cdc.public.event_headers",
+    "transforms.route.replacement": "raw-event-headers",
+    
+    "snapshot.mode": "initial",
+    "tombstones.on.delete": "true",
+    "include.schema.changes": "false",
+    
+    "errors.tolerance": "all",
+    "errors.log.enable": "true",
+    "errors.log.include.messages": "true",
+    "errors.deadletterqueue.topic.name": "dlq-raw-event-headers",
+    "errors.deadletterqueue.topic.replication.factor": "1",
+    "errors.deadletterqueue.context.headers.enable": "true"
+  }
+}
+

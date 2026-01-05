@@ -67,8 +67,52 @@ GRANT ALL PRIVILEGES ON TABLE service_record_entities TO postgres;
 GRANT ALL PRIVILEGES ON TABLE loan_payment_entities TO postgres;
 GRANT USAGE, SELECT ON SEQUENCE service_record_entities_id_seq TO postgres;
 
+-- ============================================================================
+-- Business Events Table
+-- Stores complete events with eventHeader fields as columns and full event JSON
+-- ============================================================================
+CREATE TABLE IF NOT EXISTS business_events (
+    id VARCHAR(255) PRIMARY KEY,  -- from eventHeader.uuid
+    event_name VARCHAR(255) NOT NULL,  -- from eventHeader.eventName
+    event_type VARCHAR(255),  -- from eventHeader.eventType
+    created_date TIMESTAMP WITH TIME ZONE,  -- from eventHeader.createdDate
+    saved_date TIMESTAMP WITH TIME ZONE,  -- from eventHeader.savedDate
+    event_data JSONB NOT NULL  -- entire event JSON including eventHeader + entities
+);
+
+-- Indexes for business_events
+CREATE INDEX IF NOT EXISTS idx_business_events_event_type ON business_events(event_type);
+CREATE INDEX IF NOT EXISTS idx_business_events_created_date ON business_events(created_date);
+
+-- ============================================================================
+-- Event Headers Table
+-- Stores event header data with hybrid structure (relational columns + JSONB)
+-- Foreign key to business_events for referential integrity
+-- This table is used for CDC streaming via Debezium
+-- ============================================================================
+CREATE TABLE IF NOT EXISTS event_headers (
+    id VARCHAR(255) PRIMARY KEY,  -- from eventHeader.uuid (same as business_events.id)
+    event_name VARCHAR(255) NOT NULL,  -- from eventHeader.eventName
+    event_type VARCHAR(255),  -- from eventHeader.eventType
+    created_date TIMESTAMP WITH TIME ZONE,  -- from eventHeader.createdDate
+    saved_date TIMESTAMP WITH TIME ZONE,  -- from eventHeader.savedDate
+    header_data JSONB NOT NULL,  -- full eventHeader JSON
+    CONSTRAINT fk_event_headers_business_events 
+        FOREIGN KEY (id) REFERENCES business_events(id) 
+        ON DELETE CASCADE
+);
+
+-- Indexes for event_headers
+CREATE INDEX IF NOT EXISTS idx_event_headers_event_type ON event_headers(event_type);
+CREATE INDEX IF NOT EXISTS idx_event_headers_created_date ON event_headers(created_date);
+
+-- Grant permissions for new tables
+GRANT ALL PRIVILEGES ON TABLE business_events TO postgres;
+GRANT ALL PRIVILEGES ON TABLE event_headers TO postgres;
+
 -- Log initialization
 DO $$
 BEGIN
     RAISE NOTICE 'Car entities database with hybrid relational schema initialized successfully';
+    RAISE NOTICE 'Business events and event headers tables created for CDC streaming';
 END $$;

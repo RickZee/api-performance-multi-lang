@@ -1,0 +1,357 @@
+# Docker Compose for Local CDC + Metadata Testing
+# This is a self-contained setup for testing CDC pipeline with local services
+# Based on cdc-streaming template, includes all necessary services
+# Usage: docker-compose -f docker-compose-local.yml up -d
+
+services:
+  # PostgreSQL Database (with logical replication for CDC)
+  postgres-large:
+    image: postgres:15-alpine
+    container_name: cdc-local-postgres-large
+    environment:
+      POSTGRES_DB: car_entities
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: password
+      POSTGRES_INITDB_ARGS: "-E UTF8 --locale=C"
+    command: >
+      postgres
+      -c shared_buffers=1GB
+      -c effective_cache_size=3GB
+      -c maintenance_work_mem=128MB
+      -c checkpoint_completion_target=0.9
+      -c wal_buffers=16MB
+      -c default_statistics_target=100
+      -c random_page_cost=1.1
+      -c effective_io_concurrency=200
+      -c work_mem=8MB
+      -c min_wal_size=512MB
+      -c max_wal_size=2GB
+      -c max_connections=100
+      -c max_worker_processes=4
+      -c max_parallel_workers_per_gather=2
+      -c max_parallel_workers=4
+      -c max_parallel_maintenance_workers=2
+      -c shared_preload_libraries=pg_stat_statements
+      -c pg_stat_statements.track=all
+      -c pg_stat_statements.max=10000
+      -c log_min_duration_statement=1000
+      -c wal_level=logical
+      -c max_replication_slots=10
+      -c max_wal_senders=10
+    ports:
+      - "5433:5432"
+    volumes:
+      - postgres_data_large:/var/lib/postgresql/data
+      - ../postgres/init-small.sql:/docker-entrypoint-initdb.d/init-small.sql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d car_entities"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - cdc_local_network
+    deploy:
+      resources:
+        limits:
+          memory: 4G
+          cpus: '4.0'
+        reservations:
+          memory: 1G
+          cpus: '1.0'
+
+  # Redpanda - Kafka-compatible message broker
+  redpanda:
+    image: docker.redpanda.com/redpandadata/redpanda:latest
+    container_name: cdc-local-redpanda
+    command:
+      - redpanda
+      - start
+      - --smp 1
+      - --memory 1G
+      - --overprovisioned
+      - --kafka-addr
+      - internal://0.0.0.0:9092,external://0.0.0.0:29092
+      - --advertise-kafka-addr
+      - internal://redpanda:9092,external://localhost:29092
+      - --pandaproxy-addr
+      - internal://0.0.0.0:8082,external://0.0.0.0:28082
+      - --advertise-pandaproxy-addr
+      - internal://redpanda:8082,external://localhost:28082
+      - --schema-registry-addr
+      - internal://0.0.0.0:8081,external://0.0.0.0:28081
+      - --rpc-addr
+      - redpanda:33145
+      - --advertise-rpc-addr
+      - redpanda:33145
+      - --default-log-level=info
+    ports:
+      - "29092:9092" # Kafka API (internal port 9092, external 29092)
+      - "29644:9644"  # Admin API
+      - "28081:8081"  # Schema Registry
+      - "28082:8082"  # Pandaproxy
+    volumes:
+      - redpanda-data:/var/lib/redpanda/data
+    networks:
+      - cdc_local_network
+    healthcheck:
+      test: ["CMD-SHELL", "rpk cluster health | grep -q healthy"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+    deploy:
+      resources:
+        limits:
+          memory: 2G
+          cpus: '2.0'
+        reservations:
+          memory: 512M
+          cpus: '0.5'
+
+  # Redpanda Console - Web UI for topic management
+  redpanda-console:
+    image: docker.redpanda.com/redpandadata/console:latest
+    container_name: cdc-local-redpanda-console
+    environment:
+      CONFIG_FILEPATH: /tmp/config.yml
+      KAFKA_BROKERS: redpanda:9092
+      KAFKA_SCHEMAREGISTRY_ENABLED: "true"
+      KAFKA_SCHEMAREGISTRY_URLS: http://redpanda:8081
+    ports:
+      - "8086:8080"  # Changed to 8086 to avoid conflict
+    depends_on:
+      redpanda:
+        condition: service_healthy
+    networks:
+      - cdc_local_network
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+          cpus: '0.5'
+        reservations:
+          memory: 256M
+          cpus: '0.25'
+
+  # Kafka Connect with Debezium PostgreSQL Connector
+  kafka-connect:
+    image: quay.io/debezium/connect:2.6
+    container_name: cdc-local-kafka-connect
+    ports:
+      - "8085:8083" # Kafka Connect REST API
+    environment:
+      # Bootstrap servers (Debezium image uses CONNECT_ prefix)
+      CONNECT_BOOTSTRAP_SERVERS: redpanda:9092
+      BOOTSTRAP_SERVERS: redpanda:9092
+      # Group ID
+      GROUP_ID: connect-cluster
+      # Config storage
+      CONFIG_STORAGE_TOPIC: connect-config
+      CONFIG_STORAGE_REPLICATION_FACTOR: 1
+      # Offset storage
+      OFFSET_STORAGE_TOPIC: connect-offsets
+      OFFSET_STORAGE_REPLICATION_FACTOR: 1
+      # Status storage
+      STATUS_STORAGE_TOPIC: connect-status
+      STATUS_STORAGE_REPLICATION_FACTOR: 1
+      # Converters
+      KEY_CONVERTER: org.apache.kafka.connect.json.JsonConverter
+      VALUE_CONVERTER: org.apache.kafka.connect.json.JsonConverter
+      KEY_CONVERTER_SCHEMAS_ENABLE: "false"
+      VALUE_CONVERTER_SCHEMAS_ENABLE: "false"
+      INTERNAL_KEY_CONVERTER: org.apache.kafka.connect.json.JsonConverter
+      INTERNAL_VALUE_CONVERTER: org.apache.kafka.connect.json.JsonConverter
+      INTERNAL_KEY_CONVERTER_SCHEMAS_ENABLE: "false"
+      INTERNAL_VALUE_CONVERTER_SCHEMAS_ENABLE: "false"
+      # Plugin path (Debezium connectors are pre-installed)
+      PLUGIN_PATH: /kafka/connect
+      # REST API
+      REST_PORT: 8083
+      REST_ADVERTISED_HOST_NAME: kafka-connect
+      # Logging
+      LOG4J_ROOT_LOGLEVEL: INFO
+    volumes:
+      - ../debezium-connector-dsql/build/libs/debezium-connector-dsql-1.0.0.jar:/kafka/connect/debezium-connector-dsql/debezium-connector-dsql-1.0.0.jar
+    depends_on:
+      redpanda:
+        condition: service_healthy
+      postgres-large:
+        condition: service_healthy
+    networks:
+      - cdc_local_network
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:8083/connector-plugins || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # Metadata Service - Schema Validation (Java)
+  metadata-service-java:
+    build: ../metadata-service-java
+    container_name: cdc-local-metadata-service-java
+    ports:
+      - "8081:8080"
+    environment:
+      GIT_REPOSITORY: ${GIT_REPOSITORY:-file:///app/data}
+      GIT_BRANCH: ${GIT_BRANCH:-main}
+      LOCAL_CACHE_DIR: /tmp/schema-cache
+      SERVER_PORT: 8080
+      DEFAULT_VERSION: ${DEFAULT_VERSION:-v1}
+      STRICT_MODE: ${STRICT_MODE:-true}
+      CONFLUENT_CLOUD_API_KEY: ${CONFLUENT_CLOUD_API_KEY:-}
+      CONFLUENT_CLOUD_API_SECRET: ${CONFLUENT_CLOUD_API_SECRET:-}
+      CONFLUENT_FLINK_COMPUTE_POOL_ID: ${CONFLUENT_FLINK_COMPUTE_POOL_ID:-}
+      CONFLUENT_FLINK_API_ENDPOINT: ${CONFLUENT_FLINK_API_ENDPOINT:-}
+      # Database configuration for local postgres
+      DATABASE_URL: ${DATABASE_URL:-jdbc:postgresql://postgres-large:5432/car_entities}
+      DATABASE_USERNAME: ${DATABASE_USERNAME:-postgres}
+      DATABASE_PASSWORD: ${DATABASE_PASSWORD:-password}
+    volumes:
+      - ../data:/app/data:rw
+    depends_on:
+      postgres-large:
+        condition: service_healthy
+    restart: unless-stopped
+    networks:
+      - cdc_local_network
+    deploy:
+      resources:
+        limits:
+          memory: 1G
+          cpus: '1.0'
+        reservations:
+          memory: 512M
+          cpus: '0.5'
+    healthcheck:
+      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost:8080/api/v1/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # Spring Boot Stream Processor
+  stream-processor:
+    build:
+      context: ./stream-processor-spring
+      dockerfile: Dockerfile
+    container_name: cdc-local-stream-processor
+    hostname: stream-processor
+    environment:
+      # For local development: use redpanda:9092 (no auth) - explicitly set to override env vars
+      KAFKA_BOOTSTRAP_SERVERS: redpanda:9092
+      KAFKA_API_KEY: ${KAFKA_API_KEY:-}
+      KAFKA_API_SECRET: ${KAFKA_API_SECRET:-}
+      KAFKA_SECURITY_PROTOCOL: ${KAFKA_SECURITY_PROTOCOL:-PLAINTEXT}
+      KAFKA_SASL_MECHANISM: ${KAFKA_SASL_MECHANISM:-PLAIN}
+      # Spring Kafka Streams configuration
+      SPRING_KAFKA_STREAMS_SOURCE_TOPIC: raw-event-headers
+      # Replication settings for local single-node Redpanda
+      KAFKA_REPLICATION_FACTOR: ${KAFKA_REPLICATION_FACTOR:-1}
+      KAFKA_MIN_INSYNC_REPLICAS: ${KAFKA_MIN_INSYNC_REPLICAS:-1}
+      # Disable dynamic filter loading to use static filters from filters.yml
+      METADATA_SERVICE_ENABLED: "false"
+    volumes:
+      # Mount filters.yml so Spring Boot can load it at runtime
+      - ./stream-processor-spring/src/main/resources/filters.yml:/app/filters.yml:ro
+    ports:
+      - "8083:8080"  # Actuator health endpoint
+    networks:
+      - cdc_local_network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/actuator/health"]
+      interval: 30s
+      timeout: 3s
+      start_period: 40s
+      retries: 3
+
+  # ============================================================================
+  # Spring Boot Stream Processor Consumers
+  # ============================================================================
+
+  # Loan Consumer (Spring)
+  loan-consumer:
+    build:
+      context: ./consumers-confluent/loan-consumer
+      dockerfile: Dockerfile
+    container_name: cdc-local-loan-consumer-spring
+    hostname: loan-consumer-spring
+    environment:
+      # For local development: use redpanda:9092 (no auth) - explicitly set to override env vars
+      KAFKA_BOOTSTRAP_SERVERS: redpanda:9092
+      # Consumes from Spring Boot stream processor topics
+      KAFKA_TOPIC: ${KAFKA_TOPIC_LOAN:-filtered-loan-created-events-spring}
+      # Explicitly unset for local Redpanda (no authentication)
+      KAFKA_API_KEY: ""
+      KAFKA_API_SECRET: ""
+      CONSUMER_GROUP_ID: loan-consumer-spring-group
+    networks:
+      - cdc_local_network
+    restart: unless-stopped
+
+  # Loan Payment Consumer (Spring)
+  loan-payment-consumer:
+    build:
+      context: ./consumers-confluent/loan-payment-consumer
+      dockerfile: Dockerfile
+    container_name: cdc-local-loan-payment-consumer-spring
+    hostname: loan-payment-consumer-spring
+    environment:
+      # For local development: use redpanda:9092 (no auth) - explicitly set to override env vars
+      KAFKA_BOOTSTRAP_SERVERS: redpanda:9092
+      # Consumes from Spring Boot stream processor topics
+      KAFKA_TOPIC: ${KAFKA_TOPIC_LOAN_PAYMENT:-filtered-loan-payment-submitted-events-spring}
+      # Explicitly unset for local Redpanda (no authentication)
+      KAFKA_API_KEY: ""
+      KAFKA_API_SECRET: ""
+      CONSUMER_GROUP_ID: loan-payment-consumer-spring-group
+    networks:
+      - cdc_local_network
+    restart: unless-stopped
+
+  # Service Consumer (Spring)
+  service-consumer:
+    build:
+      context: ./consumers-confluent/service-consumer
+      dockerfile: Dockerfile
+    container_name: cdc-local-service-consumer-spring
+    hostname: service-consumer-spring
+    environment:
+      # For local development: use redpanda:9092 (no auth) - explicitly set to override env vars
+      KAFKA_BOOTSTRAP_SERVERS: redpanda:9092
+      # Consumes from Spring Boot stream processor topics
+      KAFKA_TOPIC: ${KAFKA_TOPIC_SERVICE:-filtered-service-events-spring}
+      # Explicitly unset for local Redpanda (no authentication)
+      KAFKA_API_KEY: ""
+      KAFKA_API_SECRET: ""
+      CONSUMER_GROUP_ID: service-consumer-spring-group
+    networks:
+      - cdc_local_network
+    restart: unless-stopped
+
+  # Car Consumer (Spring)
+  car-consumer:
+    build:
+      context: ./consumers-confluent/car-consumer
+      dockerfile: Dockerfile
+    container_name: cdc-local-car-consumer-spring
+    hostname: car-consumer-spring
+    environment:
+      # For local development: use redpanda:9092 (no auth) - explicitly set to override env vars
+      KAFKA_BOOTSTRAP_SERVERS: redpanda:9092
+      # Consumes from Spring Boot stream processor topics
+      KAFKA_TOPIC: ${KAFKA_TOPIC_CAR:-filtered-car-created-events-spring}
+      # Explicitly unset for local Redpanda (no authentication)
+      KAFKA_API_KEY: ""
+      KAFKA_API_SECRET: ""
+      CONSUMER_GROUP_ID: car-consumer-spring-group
+    networks:
+      - cdc_local_network
+    restart: unless-stopped
+
+volumes:
+  postgres_data_large:
+  redpanda-data:
+
+networks:
+  cdc_local_network:
+    driver: bridge
+

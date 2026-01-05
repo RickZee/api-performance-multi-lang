@@ -32,8 +32,11 @@ services:
       -c pg_stat_statements.track=all
       -c pg_stat_statements.max=10000
       -c log_min_duration_statement=1000
+      -c wal_level=logical
+      -c max_replication_slots=10
+      -c max_wal_senders=10
     ports:
-      - "5432:5432"
+      - "5433:5432"  # Changed to 5433 to avoid conflict with int-test-postgres
     volumes:
       - postgres_data_large:/var/lib/postgresql/data
       - ./postgres/init-small.sql:/docker-entrypoint-initdb.d/init-small.sql
@@ -86,6 +89,139 @@ services:
           cpus: '1.0'
         reservations:
           memory: 256M
+          cpus: '0.5'
+
+  # Redpanda - Kafka-compatible message broker
+  redpanda:
+    image: docker.redpanda.com/redpandadata/redpanda:latest
+    container_name: redpanda
+    command:
+      - redpanda
+      - start
+      - --kafka-addr
+      - internal://0.0.0.0:9092,external://0.0.0.0:19092
+      - --advertise-kafka-addr
+      - internal://redpanda:9092,external://localhost:29092
+      - --pandaproxy-addr
+      - internal://0.0.0.0:8082,external://0.0.0.0:18082
+      - --advertise-pandaproxy-addr
+      - internal://redpanda:8082,external://localhost:18082
+      - --schema-registry-addr
+      - internal://0.0.0.0:8081,external://0.0.0.0:18081
+      - --rpc-addr
+      - redpanda:33145
+      - --advertise-rpc-addr
+      - redpanda:33145
+      - --smp
+      - '1'
+      - --memory
+      - '1G'
+      - --mode dev-container
+      - --default-log-level=info
+    ports:
+      - "29092:19092"  # External Kafka API (changed to avoid conflict)
+      - "29644:9644"   # Admin API (changed to avoid conflict)
+      - "28081:8081"   # Schema Registry (changed to avoid conflict)
+      - "28082:8082"   # Pandaproxy (changed to avoid conflict)
+    volumes:
+      - redpanda-data:/var/lib/redpanda/data
+    networks:
+      - car_network
+    healthcheck:
+      test: ["CMD-SHELL", "rpk cluster health | grep -q 'Healthy'"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    deploy:
+      resources:
+        limits:
+          memory: 2G
+          cpus: '2.0'
+        reservations:
+          memory: 512M
+          cpus: '0.5'
+
+  # Redpanda Console - Web UI for topic management
+  redpanda-console:
+    image: docker.redpanda.com/redpandadata/console:latest
+    container_name: redpanda-console
+    environment:
+      CONFIG_FILEPATH: /tmp/config.yml
+      KAFKA_BROKERS: redpanda:9092
+      KAFKA_SCHEMAREGISTRY_ENABLED: "true"
+      KAFKA_SCHEMAREGISTRY_URLS: http://redpanda:8081
+    ports:
+      - "8084:8080"
+    depends_on:
+      redpanda:
+        condition: service_healthy
+    networks:
+      - car_network
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+          cpus: '0.5'
+        reservations:
+          memory: 256M
+          cpus: '0.25'
+
+  # Kafka Connect with Debezium PostgreSQL Connector
+  kafka-connect:
+    image: quay.io/debezium/connect:2.6
+    container_name: kafka-connect
+    ports:
+      - "8085:8083"  # Changed to 8085 to avoid conflict
+    environment:
+      # Bootstrap servers
+      BOOTSTRAP_SERVERS: redpanda:9092
+      # Group ID
+      GROUP_ID: connect-cluster
+      # Config storage
+      CONFIG_STORAGE_TOPIC: connect-config
+      CONFIG_STORAGE_REPLICATION_FACTOR: 1
+      # Offset storage
+      OFFSET_STORAGE_TOPIC: connect-offsets
+      OFFSET_STORAGE_REPLICATION_FACTOR: 1
+      # Status storage
+      STATUS_STORAGE_TOPIC: connect-status
+      STATUS_STORAGE_REPLICATION_FACTOR: 1
+      # Converters
+      KEY_CONVERTER: org.apache.kafka.connect.json.JsonConverter
+      VALUE_CONVERTER: org.apache.kafka.connect.json.JsonConverter
+      KEY_CONVERTER_SCHEMAS_ENABLE: "false"
+      VALUE_CONVERTER_SCHEMAS_ENABLE: "false"
+      INTERNAL_KEY_CONVERTER: org.apache.kafka.connect.json.JsonConverter
+      INTERNAL_VALUE_CONVERTER: org.apache.kafka.connect.json.JsonConverter
+      INTERNAL_KEY_CONVERTER_SCHEMAS_ENABLE: "false"
+      INTERNAL_VALUE_CONVERTER_SCHEMAS_ENABLE: "false"
+      # REST API
+      REST_PORT: 8083
+      REST_ADVERTISED_HOST_NAME: kafka-connect
+      # Plugin path (Debezium connectors are pre-installed)
+      CONNECT_PLUGIN_PATH: /kafka/connect
+      # Logging
+      LOG4J_ROOT_LOGLEVEL: INFO
+    depends_on:
+      redpanda:
+        condition: service_healthy
+      postgres-large:
+        condition: service_healthy
+    networks:
+      - car_network
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:8083/connectors || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+    deploy:
+      resources:
+        limits:
+          memory: 1G
+          cpus: '1.0'
+        reservations:
+          memory: 512M
           cpus: '0.5'
 
   # Producer API - Spring Boot REST
@@ -261,7 +397,7 @@ services:
     ports:
       - "8081:8080"
     environment:
-      GIT_REPOSITORY: ${GIT_REPOSITORY:-}
+      GIT_REPOSITORY: ${GIT_REPOSITORY:-file:///app/data}
       GIT_BRANCH: ${GIT_BRANCH:-main}
       LOCAL_CACHE_DIR: /tmp/schema-cache
       SERVER_PORT: 8080
@@ -271,10 +407,17 @@ services:
       CONFLUENT_CLOUD_API_SECRET: ${CONFLUENT_CLOUD_API_SECRET:-}
       CONFLUENT_FLINK_COMPUTE_POOL_ID: ${CONFLUENT_FLINK_COMPUTE_POOL_ID:-}
       CONFLUENT_FLINK_API_ENDPOINT: ${CONFLUENT_FLINK_API_ENDPOINT:-}
+      # Database configuration for local postgres
+      DATABASE_URL: ${DATABASE_URL:-jdbc:postgresql://postgres-large:5432/car_entities}
+      DATABASE_USERNAME: ${DATABASE_USERNAME:-postgres}
+      DATABASE_PASSWORD: ${DATABASE_PASSWORD:-password}
     volumes:
       - ./data:/app/data:rw
     # For local testing: mount data directory and use file:// URL for git
     # Example: GIT_REPOSITORY=file:///app/data docker-compose up
+    depends_on:
+      postgres-large:
+        condition: service_healthy
     restart: unless-stopped
     networks:
       - car_network
@@ -336,6 +479,7 @@ volumes:
   postgres_data_large:
   postgres_data_metrics:
   metadata_cache:
+  redpanda-data:
 
 networks:
   car_network:
