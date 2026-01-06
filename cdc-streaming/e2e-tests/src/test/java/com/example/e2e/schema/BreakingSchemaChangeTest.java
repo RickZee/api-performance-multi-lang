@@ -28,15 +28,15 @@ public class BreakingSchemaChangeTest {
     
     @BeforeAll
     void setUp() {
-        // Support both local Docker Kafka and Confluent Cloud
+        // Default to local Docker Redpanda, support Confluent Cloud via environment variables
         // Check environment variables first (for Confluent Cloud mode)
         bootstrapServers = System.getenv("KAFKA_BOOTSTRAP_SERVERS");
         if (bootstrapServers == null || bootstrapServers.isEmpty()) {
             bootstrapServers = System.getenv("CONFLUENT_BOOTSTRAP_SERVERS");
         }
         if (bootstrapServers == null || bootstrapServers.isEmpty()) {
-            // Default to local Docker Kafka
-            bootstrapServers = "localhost:9092";
+            // Default to local Redpanda (external port)
+            bootstrapServers = "localhost:29092";
         }
         
         // Get API credentials if using Confluent Cloud
@@ -56,7 +56,7 @@ public class BreakingSchemaChangeTest {
             apiSecret = System.getenv("KAFKA_API_SECRET");
         }
         
-        // Local Kafka doesn't require authentication
+        // Local Redpanda doesn't require authentication (empty strings are fine)
         kafkaUtils = new KafkaTestUtils(bootstrapServers, apiKey, apiSecret);
     }
     

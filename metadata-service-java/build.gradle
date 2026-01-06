@@ -67,18 +67,22 @@ tasks.named('test') {
     // Fork test JVM for better isolation and performance
     forkEvery = 10
     
-    // Show test output in console
+    // Show test output in console with start/end messages
     testLogging {
-        events "passed", "skipped", "failed"
+        events "started", "passed", "skipped", "failed"
         exceptionFormat "full"
         showExceptions true
         showCauses true
         showStackTraces true
         displayGranularity 2
+        showStandardStreams false
     }
     
     // Show test progress
     outputs.upToDateWhen { false }
+    
+    // Configure JUnit Platform for timeouts
+    systemProperty 'junit.jupiter.execution.timeout.default', '120s'
 }
 
 jacocoTestReport {

@@ -29,7 +29,8 @@ public class V2SystemDiagnosticsTest {
             bootstrapServers = System.getenv("CONFLUENT_BOOTSTRAP_SERVERS");
         }
         if (bootstrapServers == null || bootstrapServers.isEmpty()) {
-            bootstrapServers = "localhost:9092";
+            // Default to local Redpanda (external port)
+            bootstrapServers = "localhost:29092";
         }
         
         apiKey = System.getenv("CONFLUENT_API_KEY");

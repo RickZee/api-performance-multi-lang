@@ -4,6 +4,7 @@ import com.example.e2e.model.EventHeader;
 import com.fasterxml.jackson.databind.DeserializationFeature;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
+import org.apache.kafka.clients.CommonClientConfigs;
 import org.apache.kafka.clients.consumer.ConsumerConfig;
 import org.apache.kafka.clients.consumer.ConsumerRecord;
 import org.apache.kafka.clients.consumer.ConsumerRecords;
@@ -50,6 +51,10 @@ public class KafkaTestUtils {
         props.put(ProducerConfig.RETRIES_CONFIG, 3);
         props.put(ProducerConfig.REQUEST_TIMEOUT_MS_CONFIG, 30000);
         props.put(ProducerConfig.METADATA_MAX_AGE_CONFIG, 30000);
+        // For local Redpanda, configure client to handle multiple advertised listeners
+        if (bootstrapServers != null && (bootstrapServers.contains("localhost") || bootstrapServers.contains("127.0.0.1"))) {
+            props.put(CommonClientConfigs.CLIENT_DNS_LOOKUP_CONFIG, "use_all_dns_ips");
+        }
         
         // Confluent Cloud SASL_SSL configuration
         if (apiKey != null && !apiKey.isEmpty() && apiSecret != null && !apiSecret.isEmpty()) {
@@ -83,6 +88,14 @@ public class KafkaTestUtils {
         props.put(ConsumerConfig.METADATA_MAX_AGE_CONFIG, 30000);
         // Small max poll records to ensure we process events quickly
         props.put(ConsumerConfig.MAX_POLL_RECORDS_CONFIG, 10);
+        // For local Redpanda, configure client to handle multiple advertised listeners
+        // When Redpanda advertises both internal (redpanda:9092) and external (127.0.0.1:29092),
+        // we need to ensure the client can resolve and connect to the external one
+        if (bootstrapServers != null && (bootstrapServers.contains("localhost") || bootstrapServers.contains("127.0.0.1"))) {
+            // Use default DNS lookup - will try to resolve redpanda hostname and fail gracefully
+            // The client should fall back to using the bootstrap server address
+            props.put(CommonClientConfigs.CLIENT_DNS_LOOKUP_CONFIG, "use_all_dns_ips");
+        }
         
         // Confluent Cloud SASL_SSL configuration
         if (apiKey != null && !apiKey.isEmpty() && apiSecret != null && !apiSecret.isEmpty()) {
@@ -157,16 +170,16 @@ public class KafkaTestUtils {
         KafkaConsumer<String, byte[]> consumer = createConsumer(groupId);
         consumer.subscribe(Collections.singletonList(topic));
         
-        // Wait for partition assignment
+        // Wait for partition assignment (increased timeout for Redpanda)
         int assignmentWaitCount = 0;
-        while (consumer.assignment().isEmpty() && assignmentWaitCount < 20) {
-            consumer.poll(Duration.ofMillis(200));
+        while (consumer.assignment().isEmpty() && assignmentWaitCount < 50) {
+            consumer.poll(Duration.ofMillis(500));
             assignmentWaitCount++;
         }
         
         if (consumer.assignment().isEmpty()) {
             consumer.close();
-            throw new RuntimeException("Failed to get partition assignment for topic: " + topic);
+            throw new RuntimeException("Failed to get partition assignment for topic: " + topic + " after " + (assignmentWaitCount * 500) + "ms");
         }
         
         // Seek to end of all assigned partitions to only read new messages

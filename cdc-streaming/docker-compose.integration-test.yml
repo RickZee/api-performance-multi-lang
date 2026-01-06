@@ -1,12 +1,78 @@
 version: '3.8'
 
 services:
-  # Note: Using Confluent Cloud for Kafka and Schema Registry
-  # No local Kafka or Schema Registry containers needed
+  # Redpanda - Kafka-compatible message broker (default for local mode)
+  # Can be overridden with Confluent Cloud via environment variables
+  redpanda:
+    image: docker.redpanda.com/redpandadata/redpanda:latest
+    container_name: int-test-redpanda
+    command:
+      - redpanda
+      - start
+      - --smp 1
+      - --memory 1G
+      - --overprovisioned
+      - --kafka-addr
+      - internal://0.0.0.0:9092,external://0.0.0.0:29092
+      - --advertise-kafka-addr
+      - internal://redpanda:9092,external://127.0.0.1:29092
+      - --pandaproxy-addr
+      - internal://0.0.0.0:8082,external://0.0.0.0:28082
+      - --advertise-pandaproxy-addr
+      - internal://redpanda:8082,external://127.0.0.1:28082
+      - --schema-registry-addr
+      - internal://0.0.0.0:8081,external://0.0.0.0:28081
+      - --rpc-addr
+      - redpanda:33145
+      - --advertise-rpc-addr
+      - redpanda:33145
+      - --default-log-level=info
+    ports:
+      - "29092:9092" # Kafka API (internal port 9092, external 29092)
+      - "29644:9644"  # Admin API
+      - "28081:8081"  # Schema Registry
+      - "28082:8082"  # Pandaproxy
+    volumes:
+      - redpanda-data:/var/lib/redpanda/data
+    healthcheck:
+      test: ["CMD-SHELL", "rpk cluster health | grep -q healthy"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+    deploy:
+      resources:
+        limits:
+          memory: 2G
+          cpus: '2.0'
+        reservations:
+          memory: 512M
+          cpus: '0.5'
+
+  # Redpanda Console - Web UI for topic management
+  redpanda-console:
+    image: docker.redpanda.com/redpandadata/console:latest
+    container_name: int-test-redpanda-console
+    environment:
+      CONFIG_FILEPATH: /tmp/config.yml
+      KAFKA_BROKERS: redpanda:9092
+      KAFKA_SCHEMAREGISTRY_ENABLED: "true"
+      KAFKA_SCHEMAREGISTRY_URLS: http://redpanda:8081
+    ports:
+      - "8086:8080"  # Redpanda Console UI
+    depends_on:
+      redpanda:
+        condition: service_healthy
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+          cpus: '0.5'
+        reservations:
+          memory: 256M
+          cpus: '0.25'
 
   # PostgreSQL database for Metadata Service
-  # Note: Metadata Service uses local postgres for integration tests
-  # CDC pipeline/producer APIs use Aurora (configured via .env.aurora)
+  # Default to local postgres, can use Aurora via USE_AURORA=true
   postgres:
     image: postgres:15-alpine
     container_name: int-test-postgres
@@ -22,8 +88,8 @@ services:
       retries: 10
     volumes:
       - postgres-data:/var/lib/postgresql/data
-    profiles:
-      - local-db  # Only start local postgres if not using Aurora
+    # Default to starting postgres (local mode)
+    # Can be skipped if USE_AURORA=true is set
 
   # Mock Confluent Flink API (for deployment testing)
   mock-confluent-api:
@@ -48,6 +114,9 @@ services:
         required: false  # Not required if using Aurora
       mock-confluent-api:
         condition: service_started
+      redpanda:
+        condition: service_healthy
+        required: false  # Not required if using Confluent Cloud
     ports:
       - "8080:8080"
     environment:
@@ -55,12 +124,12 @@ services:
       CONFLUENT_CLOUD_API_ENDPOINT: http://mock-confluent-api:8082
       CONFLUENT_CLOUD_API_KEY: test-key
       CONFLUENT_CLOUD_API_SECRET: test-secret
-      # Database configuration - use Aurora if available, otherwise local postgres
+      # Database configuration - default to local postgres, use Aurora if USE_AURORA=true
       DATABASE_URL: ${DATABASE_URL:-jdbc:postgresql://postgres:5432/metadata_service}
       DATABASE_USERNAME: ${DATABASE_USERNAME:-postgres}
       DATABASE_PASSWORD: ${DATABASE_PASSWORD:-postgres}
-      # Confluent Cloud configuration (from environment variables)
-      KAFKA_BOOTSTRAP_SERVERS: ${KAFKA_BOOTSTRAP_SERVERS}
+      # Kafka configuration - default to Redpanda (local), can override with Confluent Cloud
+      KAFKA_BOOTSTRAP_SERVERS: ${KAFKA_BOOTSTRAP_SERVERS:-redpanda:9092}
       KAFKA_API_KEY: ${KAFKA_API_KEY:-}
       KAFKA_API_SECRET: ${KAFKA_API_SECRET:-}
     volumes:
@@ -76,17 +145,31 @@ services:
       context: ./stream-processor-spring
       dockerfile: Dockerfile
     container_name: int-test-stream-processor
+    depends_on:
+      redpanda:
+        condition: service_healthy
+        required: false  # Not required if using Confluent Cloud
     ports:
       - "8083:8080"
     environment:
-      # Confluent Cloud configuration (from environment variables)
-      KAFKA_BOOTSTRAP_SERVERS: ${KAFKA_BOOTSTRAP_SERVERS}
+      # Kafka configuration - default to Redpanda (local), can override with Confluent Cloud
+      KAFKA_BOOTSTRAP_SERVERS: ${KAFKA_BOOTSTRAP_SERVERS:-redpanda:9092}
       KAFKA_API_KEY: ${KAFKA_API_KEY:-}
       KAFKA_API_SECRET: ${KAFKA_API_SECRET:-}
-      KAFKA_SECURITY_PROTOCOL: ${KAFKA_SECURITY_PROTOCOL:-SASL_SSL}
+      # Default to PLAINTEXT for local Redpanda, use SASL_SSL for Confluent Cloud
+      # If KAFKA_API_KEY is set, default to SASL_SSL, otherwise PLAINTEXT
+      KAFKA_SECURITY_PROTOCOL: ${KAFKA_SECURITY_PROTOCOL:-PLAINTEXT}
       KAFKA_SASL_MECHANISM: ${KAFKA_SASL_MECHANISM:-PLAIN}
       SPRING_KAFKA_STREAMS_SOURCE_TOPIC: raw-event-headers
       FILTER_CONFIG_PATH: /app/config/filters.json
+      # Enable Metadata Service integration for dynamic filter loading
+      METADATA_SERVICE_ENABLED: "true"
+      METADATA_SERVICE_URL: http://metadata-service:8080
+      METADATA_SERVICE_SCHEMA_VERSION: v1
+      METADATA_SERVICE_POLL_INTERVAL: 30000
+      # Replication settings for local single-node Redpanda
+      KAFKA_REPLICATION_FACTOR: ${KAFKA_REPLICATION_FACTOR:-1}
+      KAFKA_MIN_INSYNC_REPLICAS: ${KAFKA_MIN_INSYNC_REPLICAS:-1}
     volumes:
       - ./config:/app/config:ro
       - ./stream-processor-spring/src/main/resources/filters.yml:/app/filters.yml:ro
@@ -105,13 +188,19 @@ services:
     depends_on:
       metadata-service:
         condition: service_healthy
+      redpanda:
+        condition: service_healthy
+        required: false  # Not required if using Confluent Cloud
     ports:
       - "8084:8080"
     environment:
-      KAFKA_BOOTSTRAP_SERVERS: ${KAFKA_BOOTSTRAP_SERVERS}
+      # Kafka configuration - default to Redpanda (local), can override with Confluent Cloud
+      KAFKA_BOOTSTRAP_SERVERS: ${KAFKA_BOOTSTRAP_SERVERS:-redpanda:9092}
       KAFKA_API_KEY: ${KAFKA_API_KEY:-}
       KAFKA_API_SECRET: ${KAFKA_API_SECRET:-}
-      KAFKA_SECURITY_PROTOCOL: ${KAFKA_SECURITY_PROTOCOL:-SASL_SSL}
+      # Default to PLAINTEXT for local Redpanda, use SASL_SSL for Confluent Cloud
+      # If KAFKA_API_KEY is set, default to SASL_SSL, otherwise PLAINTEXT
+      KAFKA_SECURITY_PROTOCOL: ${KAFKA_SECURITY_PROTOCOL:-PLAINTEXT}
       KAFKA_SASL_MECHANISM: ${KAFKA_SASL_MECHANISM:-PLAIN}
       SPRING_KAFKA_STREAMS_SOURCE_TOPIC: raw-event-headers-v2
       SPRING_KAFKA_STREAMS_APPLICATION_ID: event-stream-processor-v2
@@ -123,6 +212,9 @@ services:
       METADATA_SERVICE_URL: http://metadata-service:8080
       METADATA_SERVICE_SCHEMA_VERSION: v2
       METADATA_SERVICE_POLL_INTERVAL: 30000
+      # Replication settings for local single-node Redpanda
+      KAFKA_REPLICATION_FACTOR: ${KAFKA_REPLICATION_FACTOR:-1}
+      KAFKA_MIN_INSYNC_REPLICAS: ${KAFKA_MIN_INSYNC_REPLICAS:-1}
     volumes:
       - ./config:/app/config:ro
       - ./stream-processor-spring/src/main/resources/filters.yml:/app/filters.yml:ro
@@ -136,9 +228,13 @@ services:
     build:
       context: ./consumers-confluent/car-consumer
     container_name: int-test-car-consumer
+    depends_on:
+      redpanda:
+        condition: service_healthy
+        required: false  # Not required if using Confluent Cloud
     environment:
-      # Confluent Cloud configuration (from environment variables)
-      KAFKA_BOOTSTRAP_SERVERS: ${KAFKA_BOOTSTRAP_SERVERS}
+      # Kafka configuration - default to Redpanda (local), can override with Confluent Cloud
+      KAFKA_BOOTSTRAP_SERVERS: ${KAFKA_BOOTSTRAP_SERVERS:-redpanda:9092}
       KAFKA_API_KEY: ${KAFKA_API_KEY:-}
       KAFKA_API_SECRET: ${KAFKA_API_SECRET:-}
       KAFKA_TOPIC: filtered-car-created-events-spring
@@ -148,8 +244,12 @@ services:
     build:
       context: ./consumers-confluent/loan-consumer
     container_name: int-test-loan-consumer
+    depends_on:
+      redpanda:
+        condition: service_healthy
+        required: false  # Not required if using Confluent Cloud
     environment:
-      KAFKA_BOOTSTRAP_SERVERS: ${KAFKA_BOOTSTRAP_SERVERS}
+      KAFKA_BOOTSTRAP_SERVERS: ${KAFKA_BOOTSTRAP_SERVERS:-redpanda:9092}
       KAFKA_API_KEY: ${KAFKA_API_KEY:-}
       KAFKA_API_SECRET: ${KAFKA_API_SECRET:-}
       KAFKA_TOPIC: filtered-loan-created-events-spring
@@ -159,8 +259,12 @@ services:
     build:
       context: ./consumers-confluent/loan-payment-consumer
     container_name: int-test-loan-payment-consumer
+    depends_on:
+      redpanda:
+        condition: service_healthy
+        required: false  # Not required if using Confluent Cloud
     environment:
-      KAFKA_BOOTSTRAP_SERVERS: ${KAFKA_BOOTSTRAP_SERVERS}
+      KAFKA_BOOTSTRAP_SERVERS: ${KAFKA_BOOTSTRAP_SERVERS:-redpanda:9092}
       KAFKA_API_KEY: ${KAFKA_API_KEY:-}
       KAFKA_API_SECRET: ${KAFKA_API_SECRET:-}
       KAFKA_TOPIC: filtered-loan-payment-submitted-events-spring
@@ -170,8 +274,12 @@ services:
     build:
       context: ./consumers-confluent/service-consumer
     container_name: int-test-service-consumer
+    depends_on:
+      redpanda:
+        condition: service_healthy
+        required: false  # Not required if using Confluent Cloud
     environment:
-      KAFKA_BOOTSTRAP_SERVERS: ${KAFKA_BOOTSTRAP_SERVERS}
+      KAFKA_BOOTSTRAP_SERVERS: ${KAFKA_BOOTSTRAP_SERVERS:-redpanda:9092}
       KAFKA_API_KEY: ${KAFKA_API_KEY:-}
       KAFKA_API_SECRET: ${KAFKA_API_SECRET:-}
       KAFKA_TOPIC: filtered-service-events-spring
@@ -183,8 +291,12 @@ services:
       context: ./consumers-confluent/car-consumer
     container_name: int-test-car-consumer-v2
     profiles: ["v2"]
+    depends_on:
+      redpanda:
+        condition: service_healthy
+        required: false  # Not required if using Confluent Cloud
     environment:
-      KAFKA_BOOTSTRAP_SERVERS: ${KAFKA_BOOTSTRAP_SERVERS}
+      KAFKA_BOOTSTRAP_SERVERS: ${KAFKA_BOOTSTRAP_SERVERS:-redpanda:9092}
       KAFKA_API_KEY: ${KAFKA_API_KEY:-}
       KAFKA_API_SECRET: ${KAFKA_API_SECRET:-}
       KAFKA_TOPIC: filtered-car-created-events-v2-spring
@@ -195,8 +307,12 @@ services:
       context: ./consumers-confluent/loan-consumer
     container_name: int-test-loan-consumer-v2
     profiles: ["v2"]
+    depends_on:
+      redpanda:
+        condition: service_healthy
+        required: false  # Not required if using Confluent Cloud
     environment:
-      KAFKA_BOOTSTRAP_SERVERS: ${KAFKA_BOOTSTRAP_SERVERS}
+      KAFKA_BOOTSTRAP_SERVERS: ${KAFKA_BOOTSTRAP_SERVERS:-redpanda:9092}
       KAFKA_API_KEY: ${KAFKA_API_KEY:-}
       KAFKA_API_SECRET: ${KAFKA_API_SECRET:-}
       KAFKA_TOPIC: filtered-loan-created-events-v2-spring
@@ -207,8 +323,12 @@ services:
       context: ./consumers-confluent/loan-payment-consumer
     container_name: int-test-loan-payment-consumer-v2
     profiles: ["v2"]
+    depends_on:
+      redpanda:
+        condition: service_healthy
+        required: false  # Not required if using Confluent Cloud
     environment:
-      KAFKA_BOOTSTRAP_SERVERS: ${KAFKA_BOOTSTRAP_SERVERS}
+      KAFKA_BOOTSTRAP_SERVERS: ${KAFKA_BOOTSTRAP_SERVERS:-redpanda:9092}
       KAFKA_API_KEY: ${KAFKA_API_KEY:-}
       KAFKA_API_SECRET: ${KAFKA_API_SECRET:-}
       KAFKA_TOPIC: filtered-loan-payment-submitted-events-v2-spring
@@ -219,16 +339,22 @@ services:
       context: ./consumers-confluent/service-consumer
     container_name: int-test-service-consumer-v2
     profiles: ["v2"]
+    depends_on:
+      redpanda:
+        condition: service_healthy
+        required: false  # Not required if using Confluent Cloud
     environment:
-      KAFKA_BOOTSTRAP_SERVERS: ${KAFKA_BOOTSTRAP_SERVERS}
+      KAFKA_BOOTSTRAP_SERVERS: ${KAFKA_BOOTSTRAP_SERVERS:-redpanda:9092}
       KAFKA_API_KEY: ${KAFKA_API_KEY:-}
       KAFKA_API_SECRET: ${KAFKA_API_SECRET:-}
       KAFKA_TOPIC: filtered-service-events-v2-spring
       CONSUMER_GROUP_ID: int-test-service-consumer-group-v2
 
-  # Note: Topics are created in Confluent Cloud using Confluent CLI
-  # See run-all-integration-tests.sh for topic creation via confluent kafka topic create
+  # Note: Topics are created in Redpanda (local mode) using rpk CLI
+  # Or in Confluent Cloud (--confluent-cloud flag) using Confluent CLI
+  # See run-all-integration-tests.sh for topic creation
 
 volumes:
   postgres-data:
+  redpanda-data:
 

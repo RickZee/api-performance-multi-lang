@@ -35,8 +35,8 @@ public class LocalKafkaIntegrationTest {
             bootstrapServers = System.getenv("CONFLUENT_BOOTSTRAP_SERVERS");
         }
         if (bootstrapServers == null || bootstrapServers.isEmpty()) {
-            // Default to local Docker Kafka
-            bootstrapServers = "localhost:9092";
+            // Default to local Redpanda (external port)
+            bootstrapServers = "localhost:29092";
         }
         
         // Get API credentials if using Confluent Cloud

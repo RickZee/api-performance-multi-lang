@@ -1,5 +1,13 @@
 #!/bin/bash
 # Run all metadata service Java tests locally
+#
+# Usage:
+#   ./run-tests.sh [OPTIONS]
+#
+# Options:
+#   --integration    Run only integration tests (with mock Jenkins)
+#   --workflow       Run only workflow integration tests
+#   --verbose        Enable verbose output
 
 set -e
 
@@ -48,11 +56,58 @@ echo -e "${GREEN}✓ Gradle wrapper found${NC}"
 
 echo ""
 
-# Run all tests
-echo -e "${BLUE}Running all tests (unit + integration)...${NC}"
+# Parse arguments
+INTEGRATION_ONLY=false
+WORKFLOW_ONLY=false
+VERBOSE=false
+
+while [[ $# -gt 0 ]]; do
+    case $1 in
+        --integration)
+            INTEGRATION_ONLY=true
+            shift
+            ;;
+        --workflow)
+            WORKFLOW_ONLY=true
+            shift
+            ;;
+        --verbose)
+            VERBOSE=true
+            shift
+            ;;
+        *)
+            echo -e "${YELLOW}Unknown option: $1${NC}"
+            shift
+            ;;
+    esac
+done
+
+# Determine test pattern
+TEST_PATTERN=""
+if [ "$WORKFLOW_ONLY" = true ]; then
+    TEST_PATTERN="*WorkflowIntegrationTest"
+    echo -e "${BLUE}Running workflow integration tests only...${NC}"
+elif [ "$INTEGRATION_ONLY" = true ]; then
+    TEST_PATTERN="*IntegrationTest"
+    echo -e "${BLUE}Running integration tests only (with mock Jenkins)...${NC}"
+else
+    echo -e "${BLUE}Running all tests (unit + integration)...${NC}"
+fi
+
 echo ""
 
-./gradlew test --no-daemon --info
+# Build gradle command
+GRADLE_ARGS="test --no-daemon"
+if [ "$VERBOSE" = true ]; then
+    GRADLE_ARGS="$GRADLE_ARGS --info"
+fi
+
+if [ -n "$TEST_PATTERN" ]; then
+    GRADLE_ARGS="$GRADLE_ARGS --tests $TEST_PATTERN"
+fi
+
+# Run tests
+./gradlew $GRADLE_ARGS
 
 TEST_EXIT_CODE=$?
 

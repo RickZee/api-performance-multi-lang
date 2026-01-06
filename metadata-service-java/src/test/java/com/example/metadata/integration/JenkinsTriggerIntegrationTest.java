@@ -3,6 +3,7 @@ package com.example.metadata.integration;
 import com.example.metadata.config.AppConfig;
 import com.example.metadata.model.*;
 import com.example.metadata.service.JenkinsTriggerService;
+import com.example.metadata.testutil.MockJenkinsServer;
 import com.example.metadata.testutil.TestRepoSetup;
 import org.junit.jupiter.api.*;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -47,12 +48,18 @@ class JenkinsTriggerIntegrationTest {
     private static String testRepoDir;
     private static String testCacheDir;
     private static String filterId;
+    private static MockJenkinsServer mockJenkins;
+    private static int jenkinsPort;
 
     @DynamicPropertySource
     static void configureProperties(DynamicPropertyRegistry registry) throws IOException {
         String tempDir = Files.createTempDirectory("metadata-service-test-").toString();
         testRepoDir = TestRepoSetup.setupTestRepo(tempDir);
         testCacheDir = tempDir + "/cache";
+        
+        // Start mock Jenkins server
+        mockJenkins = new MockJenkinsServer();
+        jenkinsPort = mockJenkins.start();
         
         // Configure H2 in-memory database for tests
         registry.add("spring.datasource.url", () -> "jdbc:h2:mem:testdb;DB_CLOSE_DELAY=-1;DB_CLOSE_ON_EXIT=FALSE");
@@ -68,9 +75,9 @@ class JenkinsTriggerIntegrationTest {
         registry.add("git.local-cache-dir", () -> testCacheDir);
         registry.add("test.mode", () -> "true");
         
-        // Enable Jenkins triggering for tests
+        // Enable Jenkins triggering for tests - use mock server URL
         registry.add("jenkins.enabled", () -> "true");
-        registry.add("jenkins.base-url", () -> "http://localhost:8080");
+        registry.add("jenkins.base-url", () -> "http://localhost:" + jenkinsPort);
         registry.add("jenkins.job-name", () -> "test-filter-integration-tests");
         registry.add("jenkins.trigger-on-create", () -> "true");
         registry.add("jenkins.trigger-on-update", () -> "true");
@@ -83,6 +90,11 @@ class JenkinsTriggerIntegrationTest {
 
     @BeforeEach
     void setUp() throws IOException {
+        // Reset mock Jenkins captured requests before each test
+        if (mockJenkins != null) {
+            mockJenkins.reset();
+        }
+        
         // Manually sync the repository in test mode
         Path srcPath = Paths.get(testRepoDir);
         Path dstPath = Paths.get(testCacheDir);
@@ -111,6 +123,11 @@ class JenkinsTriggerIntegrationTest {
 
     @AfterAll
     static void tearDown() throws IOException {
+        // Stop mock Jenkins server
+        if (mockJenkins != null) {
+            mockJenkins.stop();
+        }
+        
         if (testRepoDir != null) {
             TestRepoSetup.cleanupTestRepo(testRepoDir);
         }
@@ -126,7 +143,7 @@ class JenkinsTriggerIntegrationTest {
     @Test
     @Order(2)
     @DisplayName("Creating a filter should trigger Jenkins build")
-    void testCreateFilterTriggersJenkins() {
+    void testCreateFilterTriggersJenkins() throws InterruptedException {
         CreateFilterRequest request = CreateFilterRequest.builder()
             .name("Test Filter for Jenkins")
             .description("Test filter to verify Jenkins triggering")
@@ -157,15 +174,27 @@ class JenkinsTriggerIntegrationTest {
         assertThat(created.getId()).isNotNull();
         filterId = created.getId();
         
-        // Note: In a real test, we would verify that Jenkins was called
-        // For now, we verify the filter was created successfully
-        // The actual Jenkins call happens asynchronously and would require a mock Jenkins server
+        // Wait a bit for async Jenkins call to complete
+        Thread.sleep(500);
+        
+        // Verify Jenkins was actually called
+        assertThat(mockJenkins.wasTriggered("create")).isTrue();
+        assertThat(mockJenkins.wasTriggeredWith("create", created.getId(), "v1")).isTrue();
+        
+        // Verify build parameters
+        List<MockJenkinsServer.BuildRequest> requests = mockJenkins.getCapturedRequests("create");
+        assertThat(requests).hasSize(1);
+        MockJenkinsServer.BuildRequest buildRequest = requests.get(0);
+        assertThat(buildRequest.getJobName()).isEqualTo("test-filter-integration-tests");
+        assertThat(buildRequest.getFilterEventType()).isEqualTo("create");
+        assertThat(buildRequest.getFilterId()).isEqualTo(created.getId());
+        assertThat(buildRequest.getFilterVersion()).isEqualTo("v1");
     }
 
     @Test
     @Order(3)
     @DisplayName("Updating a filter should trigger Jenkins build")
-    void testUpdateFilterTriggersJenkins() {
+    void testUpdateFilterTriggersJenkins() throws InterruptedException {
         UpdateFilterRequest request = UpdateFilterRequest.builder()
             .name("Updated Test Filter")
             .description("Updated description")
@@ -181,12 +210,19 @@ class JenkinsTriggerIntegrationTest {
             .value(filter -> {
                 assertThat(filter.getName()).isEqualTo("Updated Test Filter");
             });
+        
+        // Wait for async Jenkins call
+        Thread.sleep(500);
+        
+        // Verify Jenkins was called for update
+        assertThat(mockJenkins.wasTriggered("update")).isTrue();
+        assertThat(mockJenkins.wasTriggeredWith("update", filterId, "v1")).isTrue();
     }
 
     @Test
     @Order(4)
     @DisplayName("Approving a filter should trigger Jenkins build with approver info")
-    void testApproveFilterTriggersJenkins() {
+    void testApproveFilterTriggersJenkins() throws InterruptedException {
         ApproveFilterRequest request = ApproveFilterRequest.builder()
             .approvedBy("test-reviewer@example.com")
             .build();
@@ -201,12 +237,19 @@ class JenkinsTriggerIntegrationTest {
                 assertThat(filter.getStatus()).isEqualTo("approved");
                 assertThat(filter.getApprovedBy()).isEqualTo("test-reviewer@example.com");
             });
+        
+        // Wait for async Jenkins call
+        Thread.sleep(500);
+        
+        // Verify Jenkins was called for approve
+        assertThat(mockJenkins.wasTriggered("approve")).isTrue();
+        assertThat(mockJenkins.wasTriggeredWith("approve", filterId, "v1")).isTrue();
     }
 
     @Test
     @Order(5)
     @DisplayName("Deleting a filter should trigger Jenkins build")
-    void testDeleteFilterTriggersJenkins() {
+    void testDeleteFilterTriggersJenkins() throws InterruptedException {
         // First create a filter to delete
         CreateFilterRequest createRequest = CreateFilterRequest.builder()
             .name("Filter to Delete")
@@ -232,17 +275,28 @@ class JenkinsTriggerIntegrationTest {
             .returnResult()
             .getResponseBody();
 
+        // Wait for create trigger
+        Thread.sleep(500);
+        mockJenkins.reset(); // Clear create trigger
+
         // Now delete it
         webTestClient.delete()
             .uri("/api/v1/filters/{id}?version=v1", toDelete.getId())
             .exchange()
             .expectStatus().isNoContent();
 
+        // Wait for async Jenkins call
+        Thread.sleep(500);
+
         // Verify it's deleted
         webTestClient.get()
             .uri("/api/v1/filters/{id}?version=v1", toDelete.getId())
             .exchange()
             .expectStatus().isNotFound();
+        
+        // Verify Jenkins was called for delete
+        assertThat(mockJenkins.wasTriggered("delete")).isTrue();
+        assertThat(mockJenkins.wasTriggeredWith("delete", toDelete.getId(), "v1")).isTrue();
     }
 
     @Test
@@ -262,9 +316,8 @@ class JenkinsTriggerIntegrationTest {
     @Test
     @DisplayName("Filter operations should succeed even if Jenkins triggering fails")
     void testFilterOperationsSucceedWhenJenkinsFails() {
-        // Configure Jenkins with invalid URL to simulate failure
-        String originalUrl = appConfig.getJenkins().getBaseUrl();
-        appConfig.getJenkins().setBaseUrl("http://invalid-host:9999");
+        // Configure mock Jenkins to simulate failure
+        mockJenkins.setSimulateFailure(true, 500);
         
         try {
             CreateFilterRequest request = CreateFilterRequest.builder()
@@ -301,8 +354,8 @@ class JenkinsTriggerIntegrationTest {
                 .exchange()
                 .expectStatus().isNoContent();
         } finally {
-            // Restore original URL
-            appConfig.getJenkins().setBaseUrl(originalUrl);
+            // Restore normal operation
+            mockJenkins.setSimulateFailure(false, 200);
         }
     }
 

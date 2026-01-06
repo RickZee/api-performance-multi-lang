@@ -13,8 +13,8 @@ spring:
       bootstrap-servers: ${KAFKA_BOOTSTRAP_SERVERS:localhost:9092}
       source-topic: ${SPRING_KAFKA_STREAMS_SOURCE_TOPIC:raw-event-headers}
       properties:
-        # Confluent Cloud SASL_SSL configuration
-        security.protocol: ${KAFKA_SECURITY_PROTOCOL:SASL_SSL}
+        # Default to PLAINTEXT for local Redpanda, use SASL_SSL for Confluent Cloud
+        security.protocol: ${KAFKA_SECURITY_PROTOCOL:PLAINTEXT}
         sasl.mechanism: ${KAFKA_SASL_MECHANISM:PLAIN}
         sasl.jaas.config: >
           org.apache.kafka.common.security.plain.PlainLoginModule required
@@ -37,6 +37,9 @@ spring:
         min.insync.replicas: ${KAFKA_MIN_INSYNC_REPLICAS:1}
         # Consumer settings for Confluent Cloud
         consumer.auto.offset.reset: earliest
+        # Allow topic auto-creation (for local development)
+        # Note: In production, topics should be created beforehand
+        topic.allow.auto.create: true
 
 management:
   endpoints:

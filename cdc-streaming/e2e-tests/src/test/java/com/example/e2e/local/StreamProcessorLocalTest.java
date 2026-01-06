@@ -36,7 +36,7 @@ public class StreamProcessorLocalTest {
             bootstrapServers = System.getenv("CONFLUENT_BOOTSTRAP_SERVERS");
         }
         if (bootstrapServers == null || bootstrapServers.isEmpty()) {
-            bootstrapServers = "localhost:9092"; // Fallback for local testing
+            bootstrapServers = "localhost:29092"; // Default to local Redpanda (external port)
         }
         
         apiKey = System.getenv("CONFLUENT_API_KEY");

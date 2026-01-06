@@ -1077,7 +1077,7 @@ stage('Generate Filters') {
 - **Metadata Service Integration Tests**: **60 tests** covering API functionality and CI/CD integration
 - **Grand Total**: **154 integration tests** covering all filter change scenarios, API operations, and system behavior
 
-> **Note**: For detailed test coverage analysis, see [INTEGRATION_TEST_COVERAGE_REPORT.md](../../INTEGRATION_TEST_COVERAGE_REPORT.md)
+> **Note**: For detailed test coverage analysis, see [INTEGRATION_TEST_COVERAGE_REPORT.md](../../../archive/2026-01-06/INTEGRATION_TEST_COVERAGE_REPORT.md) (archived)
 
 **Test Execution**:
 ```bash
@@ -2305,7 +2305,7 @@ DEPLOY_METHOD=local ./cdc-streaming/scripts/filters/deploy-spring-filters.sh
 - [Metadata Service Documentation](../../metadata-service-java/METADATA_SERVICE_DOCUMENTATION.md) - API reference
 - [Jenkins Setup Guide](../../JENKINS_SETUP.md) - Jenkins configuration
 - [Integration Test Guide](../e2e-tests/README.md) - Test execution guide
-- [Integration Test Coverage Report](../../INTEGRATION_TEST_COVERAGE_REPORT.md) - Comprehensive test coverage analysis
+- [Integration Test Coverage Report](../../../archive/2026-01-06/INTEGRATION_TEST_COVERAGE_REPORT.md) - Comprehensive test coverage analysis (archived)
 - [Test Coverage Report](../../metadata-service-java/TEST_COVERAGE.md) - Metadata Service test coverage details
 - [Spring Boot Stream Processor Guide](../SPRING_BOOT_STREAM_PROCESSOR_GUIDE.md) - Stream processor details
 - [Confluent Cloud Setup Guide](../CONFLUENT_CLOUD_SETUP_GUIDE.md) - Confluent Cloud configuration

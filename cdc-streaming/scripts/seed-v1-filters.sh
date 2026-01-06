@@ -1,82 +1,85 @@
-#!/bin/bash
+#!/usr/bin/env bash
+# Seed V1 filters into Metadata Service database
+# This script reads filters.json and creates them via Metadata Service API
 
-# Script to seed V1 filters into the Metadata Service
-# This is used for integration tests to ensure V1 filters are available in the database
+set -e
 
-METADATA_SERVICE_URL="http://localhost:8080"
-SCHEMA_VERSION="v1"
-FILTERS_FILE="../config/filters.json"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+CDC_STREAMING_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
+cd "$CDC_STREAMING_DIR"
 
-echo "Seeding V1 filters from $FILTERS_FILE into Metadata Service ($METADATA_SERVICE_URL) for schema version $SCHEMA_VERSION"
+METADATA_SERVICE_URL="${METADATA_SERVICE_URL:-http://localhost:8080}"
+FILTERS_FILE="${FILTERS_FILE:-./config/filters.json}"
+SCHEMA_VERSION="${SCHEMA_VERSION:-v1}"
 
-# Check if Metadata Service is available
-echo "Waiting for Metadata Service to be available..."
-until curl -s "$METADATA_SERVICE_URL/api/v1/health" | grep -q "UP"; do
-  echo -n "."
-  sleep 2
-done
-echo "Metadata Service is up!"
-
-# Read filters from JSON file
-FILTERS=$(jq '.filters' "$FILTERS_FILE")
-
-if [ -z "$FILTERS" ] || [ "$FILTERS" == "null" ]; then
-  echo "No filters found in $FILTERS_FILE"
-  exit 0
+if [ ! -f "$FILTERS_FILE" ]; then
+    echo "Error: Filters file not found: $FILTERS_FILE"
+    exit 1
 fi
 
-echo "Found $(echo "$FILTERS" | jq 'length') filters to create"
+echo "Seeding V1 filters from $FILTERS_FILE to Metadata Service at $METADATA_SERVICE_URL"
 
-# Iterate over each filter and create/approve it
-echo "$FILTERS" | jq -c '.[]' | while read -r filter_json; do
-  filter_id=$(echo "$filter_json" | jq -r '.id')
-  filter_name=$(echo "$filter_json" | jq -r '.name')
+# Check if Metadata Service is available
+if ! curl -sf "$METADATA_SERVICE_URL/api/v1/health" > /dev/null; then
+    echo "Error: Metadata Service is not available at $METADATA_SERVICE_URL"
+    exit 1
+fi
 
-  echo "Creating filter: $filter_id"
-  # Attempt to create the filter
-  create_response=$(curl -s -w "\n%{http_code}" -X POST \
-      "$METADATA_SERVICE_URL/api/v1/filters?version=$SCHEMA_VERSION" \
-      -H "Content-Type: application/json" \
-      -d "$filter_json")
-
-  http_code=$(echo "$create_response" | tail -n1)
-  body=$(echo "$create_response" | sed '$d') # Remove the last line (HTTP code)
-
-  if [ "$http_code" -eq 201 ] || [ "$http_code" -eq 409 ]; then # 201 Created, 409 Conflict (already exists)
-      if [ "$http_code" -eq 201 ]; then
-          echo "  ✓ Created filter: $filter_id"
-      else
-          echo "  ⚠ Filter already exists: $filter_id"
-      fi
-
-      # Approve the filter if it's not already approved/deployed
-      current_status=$(echo "$body" | jq -r '.status // "pending_approval"')
-      if [ "$current_status" != "approved" ] && [ "$current_status" != "deployed" ]; then
-          echo "  → Approving filter: $filter_id"
-          approve_response=$(curl -s -w "\n%{http_code}" -X POST \
-              "$METADATA_SERVICE_URL/api/v1/filters/$filter_id/approve?version=$SCHEMA_VERSION" \
-              -H "Content-Type: application/json" \
-              -d '{"approvedBy": "system"}')
-
-          approve_code=$(echo "$approve_response" | tail -n1)
-          approve_body=$(echo "$approve_response" | sed '$d')
-
-          if [ "$approve_code" -eq 200 ]; then
-              echo "  ✓ Approved filter: $filter_id"
-          else
-              echo "  ⚠ Failed to approve filter: $filter_id (HTTP $approve_code)"
-              echo "    Response: $approve_body"
-          fi
-      else
-          echo "  ✓ Filter already approved/deployed: $filter_id"
-      fi
-  else
-      echo "  ❌ Failed to create filter: $filter_id (HTTP $http_code)"
-      echo "    Response: $body"
-      exit 1 # Exit on critical failure
-  fi
-done
-
-echo "V1 filter seeding complete!"
-echo "Verify filters: curl $METADATA_SERVICE_URL/api/v1/filters/active?version=$SCHEMA_VERSION"
-
+# Parse filters.json and create each filter
+# Using jq to parse JSON and create filters
+if command -v jq &> /dev/null; then
+    filter_count=$(jq '.filters | length' "$FILTERS_FILE")
+    echo "Found $filter_count filters to create"
+    
+    for i in $(seq 0 $((filter_count - 1))); do
+        filter_json=$(jq -c ".filters[$i]" "$FILTERS_FILE")
+        
+        # Extract filter ID for logging
+        filter_id=$(echo "$filter_json" | jq -r '.id')
+        echo "Creating filter: $filter_id"
+        
+        # Create filter via API
+        response=$(curl -s -w "\n%{http_code}" -X POST \
+            "$METADATA_SERVICE_URL/api/v1/filters?version=$SCHEMA_VERSION" \
+            -H "Content-Type: application/json" \
+            -d "$filter_json")
+        
+        http_code=$(echo "$response" | tail -n1)
+        body=$(echo "$response" | sed '$d')
+        
+        if [ "$http_code" -eq 201 ] || [ "$http_code" -eq 200 ]; then
+            echo "  ✓ Created filter: $filter_id"
+            
+            # Approve the filter if it was created
+            if [ "$http_code" -eq 201 ]; then
+                created_id=$(echo "$body" | jq -r '.id')
+                echo "  → Approving filter: $created_id"
+                approve_body=$(echo '{"approvedBy":"system"}' | jq -c .)
+                approve_response=$(curl -s -w "\n%{http_code}" -X POST \
+                    "$METADATA_SERVICE_URL/api/v1/filters/$created_id/approve?version=$SCHEMA_VERSION" \
+                    -H "Content-Type: application/json" \
+                    -d "$approve_body")
+                
+                approve_code=$(echo "$approve_response" | tail -n1)
+                if [ "$approve_code" -eq 200 ]; then
+                    echo "  ✓ Approved filter: $created_id"
+                else
+                    echo "  ⚠ Failed to approve filter: $created_id (HTTP $approve_code)"
+                    echo "    Response: $(echo "$approve_response" | sed '$d')"
+                fi
+            fi
+        elif [ "$http_code" -eq 409 ]; then
+            echo "  ⚠ Filter already exists: $filter_id"
+        else
+            echo "  ✗ Failed to create filter: $filter_id (HTTP $http_code)"
+            echo "    Response: $body"
+        fi
+    done
+    
+    echo ""
+    echo "V1 filter seeding complete!"
+    echo "Verify filters: curl $METADATA_SERVICE_URL/api/v1/filters/active?version=$SCHEMA_VERSION"
+else
+    echo "Error: jq is required to parse JSON. Install it: brew install jq (macOS) or apt-get install jq (Linux)"
+    exit 1
+fi
