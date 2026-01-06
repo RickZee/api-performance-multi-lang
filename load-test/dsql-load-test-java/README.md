@@ -4,21 +4,39 @@ A comprehensive Python-based test orchestration system for evaluating DSQL (Auro
 
 ## Quick Start
 
+### Local Docker Testing (Recommended for Development)
+
+```bash
+# 1. Start local PostgreSQL (if not already running)
+cd load-test/dsql-load-test-java
+docker-compose -f docker-compose.local.yml up -d
+
+# 2. Run a small test
+./scripts/run_local_test.sh
+
+# 3. Check results in results/local-test-*/
+```
+
+### Remote Testing (DSQL/Aurora)
+
 ```bash
 # 1. Install dependencies
 cd load-test/dsql-load-test-java
 pip install -r requirements.txt
 
-# 2. Verify setup
+# 2. Load environment from Terraform
+source scripts/load_env_from_terraform.sh
+
+# 3. Verify setup
 python3 scripts/run_minimal_test.py
 
-# 3. Run full test suite
+# 4. Run full test suite
 python3 scripts/run_test_suite.py
 
-# 4. Monitor progress (separate terminal)
+# 5. Monitor progress (separate terminal)
 python3 scripts/monitor_tests.py
 
-# 5. Analyze results
+# 6. Analyze results
 python3 scripts/analyze_results.py
 ```
 
@@ -27,11 +45,138 @@ python3 scripts/analyze_results.py
 - **Python 3.8+** with dependencies (`pip install -r requirements.txt`)
 - **Java 17+** and **Maven 3.8+** (on EC2 instance)
 - **AWS credentials** configured (boto3)
-- **Environment variables** or Terraform outputs:
-  - `DSQL_HOST` - DSQL endpoint
-  - `TEST_RUNNER_INSTANCE_ID` - EC2 instance ID
-  - `S3_BUCKET` - S3 bucket for artifacts
-  - `AWS_REGION` - AWS region (default: us-east-1)
+- **Environment variables** or Terraform outputs (see Configuration section below)
+
+## Configuration
+
+The test suite supports **DSQL** (Aurora DSQL), **Aurora PostgreSQL**, and **Local Docker PostgreSQL**. Set `DATABASE_TYPE` environment variable to choose:
+- `DATABASE_TYPE=dsql` (default) - Use Aurora DSQL with IAM authentication
+- `DATABASE_TYPE=aurora` - Use Aurora PostgreSQL with username/password authentication
+- `DATABASE_TYPE=local` - Use local Docker PostgreSQL (for development and quick testing)
+
+### DSQL Configuration
+
+**Required Environment Variables:**
+- `DSQL_HOST` - DSQL endpoint (from terraform: `aurora_dsql_host`)
+- `IAM_USERNAME` - IAM database user (default: `lambda_dsql_user`)
+- `DATABASE_NAME` - Database name (default: `postgres`)
+- `AWS_REGION` - AWS region (default: `us-east-1`)
+
+**Optional:**
+- `DSQL_PORT` - Port (default: `5432`)
+- `MAX_POOL_SIZE` - Connection pool size (default: calculated from thread count)
+- `DSQL_CONNECTION_RATE_LIMIT` - Connection rate limit (default: `100` threads/second)
+
+**Load from Terraform:**
+```bash
+source scripts/load_env_from_terraform.sh
+# Or explicitly set database type:
+DATABASE_TYPE=dsql source scripts/load_env_from_terraform.sh
+```
+
+### Aurora PostgreSQL Configuration
+
+**Required Environment Variables:**
+- `AURORA_HOST` or `AURORA_ENDPOINT` - Aurora cluster endpoint (from terraform: `aurora_endpoint`)
+- `AURORA_USERNAME` - Database username (from terraform: `database_user`)
+- `AURORA_PASSWORD` - Database password (from terraform: `database_password`)
+- `DATABASE_NAME` - Database name (default: `car_entities`)
+
+**Optional:**
+- `AURORA_PORT` - Port (default: `5432`)
+- `MAX_POOL_SIZE` - Connection pool size (default: calculated from thread count, more conservative than DSQL)
+- `DSQL_CONNECTION_RATE_LIMIT` - Connection rate limit (default: `50` threads/second for Aurora)
+
+**Load from Terraform:**
+```bash
+DATABASE_TYPE=aurora source scripts/load_env_from_terraform.sh
+```
+
+**Note:** Aurora password is sensitive and stored in terraform variables, not outputs. The script will warn if password is not set. You may need to set it manually:
+```bash
+export AURORA_PASSWORD="your-password"
+# Or from terraform variables file
+export AURORA_PASSWORD=$(cd ../../terraform && terraform output -raw database_password 2>/dev/null || echo "")
+```
+
+### Local Docker Configuration
+
+**Quick Start:**
+```bash
+# Run a small test against local Docker PostgreSQL
+./scripts/run_local_test.sh
+```
+
+**Required Environment Variables:**
+- `LOCAL_HOST` - PostgreSQL host (default: `localhost`)
+- `LOCAL_PORT` - PostgreSQL port (default: `5433`)
+- `LOCAL_USERNAME` - Database username (default: `postgres`)
+- `LOCAL_PASSWORD` - Database password (default: `password`)
+- `DATABASE_NAME` - Database name (default: `car_entities`)
+
+**Optional:**
+- `MAX_POOL_SIZE` - Connection pool size (default: calculated from thread count)
+- `DSQL_CONNECTION_RATE_LIMIT` - Connection rate limit (default: `50` threads/second)
+
+**Setup Local Docker PostgreSQL:**
+
+Option 1: Use existing docker-compose (if available):
+```bash
+cd ../..  # Go to project root
+docker-compose up -d postgres-large
+```
+
+Option 2: Use dedicated load test docker-compose:
+```bash
+docker-compose -f docker-compose.local.yml up -d
+```
+
+**Manual Test Execution:**
+```bash
+export DATABASE_TYPE=local
+export LOCAL_HOST=localhost
+export LOCAL_PORT=5433
+export LOCAL_USERNAME=postgres
+export LOCAL_PASSWORD=password
+export DATABASE_NAME=car_entities
+export SCENARIO=1
+export THREADS=5
+export ITERATIONS=2
+export COUNT=10
+
+# Build JAR if needed
+mvn clean package -DskipTests
+
+# Run test
+java -jar target/dsql-load-test-1.0.0.jar
+```
+
+**Note:** Local testing runs directly on your machine (no EC2/SSM required). `TEST_RUNNER_INSTANCE_ID` and `S3_BUCKET` are not required for local execution.
+
+### Common Configuration
+
+**Required for remote execution (DSQL/Aurora):**
+- `TEST_RUNNER_INSTANCE_ID` - EC2 instance ID for test execution
+- `S3_BUCKET` - S3 bucket for test artifacts and results
+- `AWS_REGION` - AWS region (default: `us-east-1`)
+
+**Note:** These are not required for `DATABASE_TYPE=local` (runs directly on your machine).
+
+### Connection Limits
+
+- **DSQL**: Supports up to 5000 connections per cluster endpoint. Pool size can be up to 2000 connections.
+- **Aurora PostgreSQL**: Connection limits vary by instance class (e.g., `db.t3.small` ~40 connections). Pool size is more conservative, typically capped at 1000 connections.
+
+### Differences
+
+| Feature | DSQL | Aurora PostgreSQL | Local Docker |
+|---------|------|------------------|--------------|
+| Authentication | IAM (automatic token generation) | Username/Password | Username/Password |
+| Connection Limits | Up to 5000 per endpoint | Varies by instance class | ~200 (Docker default) |
+| Default Pool Size | More aggressive (threads/2 to threads/3) | More conservative (threads/3 to threads/5) | Conservative (threads/3 to threads/5) |
+| Default Rate Limit | 100 threads/second | 50 threads/second | 50 threads/second |
+| SSL/TLS | Required | Required | Optional (not required for localhost) |
+| Execution | Remote (EC2/SSM) | Remote (EC2/SSM) | Local (direct) |
 
 ## Architecture
 

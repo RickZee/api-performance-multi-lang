@@ -25,11 +25,11 @@ import java.util.concurrent.ConcurrentHashMap;
 public class DSQLLoadTest {
     private static final Logger LOGGER = LoggerFactory.getLogger(DSQLLoadTest.class);
     
-    private final DSQLConnection connection;
+    private final DatabaseConnection connection;
     private final String eventType;
     private final Integer payloadSize;
     
-    public DSQLLoadTest(DSQLConnection connection, String eventType, Integer payloadSize) {
+    public DSQLLoadTest(DatabaseConnection connection, String eventType, Integer payloadSize) {
         this.connection = connection;
         this.eventType = eventType;
         this.payloadSize = payloadSize;
@@ -551,12 +551,13 @@ public class DSQLLoadTest {
      * Run parallel load test
      */
     public static void main(String[] args) {
+        // Get database type from environment (default: dsql for backward compatibility)
+        String databaseType = System.getenv("DATABASE_TYPE");
+        if (databaseType == null || databaseType.isEmpty()) {
+            databaseType = "dsql";
+        }
+        
         // Get configuration from environment variables
-        String dsqlHost = System.getenv("DSQL_HOST");
-        String portStr = System.getenv("DSQL_PORT");
-        String databaseName = System.getenv("DATABASE_NAME");
-        String iamUsername = System.getenv("IAM_USERNAME");
-        String region = System.getenv("AWS_REGION");
         String scenario = System.getenv("SCENARIO");
         String threadsStr = System.getenv("THREADS");
         String iterationsStr = System.getenv("ITERATIONS");
@@ -567,16 +568,108 @@ public class DSQLLoadTest {
         String testId = System.getenv("TEST_ID");
         
         // Defaults
-        if (dsqlHost == null) dsqlHost = "vftmkydwxvxys6asbsc6ih2the.dsql-fnh4.us-east-1.on.aws";
-        if (portStr == null) portStr = "5432";
-        if (databaseName == null) databaseName = "postgres";
-        if (iamUsername == null) iamUsername = "lambda_dsql_user";
-        if (region == null) region = "us-east-1";
         if (scenario == null) scenario = "both";
         if (threadsStr == null) threadsStr = "5";
         if (iterationsStr == null) iterationsStr = "2";
         if (countStr == null) countStr = "1";
         if (eventType == null) eventType = "CarCreated";
+        
+        // Create appropriate connection based on database type
+        DatabaseConnection connection;
+        String connectionHost;
+        String connectionDatabase;
+        String connectionUser;
+        String connectionRegion = null;
+        
+        if ("local".equalsIgnoreCase(databaseType)) {
+            // Local Docker PostgreSQL configuration
+            String localHost = System.getenv("LOCAL_HOST");
+            if (localHost == null || localHost.isEmpty()) {
+                localHost = "localhost";
+            }
+            String localPortStr = System.getenv("LOCAL_PORT");
+            if (localPortStr == null || localPortStr.isEmpty()) {
+                localPortStr = "5433";  // Default port for local Docker
+            }
+            String localUsername = System.getenv("LOCAL_USERNAME");
+            if (localUsername == null || localUsername.isEmpty()) {
+                localUsername = "postgres";
+            }
+            String localPassword = System.getenv("LOCAL_PASSWORD");
+            if (localPassword == null || localPassword.isEmpty()) {
+                localPassword = "password";
+            }
+            String databaseName = System.getenv("DATABASE_NAME");
+            if (databaseName == null || databaseName.isEmpty()) {
+                databaseName = "car_entities";
+            }
+            
+            int localPort = Integer.parseInt(localPortStr);
+            int threads = Integer.parseInt(threadsStr);
+            // Local connections don't require SSL
+            connection = new AuroraConnection(localHost, localPort, databaseName, localUsername, localPassword, false, threads);
+            connectionHost = localHost;
+            connectionDatabase = databaseName;
+            connectionUser = localUsername;
+        } else if ("aurora".equalsIgnoreCase(databaseType)) {
+            // Aurora configuration
+            String auroraHost = System.getenv("AURORA_HOST");
+            if (auroraHost == null || auroraHost.isEmpty()) {
+                auroraHost = System.getenv("AURORA_ENDPOINT");
+            }
+            String auroraPortStr = System.getenv("AURORA_PORT");
+            if (auroraPortStr == null || auroraPortStr.isEmpty()) {
+                auroraPortStr = "5432";
+            }
+            String auroraUsername = System.getenv("AURORA_USERNAME");
+            String auroraPassword = System.getenv("AURORA_PASSWORD");
+            String databaseName = System.getenv("DATABASE_NAME");
+            
+            if (auroraHost == null || auroraHost.isEmpty()) {
+                System.err.println("Error: AURORA_HOST or AURORA_ENDPOINT environment variable is required for Aurora");
+                System.exit(1);
+            }
+            if (auroraUsername == null || auroraUsername.isEmpty()) {
+                System.err.println("Error: AURORA_USERNAME environment variable is required for Aurora");
+                System.exit(1);
+            }
+            if (auroraPassword == null || auroraPassword.isEmpty()) {
+                System.err.println("Error: AURORA_PASSWORD environment variable is required for Aurora");
+                System.exit(1);
+            }
+            if (databaseName == null || databaseName.isEmpty()) {
+                databaseName = "car_entities";
+            }
+            
+            int auroraPort = Integer.parseInt(auroraPortStr);
+            int threads = Integer.parseInt(threadsStr);
+            connection = new AuroraConnection(auroraHost, auroraPort, databaseName, auroraUsername, auroraPassword, threads);
+            connectionHost = auroraHost;
+            connectionDatabase = databaseName;
+            connectionUser = auroraUsername;
+        } else {
+            // DSQL configuration (default)
+            String dsqlHost = System.getenv("DSQL_HOST");
+            String portStr = System.getenv("DSQL_PORT");
+            String databaseName = System.getenv("DATABASE_NAME");
+            String iamUsername = System.getenv("IAM_USERNAME");
+            String region = System.getenv("AWS_REGION");
+            
+            // Defaults for DSQL
+            if (dsqlHost == null) dsqlHost = "vftmkydwxvxys6asbsc6ih2the.dsql-fnh4.us-east-1.on.aws";
+            if (portStr == null) portStr = "5432";
+            if (databaseName == null) databaseName = "postgres";
+            if (iamUsername == null) iamUsername = "lambda_dsql_user";
+            if (region == null) region = "us-east-1";
+            
+            int port = Integer.parseInt(portStr);
+            int threads = Integer.parseInt(threadsStr);
+            connection = new DSQLConnection(dsqlHost, port, databaseName, iamUsername, region, threads);
+            connectionHost = dsqlHost;
+            connectionDatabase = databaseName;
+            connectionUser = iamUsername;
+            connectionRegion = region;
+        }
         
         // Parse payload size
         Integer payloadSize = EventGenerator.parsePayloadSize(payloadSizeStr);
@@ -592,7 +685,6 @@ public class DSQLLoadTest {
             scenario = "2";
         }
         
-        int port = Integer.parseInt(portStr);
         int threads = Integer.parseInt(threadsStr);
         int iterations = Integer.parseInt(iterationsStr);
         int count = Integer.parseInt(countStr);
@@ -605,13 +697,15 @@ public class DSQLLoadTest {
                                   payloadSize != null ? payloadSize + "bytes" : "default");
         }
         
-        System.out.println("DSQL Load Test Configuration:");
+        System.out.println("Database Load Test Configuration:");
+        System.out.println("  Database Type: " + databaseType.toUpperCase());
         System.out.println("  Test ID: " + testId);
-        System.out.println("  Host: " + dsqlHost);
-        System.out.println("  Port: " + port);
-        System.out.println("  Database: " + databaseName);
-        System.out.println("  IAM User: " + iamUsername);
-        System.out.println("  Region: " + region);
+        System.out.println("  Host: " + connectionHost);
+        System.out.println("  Database: " + connectionDatabase);
+        System.out.println("  User: " + connectionUser);
+        if (connectionRegion != null) {
+            System.out.println("  Region: " + connectionRegion);
+        }
         System.out.println("  Scenario: " + scenario);
         System.out.println("  Threads: " + threads);
         System.out.println("  Iterations: " + iterations);
@@ -627,9 +721,9 @@ public class DSQLLoadTest {
             System.out.println("  Output Directory: " + outputDir);
         }
         
-        // DSQL is extremely high-performance - no rate limiting needed for regular tests
-        // Only apply minimal delay for extreme scaling (1000+ threads)
-        int connectionRateLimit = parseEnvInt("DSQL_CONNECTION_RATE_LIMIT", 100);
+        // Connection rate limiting (more conservative for Aurora)
+        int connectionRateLimit = parseEnvInt("DSQL_CONNECTION_RATE_LIMIT", 
+                                             "aurora".equalsIgnoreCase(databaseType) ? 50 : 100);
         long batchDelayMs = threads >= 1000 ? 50 : 0; // No delay for regular tests, 50ms only for extreme
         System.out.println("  Connection Rate Limit: " + connectionRateLimit + " threads/second");
         System.out.println();
@@ -640,11 +734,10 @@ public class DSQLLoadTest {
             collector = new TestResultsCollector(outputDir, testId);
             int scenarioNum = "1".equals(scenario) ? 1 : ("2".equals(scenario) ? 2 : 0);
             collector.setConfiguration(scenarioNum, threads, iterations, count, eventType, payloadSize,
-                                       dsqlHost, databaseName, iamUsername, region);
+                                       connectionHost, connectionDatabase, connectionUser, connectionRegion);
         }
         
-        // Create connection with pool size optimized for thread count
-        DSQLConnection connection = new DSQLConnection(dsqlHost, port, databaseName, iamUsername, region, threads);
+        // Create test instance
         DSQLLoadTest test = new DSQLLoadTest(connection, eventType, payloadSize);
         
         ExecutorService executor = Executors.newFixedThreadPool(threads);
@@ -712,7 +805,7 @@ public class DSQLLoadTest {
                 long totalDuration = System.currentTimeMillis() - startTime;
                 
                 // Log connection pool metrics
-                DSQLConnection.PoolMetrics poolMetrics = connection.getPoolMetrics();
+                DatabaseConnection.PoolMetrics poolMetrics = connection.getPoolMetrics();
                 System.out.println("\n=== Connection Pool Metrics (Scenario 1) ===");
                 System.out.println("  " + poolMetrics.toString());
                 LOGGER.info("Connection pool metrics after Scenario 1: {}", poolMetrics);
@@ -812,7 +905,7 @@ public class DSQLLoadTest {
                 long totalDuration = System.currentTimeMillis() - startTime;
                 
                 // Log connection pool metrics
-                DSQLConnection.PoolMetrics poolMetrics = connection.getPoolMetrics();
+                DatabaseConnection.PoolMetrics poolMetrics = connection.getPoolMetrics();
                 System.out.println("\n=== Connection Pool Metrics (Scenario 2) ===");
                 System.out.println("  " + poolMetrics.toString());
                 LOGGER.info("Connection pool metrics after Scenario 2: {}", poolMetrics);

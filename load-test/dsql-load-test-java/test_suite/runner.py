@@ -267,18 +267,63 @@ class TestRunner:
             return False
     
     def _clear_database(self) -> bool:
-        """Clear DSQL database by dropping and recreating table."""
-        print("=== Clearing DSQL database ===")
+        """Clear database by dropping and recreating table."""
+        db_type = self.config.database_type
+        print(f"=== Clearing {db_type.upper()} database ===")
+        
+        # Build environment variables based on database type
+        env_vars = []
+        conn_string_parts = []
+        
+        if db_type == "aurora":
+            if not self.config.aurora_host:
+                print("Error: AURORA_HOST not configured")
+                return False
+            env_vars.extend([
+                f"export AURORA_HOST={self.config.aurora_host}",
+                f"export AURORA_PORT={self.config.aurora_port or 5432}",
+                f"export DATABASE_NAME={self.config.database_name or 'car_entities'}",
+            ])
+            if self.config.aurora_username:
+                env_vars.append(f"export AURORA_USERNAME={self.config.aurora_username}")
+            if self.config.aurora_password:
+                env_vars.append(f"export AURORA_PASSWORD={self.config.aurora_password}")
+            
+            # Build connection string for Aurora (username/password)
+            conn_string_parts = [
+                "host = os.environ.get('AURORA_HOST')",
+                "port = os.environ.get('AURORA_PORT', '5432')",
+                "dbname = os.environ.get('DATABASE_NAME', 'car_entities')",
+                "user = os.environ.get('AURORA_USERNAME')",
+                "password = os.environ.get('AURORA_PASSWORD')",
+                "conn_string = f\"host={host} port={port} dbname={dbname} user={user} password={password} sslmode=require\""
+            ]
+        else:  # dsql
+            if not self.config.dsql_host:
+                print("Error: DSQL_HOST not configured")
+                return False
+            env_vars.extend([
+                f"export DSQL_HOST={self.config.dsql_host}",
+                "export DSQL_PORT=5432",
+                "export DATABASE_NAME=postgres",
+                f"export IAM_USERNAME={self.config.iam_username or 'lambda_dsql_user'}",
+                f"export AWS_REGION={self.config.region}",
+            ])
+            
+            # Build connection string for DSQL (IAM auth)
+            conn_string_parts = [
+                "host = os.environ.get('DSQL_HOST')",
+                "port = os.environ.get('DSQL_PORT', '5432')",
+                "dbname = os.environ.get('DATABASE_NAME', 'postgres')",
+                "user = os.environ.get('IAM_USERNAME')",
+                "conn_string = f\"host={host} port={port} dbname={dbname} user={user} sslmode=require\""
+            ]
         
         commands = [
             "set +e",
             # Install psycopg2 if not available
             "python3 -c 'import psycopg2' 2>/dev/null || pip3 install psycopg2-binary --quiet || dnf install -y python3-psycopg2 >/dev/null 2>&1 || yum install -y python3-psycopg2 >/dev/null 2>&1 || true",
-            f"export DSQL_HOST={self.config.dsql_host}",
-            "export DSQL_PORT=5432",
-            "export DATABASE_NAME=postgres",
-            f"export IAM_USERNAME={self.config.iam_username}",
-            f"export AWS_REGION={self.config.region}",
+        ] + env_vars + [
             "python3 << 'PYTHON_EOF'",
             "import psycopg2",
             "import os",
@@ -286,7 +331,7 @@ class TestRunner:
             "from psycopg2.extensions import ISOLATION_LEVEL_AUTOCOMMIT",
             "",
             "try:",
-            "    conn_string = f\"host={os.environ['DSQL_HOST']} port=5432 dbname=postgres user={os.environ['IAM_USERNAME']} sslmode=require\"",
+        ] + [f"    {part}" for part in conn_string_parts] + [
             "    conn = psycopg2.connect(conn_string)",
             "    conn.set_isolation_level(ISOLATION_LEVEL_AUTOCOMMIT)",
             "    cur = conn.cursor()",
@@ -331,6 +376,30 @@ class TestRunner:
             # Build test commands
             payload_export = f"export PAYLOAD_SIZE={test_def.payload_size}" if test_def.payload_size != 'default' else "unset PAYLOAD_SIZE"
             
+            # Build environment variables based on database type
+            db_env_vars = []
+            if self.config.database_type == "aurora":
+                if self.config.aurora_host:
+                    db_env_vars.append(f"export AURORA_HOST={self.config.aurora_host}")
+                if self.config.aurora_port:
+                    db_env_vars.append(f"export AURORA_PORT={self.config.aurora_port}")
+                if self.config.aurora_username:
+                    db_env_vars.append(f"export AURORA_USERNAME={self.config.aurora_username}")
+                if self.config.aurora_password:
+                    db_env_vars.append(f"export AURORA_PASSWORD={self.config.aurora_password}")
+                if self.config.database_name:
+                    db_env_vars.append(f"export DATABASE_NAME={self.config.database_name}")
+                db_env_vars.append("export DATABASE_TYPE=aurora")
+            else:  # dsql
+                if self.config.dsql_host:
+                    db_env_vars.append(f"export DSQL_HOST={self.config.dsql_host}")
+                db_env_vars.append("export DSQL_PORT=5432")
+                db_env_vars.append("export DATABASE_NAME=postgres")
+                if self.config.iam_username:
+                    db_env_vars.append(f"export IAM_USERNAME={self.config.iam_username}")
+                db_env_vars.append(f"export AWS_REGION={self.config.region}")
+                db_env_vars.append("export DATABASE_TYPE=dsql")
+            
             commands = [
                 "set +e",
                 "cd /tmp/dsql-load-test-java",
@@ -338,11 +407,7 @@ class TestRunner:
                 "  echo 'ERROR: JAR file not found';",
                 "  exit 1;",
                 "fi",
-                f"export DSQL_HOST={self.config.dsql_host}",
-                "export DSQL_PORT=5432",
-                "export DATABASE_NAME=postgres",
-                f"export IAM_USERNAME={self.config.iam_username}",
-                f"export AWS_REGION={self.config.region}",
+            ] + db_env_vars + [
                 f"export SCENARIO={test_def.scenario}",
                 f"export THREADS={test_def.threads}",
                 f"export ITERATIONS={test_def.iterations}",

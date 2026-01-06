@@ -1,0 +1,65 @@
+version: '3.8'
+
+# Docker Compose for Local Load Testing
+# This provides a PostgreSQL database for running load tests locally
+# Usage: docker-compose -f docker-compose.local.yml up -d
+
+services:
+  # PostgreSQL Database for Load Testing
+  postgres-load-test:
+    image: postgres:15-alpine
+    container_name: dsql_load_test_postgres
+    environment:
+      POSTGRES_DB: car_entities
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: password
+      POSTGRES_INITDB_ARGS: "-E UTF8 --locale=C"
+    command: >
+      postgres
+      -c shared_buffers=512MB
+      -c effective_cache_size=1GB
+      -c maintenance_work_mem=64MB
+      -c checkpoint_completion_target=0.9
+      -c wal_buffers=16MB
+      -c default_statistics_target=100
+      -c random_page_cost=1.1
+      -c effective_io_concurrency=200
+      -c work_mem=4MB
+      -c min_wal_size=256MB
+      -c max_wal_size=1GB
+      -c max_connections=200
+      -c max_worker_processes=4
+      -c max_parallel_workers_per_gather=2
+      -c max_parallel_workers=4
+      -c max_parallel_maintenance_workers=2
+      -c shared_preload_libraries=pg_stat_statements
+      -c pg_stat_statements.track=all
+      -c pg_stat_statements.max=10000
+    ports:
+      - "5433:5432"
+    volumes:
+      - postgres_load_test_data:/var/lib/postgresql/data
+      - ../postgres/init-small.sql:/docker-entrypoint-initdb.d/init-small.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d car_entities"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    networks:
+      - load_test_network
+    deploy:
+      resources:
+        limits:
+          memory: 2G
+          cpus: '2.0'
+        reservations:
+          memory: 512M
+          cpus: '0.5'
+
+volumes:
+  postgres_load_test_data:
+
+networks:
+  load_test_network:
+    driver: bridge
+

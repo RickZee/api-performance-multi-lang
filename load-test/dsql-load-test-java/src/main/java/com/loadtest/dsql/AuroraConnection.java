@@ -10,52 +10,59 @@ import java.sql.Connection;
 import java.sql.SQLException;
 
 /**
- * DSQL connection manager using HikariCP connection pool with AWS DSQL JDBC connector.
+ * Aurora PostgreSQL connection manager using HikariCP connection pool with standard PostgreSQL JDBC driver.
  * 
- * Uses the AWS DSQL JDBC connector which automatically handles IAM token generation,
- * eliminating the need for manual SigV4 signing.
+ * Uses standard PostgreSQL JDBC driver with username/password authentication.
  * 
- * Optimized for extreme scaling tests with up to 5000+ concurrent threads.
+ * Optimized for load testing with configurable connection pool sizing.
  */
-public class DSQLConnection implements DatabaseConnection {
-    private static final Logger LOGGER = LoggerFactory.getLogger(DSQLConnection.class);
+public class AuroraConnection implements DatabaseConnection {
+    private static final Logger LOGGER = LoggerFactory.getLogger(AuroraConnection.class);
     
-    // DSQL connection limits - increase for extreme scaling
-    // Note: DSQL supports up to 5000 connections per cluster endpoint
-    private static final int ABSOLUTE_MAX_POOL_SIZE = 2000;
-    // DSQL is extremely high-performance - minimal retries needed
-    private static final int DEFAULT_MAX_RETRIES = 1; // Single retry only (DSQL should work first time)
-    private static final long DEFAULT_RETRY_DELAY_MS = 10; // 10ms delay (DSQL responds in microseconds)
+    // Aurora connection limits - typically lower than DSQL
+    // Note: Aurora instance connection limits vary by instance class (e.g., db.t3.small ~40 connections)
+    // For load testing, we'll use a more conservative limit
+    private static final int ABSOLUTE_MAX_POOL_SIZE = 1000;
+    // Aurora may need more retries than DSQL due to connection limits
+    private static final int DEFAULT_MAX_RETRIES = 3;
+    private static final long DEFAULT_RETRY_DELAY_MS = 100; // 100ms delay for Aurora
     
-    private final String dsqlHost;
+    private final String auroraHost;
     private final int port;
     private final String databaseName;
-    private final String iamUsername;
-    private final String region;
+    private final String username;
+    private final String password;
+    private final boolean requireSsl;
     private final int maxPoolSize;
     private final int maxRetries;
     private final long retryDelayMs;
     private HikariDataSource dataSource;
     
-    public DSQLConnection(String dsqlHost, int port, String databaseName, 
-                         String iamUsername, String region) {
-        this(dsqlHost, port, databaseName, iamUsername, region, 5);
+    public AuroraConnection(String auroraHost, int port, String databaseName, 
+                            String username, String password) {
+        this(auroraHost, port, databaseName, username, password, true, 5);
     }
     
-    public DSQLConnection(String dsqlHost, int port, String databaseName, 
-                         String iamUsername, String region, int threadCount) {
-        this.dsqlHost = dsqlHost;
+    public AuroraConnection(String auroraHost, int port, String databaseName,
+                           String username, String password, int threadCount) {
+        this(auroraHost, port, databaseName, username, password, true, threadCount);
+    }
+    
+    public AuroraConnection(String auroraHost, int port, String databaseName,
+                           String username, String password, boolean requireSsl, int threadCount) {
+        this.auroraHost = auroraHost;
         this.port = port;
         this.databaseName = databaseName;
-        this.iamUsername = iamUsername;
-        this.region = region;
+        this.username = username;
+        this.password = password;
+        this.requireSsl = requireSsl;
         
         // Parse retry configuration from environment
         this.maxRetries = parseEnvInt("CONNECTION_MAX_RETRIES", DEFAULT_MAX_RETRIES);
         this.retryDelayMs = parseEnvLong("CONNECTION_RETRY_DELAY_MS", DEFAULT_RETRY_DELAY_MS);
         
-        // Enhanced pool sizing for extreme scaling
-        // Support up to ABSOLUTE_MAX_POOL_SIZE connections
+        // Enhanced pool sizing for Aurora
+        // Aurora has lower connection limits, so be more conservative
         String maxPoolSizeEnv = System.getenv("MAX_POOL_SIZE");
         int calculatedPoolSize;
         if (maxPoolSizeEnv != null && !maxPoolSizeEnv.isEmpty()) {
@@ -73,18 +80,20 @@ public class DSQLConnection implements DatabaseConnection {
     }
     
     private int calculatePoolSize(int threadCount) {
-        // For extreme scaling (1000+ threads), use aggressive pool sizing
+        // Aurora has lower connection limits, so use more conservative pool sizing
         // Each connection can handle multiple requests sequentially
-        // Goal: minimize connection wait time while not exceeding DSQL limits
-        if (threadCount >= 2000) {
-            // Extreme scaling: pool size = threads / 3, capped at ABSOLUTE_MAX_POOL_SIZE
-            return Math.min(threadCount / 3, ABSOLUTE_MAX_POOL_SIZE);
+        if (threadCount >= 1000) {
+            // High concurrency: pool size = threads / 5 (more conservative than DSQL)
+            return Math.min(threadCount / 5, ABSOLUTE_MAX_POOL_SIZE);
         } else if (threadCount >= 500) {
-            // High concurrency: pool size = threads / 2
+            // Medium concurrency: pool size = threads / 3
+            return Math.min(threadCount / 3, ABSOLUTE_MAX_POOL_SIZE);
+        } else if (threadCount >= 100) {
+            // Normal: pool size = threads / 2
             return Math.min(threadCount / 2, ABSOLUTE_MAX_POOL_SIZE);
         } else {
-            // Normal: match thread count up to 200, then grow slower
-            return Math.min(Math.max(threadCount, 10), 200);
+            // Low concurrency: match thread count up to 50
+            return Math.min(Math.max(threadCount, 5), 50);
         }
     }
     
@@ -114,8 +123,8 @@ public class DSQLConnection implements DatabaseConnection {
     
     /**
      * Get a connection from the pool with retry logic for high concurrency scenarios.
-     * Uses exponential backoff to handle connection pool contention.
      */
+    @Override
     public Connection getConnection() throws SQLException {
         if (dataSource == null || dataSource.isClosed()) {
             synchronized (this) {
@@ -132,9 +141,7 @@ public class DSQLConnection implements DatabaseConnection {
             } catch (SQLException e) {
                 lastException = e;
                 if (attempt < maxRetries) {
-                    // DSQL is extremely high-performance - minimal delay needed
-                    // Use fixed small delay instead of exponential backoff
-                    long delay = retryDelayMs;
+                    long delay = retryDelayMs * (attempt + 1); // Exponential backoff
                     LOGGER.debug("Connection attempt {} failed, retrying in {}ms: {}", 
                                 attempt + 1, delay, e.getMessage());
                     try {
@@ -156,6 +163,7 @@ public class DSQLConnection implements DatabaseConnection {
      * Get a connection with a custom timeout (useful for extreme scaling scenarios).
      * @param timeoutMs Maximum time to wait for a connection
      */
+    @Override
     public Connection getConnection(long timeoutMs) throws SQLException {
         if (dataSource == null || dataSource.isClosed()) {
             synchronized (this) {
@@ -175,12 +183,10 @@ public class DSQLConnection implements DatabaseConnection {
             } catch (SQLException e) {
                 lastException = e;
                 attempt++;
-                // DSQL is extremely high-performance - minimal delay needed
-                // Use fixed small delay instead of exponential backoff
-                long delay = retryDelayMs;
+                long delay = retryDelayMs * (attempt + 1); // Exponential backoff
                 LOGGER.debug("Connection attempt {} failed, retrying in {}ms", attempt, delay);
                 try {
-                    Thread.sleep(delay);
+                    Thread.sleep(Math.min(delay, timeoutMs - (System.currentTimeMillis() - startTime)));
                 } catch (InterruptedException ie) {
                     Thread.currentThread().interrupt();
                     throw e;
@@ -206,35 +212,32 @@ public class DSQLConnection implements DatabaseConnection {
         try {
             HikariConfig config = new HikariConfig();
             
-            // Use AWS DSQL JDBC connector - automatically handles IAM token generation
-            // Key: Use DSQL wrapper prefix (jdbc:aws-dsql:postgresql://) to trigger IAM auto-auth
-            // The connector wraps PostgreSQL driver and handles SigV4 token generation automatically
-            String jdbcUrl = String.format("jdbc:aws-dsql:postgresql://%s:%d/%s?user=%s&sslmode=require&token-duration-secs=900",
-                                           dsqlHost, port, databaseName, iamUsername);
+            // Use standard PostgreSQL JDBC driver with username/password authentication
+            String sslMode = requireSsl ? "require" : "disable";
+            String jdbcUrl = String.format("jdbc:postgresql://%s:%d/%s?sslmode=%s",
+                                           auroraHost, port, databaseName, sslMode);
             config.setJdbcUrl(jdbcUrl);
+            config.setDriverClassName("org.postgresql.Driver");
+            config.setUsername(username);
+            config.setPassword(password);
             
-            // Don't set driver class - let ServiceLoader mechanism find the connector driver
-            // The connector registers itself via META-INF/services/java.sql.Driver
-            config.setUsername(iamUsername); // Explicit for clarity
-            
-            // Pool settings - optimized for extreme scaling (up to 5000+ threads)
+            // Pool settings - optimized for Aurora (more conservative than DSQL)
             config.setMaximumPoolSize(maxPoolSize);
             
-            // Pre-warm connections: use a fraction of max to avoid overwhelming DSQL on startup
-            int minIdle = maxPoolSize >= 500 ? Math.min(maxPoolSize / 4, 200) : 
-                          maxPoolSize >= 100 ? Math.min(maxPoolSize / 2, 50) : 
+            // Pre-warm connections: use a fraction of max to avoid overwhelming Aurora on startup
+            int minIdle = maxPoolSize >= 100 ? Math.min(maxPoolSize / 4, 50) : 
+                          maxPoolSize >= 50 ? Math.min(maxPoolSize / 2, 25) : 
                           Math.min(maxPoolSize / 2, 5);
             config.setMinimumIdle(minIdle);
             
-            // DSQL is extremely high-performance - but allow time for connection pool initialization
-            // Use reasonable timeouts: 3-10 seconds (DSQL is fast, but pool init takes a moment)
-            int connectionTimeout = maxPoolSize >= 500 ? 10000 : 
-                                   maxPoolSize >= 100 ? 5000 : 3000;
-            config.setConnectionTimeout(connectionTimeout); // 3-10 seconds for high-performance DSQL
+            // Aurora connection timeouts - allow more time than DSQL
+            int connectionTimeout = maxPoolSize >= 100 ? 15000 : 
+                                   maxPoolSize >= 50 ? 10000 : 5000;
+            config.setConnectionTimeout(connectionTimeout); // 5-15 seconds for Aurora
             config.setIdleTimeout(600000); // 10 minutes
-            config.setMaxLifetime(1800000); // 30 minutes - IAM tokens valid for 15 mins
-            config.setLeakDetectionThreshold(120000); // 2 minutes for extreme tests
-            config.setPoolName("DSQL-LoadTest-Pool");
+            config.setMaxLifetime(1800000); // 30 minutes
+            config.setLeakDetectionThreshold(120000); // 2 minutes
+            config.setPoolName("Aurora-LoadTest-Pool");
             
             // Enable keepalive to maintain connections during high-latency periods
             config.setKeepaliveTime(60000); // 1 minute keepalive
@@ -244,25 +247,23 @@ public class DSQLConnection implements DatabaseConnection {
             config.setValidationTimeout(5000); // 5 seconds
             config.setRegisterMbeans(true); // Enable monitoring via JMX
             
-            // AWS DSQL connector configuration
-            // Connector automatically uses DefaultCredentialsProvider from EC2 instance profile
-            config.addDataSourceProperty("region", region);
-            
             // PostgreSQL-specific settings
             config.addDataSourceProperty("cachePrepStmts", "true");
             config.addDataSourceProperty("prepStmtCacheSize", "250");
             config.addDataSourceProperty("prepStmtCacheSqlLimit", "2048");
             
-            // DSQL SSL settings (required for DSQL)
-            config.addDataSourceProperty("ssl", "true");
-            config.addDataSourceProperty("sslfactory", "org.postgresql.ssl.DefaultJavaSSLFactory");
+            // SSL settings (optional for local connections)
+            if (requireSsl) {
+                config.addDataSourceProperty("ssl", "true");
+                config.addDataSourceProperty("sslfactory", "org.postgresql.ssl.DefaultJavaSSLFactory");
+            }
             
             // Set search path
             config.setConnectionInitSql("SET search_path TO car_entities_schema");
             
             dataSource = new HikariDataSource(config);
-            LOGGER.info("Created DSQL connection pool using AWS DSQL JDBC connector for {} (pool size: {})", 
-                       dsqlHost, maxPoolSize);
+            LOGGER.info("Created Aurora connection pool for {} (pool size: {})", 
+                       auroraHost, maxPoolSize);
         } finally {
             // Restore original system properties
             if (originalHostnameVerifier != null) {
@@ -271,6 +272,7 @@ public class DSQLConnection implements DatabaseConnection {
         }
     }
     
+    @Override
     public void close() {
         if (dataSource != null && !dataSource.isClosed()) {
             dataSource.close();
