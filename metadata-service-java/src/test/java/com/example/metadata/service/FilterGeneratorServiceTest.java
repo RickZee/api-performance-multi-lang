@@ -6,7 +6,8 @@ import com.example.metadata.model.GenerateSQLResponse;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
-import java.time.Instant;
+import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.*;
@@ -27,6 +28,7 @@ class FilterGeneratorServiceTest {
             .name("Service Events for Dealer 001")
             .outputTopic("filtered-service-events-dealer-001")
             .enabled(true)
+            .targets(new ArrayList<>(Arrays.asList("flink")))
             .conditions(List.of(
                 FilterCondition.builder()
                     .field("event_type")
@@ -63,6 +65,7 @@ class FilterGeneratorServiceTest {
             .name("Disabled Filter")
             .outputTopic("test-topic")
             .enabled(false)
+            .targets(new ArrayList<>(Arrays.asList("flink")))
             .conditions(List.of())
             .build();
         
@@ -74,12 +77,39 @@ class FilterGeneratorServiceTest {
     }
     
     @Test
+    void testGenerateSQL_NoFlinkTarget() {
+        Filter filter = Filter.builder()
+            .id("test-filter-006")
+            .name("Filter without Flink target")
+            .outputTopic("test-topic")
+            .enabled(true)
+            .targets(new ArrayList<>(Arrays.asList("spring")))
+            .conditions(List.of(
+                FilterCondition.builder()
+                    .field("event_type")
+                    .operator("equals")
+                    .value("CarCreated")
+                    .valueType("string")
+                    .build()
+            ))
+            .conditionLogic("AND")
+            .build();
+        
+        GenerateSQLResponse response = generatorService.generateSQL(filter);
+        
+        assertFalse(response.isValid());
+        assertNotNull(response.getValidationErrors());
+        assertTrue(response.getValidationErrors().contains("filter does not have 'flink' target"));
+    }
+    
+    @Test
     void testGenerateSQL_WithInOperator() {
         Filter filter = Filter.builder()
             .id("test-filter-003")
             .name("Filter with IN operator")
             .outputTopic("test-topic")
             .enabled(true)
+            .targets(new ArrayList<>(Arrays.asList("flink")))
             .conditions(List.of(
                 FilterCondition.builder()
                     .field("event_type")
@@ -106,6 +136,7 @@ class FilterGeneratorServiceTest {
             .name("Filter with OR logic")
             .outputTopic("test-topic")
             .enabled(true)
+            .targets(new ArrayList<>(Arrays.asList("flink")))
             .conditions(List.of(
                 FilterCondition.builder()
                     .field("event_type")
@@ -136,6 +167,7 @@ class FilterGeneratorServiceTest {
             .name("Filter with BETWEEN operator")
             .outputTopic("test-topic")
             .enabled(true)
+            .targets(new ArrayList<>(Arrays.asList("flink")))
             .conditions(List.of(
                 FilterCondition.builder()
                     .field("year")

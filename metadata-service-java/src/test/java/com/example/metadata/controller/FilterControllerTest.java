@@ -1,6 +1,7 @@
 package com.example.metadata.controller;
 
 import com.example.metadata.model.*;
+import com.example.metadata.testutil.MockJenkinsServer;
 import com.example.metadata.testutil.TestRepoSetup;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.*;
@@ -34,6 +35,9 @@ public class FilterControllerTest {
     private ObjectMapper objectMapper = new ObjectMapper();
     private static String testRepoDir;
     private static String testCacheDir;
+    private static MockJenkinsServer mockJenkins;
+    private static int jenkinsPort;
+    private static Path yamlFile;
     private String filterId;
     
     @DynamicPropertySource
@@ -41,6 +45,13 @@ public class FilterControllerTest {
         String tempDir = Files.createTempDirectory("metadata-service-test-").toString();
         testRepoDir = TestRepoSetup.setupTestRepo(tempDir);
         testCacheDir = tempDir + "/cache";
+        
+        // Start mock Jenkins server
+        mockJenkins = new MockJenkinsServer();
+        jenkinsPort = mockJenkins.start();
+        
+        // Set up YAML file path
+        yamlFile = Paths.get(tempDir, "filters.yml");
         
         // Copy schemas to cache directory for tests (simulating GitSync behavior)
         Path repoSchemasDir = Paths.get(testRepoDir, "schemas");
@@ -66,10 +77,20 @@ public class FilterControllerTest {
         registry.add("git.branch", () -> "main");
         registry.add("git.local-cache-dir", () -> testCacheDir);
         registry.add("test.mode", () -> "true");
-        // Disable Spring YAML writing in tests
-        registry.add("spring-boot.filters-yaml-path", () -> "");
-        // Disable Jenkins in tests
-        registry.add("jenkins.enabled", () -> "false");
+        
+        // Configure Spring YAML path for tests
+        registry.add("spring-boot.filters-yaml-path", () -> yamlFile.toString());
+        registry.add("spring-boot.backup-enabled", () -> "false");
+        
+        // Enable Jenkins triggering for tests - use mock server URL
+        registry.add("jenkins.enabled", () -> "true");
+        registry.add("jenkins.base-url", () -> "http://localhost:" + jenkinsPort);
+        registry.add("jenkins.job-name", () -> "filter-integration-tests");
+        registry.add("jenkins.trigger-on-create", () -> "true");
+        registry.add("jenkins.trigger-on-update", () -> "true");
+        registry.add("jenkins.trigger-on-delete", () -> "true");
+        registry.add("jenkins.trigger-on-approve", () -> "true");
+        registry.add("jenkins.trigger-on-deploy", () -> "true");
     }
     
     @Sql(scripts = "/schema-test.sql", executionPhase = Sql.ExecutionPhase.BEFORE_TEST_METHOD)
@@ -91,6 +112,9 @@ public class FilterControllerTest {
     
     @AfterAll
     static void tearDown() throws IOException {
+        if (mockJenkins != null) {
+            mockJenkins.stop();
+        }
         if (testRepoDir != null) {
             TestRepoSetup.cleanupTestRepo(testRepoDir);
         }
