@@ -78,4 +78,4 @@ For comprehensive testing information including test catalog, coverage reports, 
 ## Documentation
 
 - **[Comprehensive Documentation](METADATA_SERVICE_DOCUMENTATION.md)** - Complete service documentation including architecture, API reference, configuration, and workflows
-- **[Testing Guide](docs/TESTING.md)** - Testing documentation including test catalog, coverage reports, and implementation details
+- **[Testing Guide](METADATA_SERVICE_TESTING.md)** - Testing documentation including test catalog, coverage reports, and implementation details
