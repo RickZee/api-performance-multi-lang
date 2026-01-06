@@ -37,8 +37,13 @@ public class CreateFilterRequest {
     private List<FilterCondition> conditions;
     
     @JsonProperty("enabled")
+    @Builder.Default
     private boolean enabled = true;
     
     @JsonProperty("conditionLogic")
+    @Builder.Default
     private String conditionLogic = "AND";
+    
+    @JsonProperty("targets")
+    private List<String> targets;
 }

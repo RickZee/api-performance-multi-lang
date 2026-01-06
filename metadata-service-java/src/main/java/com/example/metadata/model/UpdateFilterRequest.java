@@ -33,4 +33,7 @@ public class UpdateFilterRequest {
     
     @JsonProperty("conditionLogic")
     private String conditionLogic;
+    
+    @JsonProperty("targets")
+    private List<String> targets;
 }

@@ -8,8 +8,6 @@ import lombok.AllArgsConstructor;
 import lombok.Builder;
 import lombok.Data;
 import lombok.NoArgsConstructor;
-import org.hibernate.annotations.JdbcTypeCode;
-import org.hibernate.type.SqlTypes;
 
 import java.time.Instant;
 import java.util.ArrayList;
@@ -91,6 +89,51 @@ public class FilterEntity {
     @Convert(converter = StringListConverter.class)
     @Column(name = "flink_statement_ids", length = 10000)
     private List<String> flinkStatementIds;
+    
+    @Convert(converter = StringListConverter.class)
+    @Column(name = "targets", length = 10000)
+    @Builder.Default
+    private List<String> targets = new ArrayList<>();
+    
+    @Column(name = "approved_for_flink")
+    @Builder.Default
+    private Boolean approvedForFlink = false;
+    
+    @Column(name = "approved_for_spring")
+    @Builder.Default
+    private Boolean approvedForSpring = false;
+    
+    @Column(name = "approved_for_flink_at")
+    private Instant approvedForFlinkAt;
+    
+    @Column(name = "approved_for_flink_by", length = 255)
+    private String approvedForFlinkBy;
+    
+    @Column(name = "approved_for_spring_at")
+    private Instant approvedForSpringAt;
+    
+    @Column(name = "approved_for_spring_by", length = 255)
+    private String approvedForSpringBy;
+    
+    @Column(name = "deployed_to_flink")
+    @Builder.Default
+    private Boolean deployedToFlink = false;
+    
+    @Column(name = "deployed_to_flink_at")
+    private Instant deployedToFlinkAt;
+    
+    @Column(name = "deployed_to_spring")
+    @Builder.Default
+    private Boolean deployedToSpring = false;
+    
+    @Column(name = "deployed_to_spring_at")
+    private Instant deployedToSpringAt;
+    
+    @Column(name = "flink_deployment_error", columnDefinition = "TEXT")
+    private String flinkDeploymentError;
+    
+    @Column(name = "spring_deployment_error", columnDefinition = "TEXT")
+    private String springDeploymentError;
     
     @PrePersist
     protected void onCreate() {

@@ -12,5 +12,6 @@ import lombok.NoArgsConstructor;
 @AllArgsConstructor
 public class DeployFilterRequest {
     @JsonProperty("force")
+    @Builder.Default
     private boolean force = false;
 }

@@ -64,4 +64,43 @@ public class Filter {
     
     @JsonProperty("version")
     private int version;
+    
+    @JsonProperty("targets")
+    private List<String> targets;
+    
+    @JsonProperty("approvedForFlink")
+    private Boolean approvedForFlink;
+    
+    @JsonProperty("approvedForSpring")
+    private Boolean approvedForSpring;
+    
+    @JsonProperty("approvedForFlinkAt")
+    private Instant approvedForFlinkAt;
+    
+    @JsonProperty("approvedForFlinkBy")
+    private String approvedForFlinkBy;
+    
+    @JsonProperty("approvedForSpringAt")
+    private Instant approvedForSpringAt;
+    
+    @JsonProperty("approvedForSpringBy")
+    private String approvedForSpringBy;
+    
+    @JsonProperty("deployedToFlink")
+    private Boolean deployedToFlink;
+    
+    @JsonProperty("deployedToFlinkAt")
+    private Instant deployedToFlinkAt;
+    
+    @JsonProperty("deployedToSpring")
+    private Boolean deployedToSpring;
+    
+    @JsonProperty("deployedToSpringAt")
+    private Instant deployedToSpringAt;
+    
+    @JsonProperty("flinkDeploymentError")
+    private String flinkDeploymentError;
+    
+    @JsonProperty("springDeploymentError")
+    private String springDeploymentError;
 }

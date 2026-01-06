@@ -113,6 +113,14 @@ public class FilterStorageServiceTest {
         assertEquals(1, filter.getVersion());
         assertNotNull(filter.getCreatedAt());
         assertNotNull(filter.getUpdatedAt());
+        // Default targets should be ["flink", "spring"]
+        assertNotNull(filter.getTargets());
+        assertTrue(filter.getTargets().contains("flink"));
+        assertTrue(filter.getTargets().contains("spring"));
+        assertFalse(filter.getApprovedForFlink());
+        assertFalse(filter.getApprovedForSpring());
+        assertFalse(filter.getDeployedToFlink());
+        assertFalse(filter.getDeployedToSpring());
     }
     
     @Test
@@ -221,6 +229,265 @@ public class FilterStorageServiceTest {
         assertEquals("approved", approved.getStatus());
         assertEquals("test-user", approved.getApprovedBy());
         assertNotNull(approved.getApprovedAt());
+        // Legacy approve should approve for all targets
+        assertTrue(approved.getApprovedForFlink());
+        assertTrue(approved.getApprovedForSpring());
+    }
+    
+    @Test
+    void testCreateFilter_WithTargets() throws IOException {
+        CreateFilterRequest request = CreateFilterRequest.builder()
+            .name("Single Target Filter")
+            .consumerId("test-consumer")
+            .outputTopic("test-topic")
+            .targets(List.of("flink"))
+            .conditions(List.of(
+                FilterCondition.builder()
+                    .field("event_type")
+                    .operator("equals")
+                    .value("CarCreated")
+                    .build()
+            ))
+            .build();
+        
+        Filter filter = filterStorageService.create("v1", request);
+        
+        assertNotNull(filter.getTargets());
+        assertEquals(1, filter.getTargets().size());
+        assertTrue(filter.getTargets().contains("flink"));
+        assertFalse(filter.getTargets().contains("spring"));
+    }
+    
+    @Test
+    void testApproveForTarget_Flink() throws IOException {
+        CreateFilterRequest request = CreateFilterRequest.builder()
+            .name("Approve Target Test Filter")
+            .consumerId("test-consumer")
+            .outputTopic("test-topic")
+            .targets(List.of("flink", "spring"))
+            .conditions(List.of(
+                FilterCondition.builder()
+                    .field("event_type")
+                    .operator("equals")
+                    .value("CarCreated")
+                    .build()
+            ))
+            .build();
+        
+        Filter created = filterStorageService.create("v1", request);
+        Filter approved = filterStorageService.approveForTarget("v1", created.getId(), "flink", "test-user");
+        
+        assertTrue(approved.getApprovedForFlink());
+        assertFalse(approved.getApprovedForSpring());
+        assertNotNull(approved.getApprovedForFlinkAt());
+        assertEquals("test-user", approved.getApprovedForFlinkBy());
+        // Status should still be pending_approval since spring is not approved
+        assertEquals("pending_approval", approved.getStatus());
+    }
+    
+    @Test
+    void testApproveForTarget_Spring() throws IOException {
+        CreateFilterRequest request = CreateFilterRequest.builder()
+            .name("Approve Spring Test Filter")
+            .consumerId("test-consumer")
+            .outputTopic("test-topic")
+            .targets(List.of("flink", "spring"))
+            .conditions(List.of(
+                FilterCondition.builder()
+                    .field("event_type")
+                    .operator("equals")
+                    .value("CarCreated")
+                    .build()
+            ))
+            .build();
+        
+        Filter created = filterStorageService.create("v1", request);
+        Filter approved = filterStorageService.approveForTarget("v1", created.getId(), "spring", "test-user");
+        
+        assertFalse(approved.getApprovedForFlink());
+        assertTrue(approved.getApprovedForSpring());
+        assertNotNull(approved.getApprovedForSpringAt());
+        assertEquals("test-user", approved.getApprovedForSpringBy());
+    }
+    
+    @Test
+    void testApproveForTarget_Both() throws IOException {
+        CreateFilterRequest request = CreateFilterRequest.builder()
+            .name("Approve Both Test Filter")
+            .consumerId("test-consumer")
+            .outputTopic("test-topic")
+            .targets(List.of("flink", "spring"))
+            .conditions(List.of(
+                FilterCondition.builder()
+                    .field("event_type")
+                    .operator("equals")
+                    .value("CarCreated")
+                    .build()
+            ))
+            .build();
+        
+        Filter created = filterStorageService.create("v1", request);
+        Filter approvedFlink = filterStorageService.approveForTarget("v1", created.getId(), "flink", "test-user");
+        Filter approvedBoth = filterStorageService.approveForTarget("v1", created.getId(), "spring", "test-user");
+        
+        assertTrue(approvedBoth.getApprovedForFlink());
+        assertTrue(approvedBoth.getApprovedForSpring());
+        assertEquals("approved", approvedBoth.getStatus());
+    }
+    
+    @Test
+    void testApproveForTarget_InvalidTarget() throws IOException {
+        CreateFilterRequest request = CreateFilterRequest.builder()
+            .name("Invalid Target Test Filter")
+            .consumerId("test-consumer")
+            .outputTopic("test-topic")
+            .targets(List.of("flink"))
+            .conditions(List.of(
+                FilterCondition.builder()
+                    .field("event_type")
+                    .operator("equals")
+                    .value("CarCreated")
+                    .build()
+            ))
+            .build();
+        
+        Filter created = filterStorageService.create("v1", request);
+        
+        assertThrows(IllegalArgumentException.class, () -> {
+            filterStorageService.approveForTarget("v1", created.getId(), "invalid", "test-user");
+        });
+    }
+    
+    @Test
+    void testApproveForTarget_TargetNotInFilter() throws IOException {
+        CreateFilterRequest request = CreateFilterRequest.builder()
+            .name("Single Target Test Filter")
+            .consumerId("test-consumer")
+            .outputTopic("test-topic")
+            .targets(List.of("flink"))
+            .conditions(List.of(
+                FilterCondition.builder()
+                    .field("event_type")
+                    .operator("equals")
+                    .value("CarCreated")
+                    .build()
+            ))
+            .build();
+        
+        Filter created = filterStorageService.create("v1", request);
+        
+        assertThrows(IOException.class, () -> {
+            filterStorageService.approveForTarget("v1", created.getId(), "spring", "test-user");
+        });
+    }
+    
+    @Test
+    void testUpdateDeploymentForTarget_Flink() throws IOException {
+        CreateFilterRequest request = CreateFilterRequest.builder()
+            .name("Deploy Flink Test Filter")
+            .consumerId("test-consumer")
+            .outputTopic("test-topic")
+            .targets(List.of("flink", "spring"))
+            .conditions(List.of(
+                FilterCondition.builder()
+                    .field("event_type")
+                    .operator("equals")
+                    .value("CarCreated")
+                    .build()
+            ))
+            .build();
+        
+        Filter created = filterStorageService.create("v1", request);
+        filterStorageService.approveForTarget("v1", created.getId(), "flink", "test-user");
+        
+        List<String> statementIds = List.of("stmt-123", "stmt-456");
+        Filter deployed = filterStorageService.updateDeploymentForTarget("v1", created.getId(), "flink", "deployed", statementIds, null);
+        
+        assertTrue(deployed.getDeployedToFlink());
+        assertFalse(deployed.getDeployedToSpring());
+        assertNotNull(deployed.getDeployedToFlinkAt());
+        assertEquals(statementIds, deployed.getFlinkStatementIds());
+    }
+    
+    @Test
+    void testUpdateDeploymentForTarget_Spring() throws IOException {
+        CreateFilterRequest request = CreateFilterRequest.builder()
+            .name("Deploy Spring Test Filter")
+            .consumerId("test-consumer")
+            .outputTopic("test-topic")
+            .targets(List.of("flink", "spring"))
+            .conditions(List.of(
+                FilterCondition.builder()
+                    .field("event_type")
+                    .operator("equals")
+                    .value("CarCreated")
+                    .build()
+            ))
+            .build();
+        
+        Filter created = filterStorageService.create("v1", request);
+        Filter approved = filterStorageService.approveForTarget("v1", created.getId(), "spring", "test-user");
+        
+        Filter deployed = filterStorageService.updateDeploymentForTarget("v1", approved.getId(), "spring", "deployed", null, null);
+        
+        assertFalse(deployed.getDeployedToFlink());
+        assertTrue(deployed.getDeployedToSpring());
+        assertNotNull(deployed.getDeployedToSpringAt());
+    }
+    
+    @Test
+    void testUpdateDeploymentForTarget_Both() throws IOException {
+        CreateFilterRequest request = CreateFilterRequest.builder()
+            .name("Deploy Both Test Filter")
+            .consumerId("test-consumer")
+            .outputTopic("test-topic")
+            .targets(List.of("flink", "spring"))
+            .conditions(List.of(
+                FilterCondition.builder()
+                    .field("event_type")
+                    .operator("equals")
+                    .value("CarCreated")
+                    .build()
+            ))
+            .build();
+        
+        Filter created = filterStorageService.create("v1", request);
+        Filter approvedFlink = filterStorageService.approveForTarget("v1", created.getId(), "flink", "test-user");
+        Filter approvedBoth = filterStorageService.approveForTarget("v1", created.getId(), "spring", "test-user");
+        
+        List<String> statementIds = List.of("stmt-123");
+        Filter deployedFlink = filterStorageService.updateDeploymentForTarget("v1", approvedBoth.getId(), "flink", "deployed", statementIds, null);
+        Filter deployedBoth = filterStorageService.updateDeploymentForTarget("v1", deployedFlink.getId(), "spring", "deployed", null, null);
+        
+        assertTrue(deployedBoth.getDeployedToFlink());
+        assertTrue(deployedBoth.getDeployedToSpring());
+        assertEquals("deployed", deployedBoth.getStatus());
+    }
+    
+    @Test
+    void testUpdateDeploymentForTarget_Failed() throws IOException {
+        CreateFilterRequest request = CreateFilterRequest.builder()
+            .name("Failed Deployment Test Filter")
+            .consumerId("test-consumer")
+            .outputTopic("test-topic")
+            .targets(List.of("flink"))
+            .conditions(List.of(
+                FilterCondition.builder()
+                    .field("event_type")
+                    .operator("equals")
+                    .value("CarCreated")
+                    .build()
+            ))
+            .build();
+        
+        Filter created = filterStorageService.create("v1", request);
+        Filter approved = filterStorageService.approveForTarget("v1", created.getId(), "flink", "test-user");
+        
+        Filter failed = filterStorageService.updateDeploymentForTarget("v1", approved.getId(), "flink", "failed", null, "Deployment error");
+        
+        assertFalse(failed.getDeployedToFlink());
+        assertEquals("failed", failed.getStatus());
+        assertEquals("Deployment error", failed.getFlinkDeploymentError());
     }
     
     @Test

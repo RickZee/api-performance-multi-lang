@@ -22,6 +22,15 @@ public class FilterGeneratorService {
                 .validationErrors(List.of("filter is disabled"))
                 .build();
         }
+        
+        // Check if filter has flink target
+        if (filter.getTargets() == null || !filter.getTargets().contains("flink")) {
+            return GenerateSQLResponse.builder()
+                .filterId(filter.getId())
+                .valid(false)
+                .validationErrors(List.of("filter does not have 'flink' target"))
+                .build();
+        }
 
         List<String> statements = new ArrayList<>();
         List<String> errors = new ArrayList<>();

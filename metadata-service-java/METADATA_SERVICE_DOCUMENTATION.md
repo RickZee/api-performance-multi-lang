@@ -365,7 +365,7 @@ flowchart TD
 
 ### 8.1 Filter Structure
 
-A filter configuration defines conditions for filtering events in Flink SQL:
+A filter configuration defines conditions for filtering events and can target multiple deployment platforms (Flink, Spring Boot, or both):
 
 ```json
 {
@@ -374,6 +374,7 @@ A filter configuration defines conditions for filtering events in Flink SQL:
   "description": "Filters service events for dealer ID 001",
   "consumerId": "dealer-001-consumer",
   "outputTopic": "service-events-dealer-001",
+  "targets": ["flink", "spring"],
   "conditions": [
     {
       "field": "event_type",
@@ -390,10 +391,21 @@ A filter configuration defines conditions for filtering events in Flink SQL:
   ],
   "conditionLogic": "AND",
   "enabled": true,
-  "status": "approved",
+  "status": "pending_approval",
+  "approvedForFlink": false,
+  "approvedForSpring": false,
+  "deployedToFlink": false,
+  "deployedToSpring": false,
   "version": 1
 }
 ```
+
+**Key Fields:**
+- `targets` - Array of deployment targets: `["flink"]`, `["spring"]`, or `["flink", "spring"]` (defaults to both for backward compatibility)
+- `approvedForFlink` - Approval status for Flink deployment
+- `approvedForSpring` - Approval status for Spring Boot deployment
+- `deployedToFlink` - Deployment status for Flink
+- `deployedToSpring` - Deployment status for Spring Boot
 
 ### 8.2 Supported Operators
 
@@ -454,20 +466,30 @@ WHERE `__op` = 'c'
 
 ### 8.4 Filter Lifecycle
 
+Filters support per-target approval and deployment workflows:
+
 ```mermaid
 stateDiagram-v2
-    [*] --> pending_approval: Create
-    pending_approval --> approved: Approve
-    pending_approval --> [*]: Delete
-    approved --> deploying: Deploy
-    deploying --> deployed: Success
-    deploying --> failed: Error
-    deployed --> deploying: Redeploy
-    failed --> deploying: Retry
-    approved --> [*]: Delete
-    deployed --> [*]: Delete
-    failed --> [*]: Delete
+    [*] --> pending_approval: Create filter with targets
+    pending_approval --> approved_flink: Approve for Flink
+    pending_approval --> approved_spring: Approve for Spring
+    approved_flink --> approved_both: Approve for Spring
+    approved_spring --> approved_both: Approve for Flink
+    approved_flink --> deployed_flink: Deploy to Flink
+    approved_spring --> deployed_spring: Deploy to Spring
+    approved_both --> deployed_both: Deploy to both
+    deployed_flink --> deployed_both: Deploy to Spring
+    deployed_spring --> deployed_both: Deploy to Flink
+    deployed_both --> [*]: Delete
+    deployed_flink --> [*]: Delete
+    deployed_spring --> [*]: Delete
 ```
+
+**Lifecycle States:**
+- `pending_approval` - Initial state after creation
+- `approved` - Approved for all targets (or single target if filter has only one)
+- `deployed` - Deployed to all targets (or single target if filter has only one)
+- `failed` - Deployment failed for one or more targets
 
 ---
 
@@ -552,11 +574,15 @@ GET /api/v1/schemas/v1?type=car
 | GET | `/api/v1/filters` | List all filters (supports query parameters) |
 | GET | `/api/v1/filters/:id` | Get filter by ID (includes status) |
 | PUT | `/api/v1/filters/:id` | Update filter |
-| PATCH | `/api/v1/filters/:id` | Update filter status (e.g., approve) |
+| PATCH | `/api/v1/filters/:id` | Update filter status (deprecated - use per-target approval) |
 | DELETE | `/api/v1/filters/:id` | Delete filter |
-| GET | `/api/v1/filters/:id/sql` | Get generated Flink SQL for filter |
+| GET | `/api/v1/filters/:id/sql` | Get generated Flink SQL for filter (only for Flink targets) |
 | POST | `/api/v1/filters/:id/validations` | Create SQL validation |
-| POST | `/api/v1/filters/:id/deployments` | Create deployment to Confluent Cloud |
+| POST | `/api/v1/filters/:id/deployments` | Create deployment (deprecated - use per-target deployment) |
+| PATCH | `/api/v1/filters/:id/approvals/{target}` | Approve filter for specific target (flink or spring) |
+| GET | `/api/v1/filters/:id/approvals` | Get approval status for all targets |
+| POST | `/api/v1/filters/:id/deployments/{target}` | Deploy filter to specific target (flink or spring) |
+| GET | `/api/v1/filters/:id/deployments` | Get deployment status for all targets |
 
 **Query Parameters for `GET /api/v1/filters`:**
 - `version` (optional, default: `v1`) - Schema version to retrieve filters for
@@ -625,11 +651,55 @@ Creates a validation check for SQL syntax. Returns 201 Created on success.
 }
 ```
 
-#### 9.3.4 Filter Deployment
+#### 9.3.4 Per-Target Approval
 
-**POST `/api/v1/filters/:id/deployments`**
+**PATCH `/api/v1/filters/:id/approvals/{target}`**
 
-Creates a deployment to Confluent Cloud. Returns 201 Created on success.
+Approves a filter for a specific deployment target (`flink` or `spring`). Returns 200 OK on success.
+
+**Path Parameters:**
+- `target` - Deployment target: `flink` or `spring`
+
+**Request Example:**
+```json
+{
+  "approvedBy": "reviewer@example.com",
+  "notes": "Approved for Flink deployment"
+}
+```
+
+**Response:** Returns the updated filter with approval status for the target.
+
+#### 9.3.5 Get Approval Status
+
+**GET `/api/v1/filters/:id/approvals`**
+
+Retrieves approval status for all targets.
+
+**Response Example:**
+```json
+{
+  "flink": {
+    "approved": true,
+    "approvedAt": "2025-12-30T10:00:00Z",
+    "approvedBy": "reviewer@example.com"
+  },
+  "spring": {
+    "approved": false,
+    "approvedAt": null,
+    "approvedBy": null
+  }
+}
+```
+
+#### 9.3.6 Per-Target Deployment
+
+**POST `/api/v1/filters/:id/deployments/{target}`**
+
+Deploys a filter to a specific target (`flink` or `spring`). Returns 201 Created on success.
+
+**Path Parameters:**
+- `target` - Deployment target: `flink` or `spring`
 
 **Request Example:**
 ```json
@@ -638,15 +708,56 @@ Creates a deployment to Confluent Cloud. Returns 201 Created on success.
 }
 ```
 
-**Response Example:**
+**Response Example (Flink):**
 ```json
 {
   "filterId": "service-events-for-dealer-001",
   "status": "deployed",
   "flinkStatementIds": ["stmt-123", "stmt-456"],
-  "message": "Filter deployed successfully"
+  "message": "Filter deployed successfully to flink"
 }
 ```
+
+**Response Example (Spring):**
+```json
+{
+  "filterId": "service-events-for-dealer-001",
+  "status": "deployed",
+  "message": "Filter deployed successfully to spring"
+}
+```
+
+#### 9.3.7 Get Deployment Status
+
+**GET `/api/v1/filters/:id/deployments`**
+
+Retrieves deployment status for all targets.
+
+**Response Example:**
+```json
+{
+  "flink": {
+    "deployed": true,
+    "deployedAt": "2025-12-30T10:00:00Z",
+    "statementIds": ["stmt-123", "stmt-456"],
+    "error": null
+  },
+  "spring": {
+    "deployed": true,
+    "deployedAt": "2025-12-30T10:05:00Z",
+    "statementIds": null,
+    "error": null
+  }
+}
+```
+
+#### 9.3.8 Legacy Filter Deployment (Deprecated)
+
+**POST `/api/v1/filters/:id/deployments`**
+
+**Deprecated:** Use `POST /api/v1/filters/:id/deployments/{target}` instead.
+
+Creates a deployment to Confluent Cloud. Returns 201 Created on success.
 
 **Response Example:**
 ```json
@@ -675,13 +786,14 @@ Creates a deployment to Confluent Cloud. Returns 201 Created on success.
 - CDC Streaming Service dynamic filter loading
 - Filter monitoring and reporting
 - Integration with external systems
+- Multi-platform deployment (Flink and Spring Boot)
 
 **Filter Lifecycle States:**
 1. `pending_approval` - Initial state after creation
-2. `approved` - Approved by reviewer, ready for deployment
-3. `deploying` - Deployment in progress
-4. `deployed` - Successfully deployed to Confluent Cloud
-5. `failed` - Deployment failed
+2. `approved` - Approved for all targets (or single target if filter has only one)
+3. `deploying` - Deployment in progress (per-target)
+4. `deployed` - Successfully deployed to all targets (or single target if filter has only one)
+5. `failed` - Deployment failed for one or more targets
 
 ### 9.4 Health Endpoint
 

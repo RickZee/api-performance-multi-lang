@@ -19,6 +19,8 @@ import java.nio.file.Paths;
 import java.nio.file.StandardCopyOption;
 import java.util.List;
 
+import static org.junit.jupiter.api.Assertions.*;
+
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT, properties = {
     "spring.main.allow-bean-definition-overriding=true",
     "spring.main.lazy-initialization=true"
@@ -64,6 +66,10 @@ public class FilterControllerTest {
         registry.add("git.branch", () -> "main");
         registry.add("git.local-cache-dir", () -> testCacheDir);
         registry.add("test.mode", () -> "true");
+        // Disable Spring YAML writing in tests
+        registry.add("spring-boot.filters-yaml-path", () -> "");
+        // Disable Jenkins in tests
+        registry.add("jenkins.enabled", () -> "false");
     }
     
     @Sql(scripts = "/schema-test.sql", executionPhase = Sql.ExecutionPhase.BEFORE_TEST_METHOD)
@@ -118,6 +124,262 @@ public class FilterControllerTest {
             .value(filter -> {
                 Assertions.assertNotNull(filter.getId());
                 filterId = filter.getId();
+                // Default targets should be ["flink", "spring"]
+                assertNotNull(filter.getTargets());
+                assertTrue(filter.getTargets().contains("flink"));
+                assertTrue(filter.getTargets().contains("spring"));
+            });
+    }
+    
+    @Test
+    void testCreateFilter_WithTargets() {
+        CreateFilterRequest request = CreateFilterRequest.builder()
+            .name("Single Target Filter")
+            .description("Test Description")
+            .consumerId("test-consumer")
+            .outputTopic("test-topic")
+            .targets(List.of("flink"))
+            .conditions(List.of(
+                FilterCondition.builder()
+                    .field("event_type")
+                    .operator("equals")
+                    .value("CarCreated")
+                    .valueType("string")
+                    .build()
+            ))
+            .enabled(true)
+            .conditionLogic("AND")
+            .build();
+        
+        webTestClient.post()
+            .uri("/api/v1/filters?version=v1")
+            .bodyValue(request)
+            .exchange()
+            .expectStatus().isCreated()
+            .expectBody(Filter.class)
+            .value(filter -> {
+                assertNotNull(filter.getId());
+                assertNotNull(filter.getTargets());
+                assertEquals(1, filter.getTargets().size());
+                assertTrue(filter.getTargets().contains("flink"));
+            });
+    }
+    
+    @Test
+    void testApproveFilterForTarget_Flink() {
+        // First create a filter
+        CreateFilterRequest createRequest = CreateFilterRequest.builder()
+            .name("Approve Target Test Filter")
+            .consumerId("test-consumer")
+            .outputTopic("test-topic")
+            .targets(List.of("flink", "spring"))
+            .conditions(List.of(
+                FilterCondition.builder()
+                    .field("event_type")
+                    .operator("equals")
+                    .value("CarCreated")
+                    .valueType("string")
+                    .build()
+            ))
+            .build();
+        
+        Filter created = webTestClient.post()
+            .uri("/api/v1/filters?version=v1")
+            .bodyValue(createRequest)
+            .exchange()
+            .expectStatus().isCreated()
+            .expectBody(Filter.class)
+            .returnResult()
+            .getResponseBody();
+        
+        // Then approve for Flink
+        ApproveFilterRequest approveRequest = ApproveFilterRequest.builder()
+            .approvedBy("test-user")
+            .notes("Approved for Flink")
+            .build();
+        
+        webTestClient.patch()
+            .uri("/api/v1/filters/{id}/approvals/flink?version=v1", created.getId())
+            .bodyValue(approveRequest)
+            .exchange()
+            .expectStatus().isOk()
+            .expectBody(Filter.class)
+            .value(filter -> {
+                assertTrue(filter.getApprovedForFlink());
+                assertFalse(filter.getApprovedForSpring());
+                assertEquals("test-user", filter.getApprovedForFlinkBy());
+            });
+    }
+    
+    @Test
+    void testApproveFilterForTarget_Spring() {
+        // First create a filter
+        CreateFilterRequest createRequest = CreateFilterRequest.builder()
+            .name("Approve Spring Test Filter")
+            .consumerId("test-consumer")
+            .outputTopic("test-topic")
+            .targets(List.of("flink", "spring"))
+            .conditions(List.of(
+                FilterCondition.builder()
+                    .field("event_type")
+                    .operator("equals")
+                    .value("CarCreated")
+                    .valueType("string")
+                    .build()
+            ))
+            .build();
+        
+        Filter created = webTestClient.post()
+            .uri("/api/v1/filters?version=v1")
+            .bodyValue(createRequest)
+            .exchange()
+            .expectStatus().isCreated()
+            .expectBody(Filter.class)
+            .returnResult()
+            .getResponseBody();
+        
+        // Then approve for Spring
+        ApproveFilterRequest approveRequest = ApproveFilterRequest.builder()
+            .approvedBy("test-user")
+            .build();
+        
+        webTestClient.patch()
+            .uri("/api/v1/filters/{id}/approvals/spring?version=v1", created.getId())
+            .bodyValue(approveRequest)
+            .exchange()
+            .expectStatus().isOk()
+            .expectBody(Filter.class)
+            .value(filter -> {
+                assertFalse(filter.getApprovedForFlink());
+                assertTrue(filter.getApprovedForSpring());
+            });
+    }
+    
+    @Test
+    void testGetFilterApprovals() {
+        // First create and approve a filter
+        CreateFilterRequest createRequest = CreateFilterRequest.builder()
+            .name("Get Approvals Test Filter")
+            .consumerId("test-consumer")
+            .outputTopic("test-topic")
+            .targets(List.of("flink", "spring"))
+            .conditions(List.of(
+                FilterCondition.builder()
+                    .field("event_type")
+                    .operator("equals")
+                    .value("CarCreated")
+                    .valueType("string")
+                    .build()
+            ))
+            .build();
+        
+        Filter created = webTestClient.post()
+            .uri("/api/v1/filters?version=v1")
+            .bodyValue(createRequest)
+            .exchange()
+            .expectStatus().isCreated()
+            .expectBody(Filter.class)
+            .returnResult()
+            .getResponseBody();
+        
+        // Approve for Flink
+        ApproveFilterRequest approveRequest = ApproveFilterRequest.builder()
+            .approvedBy("test-user")
+            .build();
+        
+        webTestClient.patch()
+            .uri("/api/v1/filters/{id}/approvals/flink?version=v1", created.getId())
+            .bodyValue(approveRequest)
+            .exchange()
+            .expectStatus().isOk();
+        
+        // Get approval status
+        webTestClient.get()
+            .uri("/api/v1/filters/{id}/approvals?version=v1", created.getId())
+            .exchange()
+            .expectStatus().isOk()
+            .expectBody(FilterApprovalStatus.class)
+            .value(status -> {
+                assertTrue(status.getFlink().getApproved());
+                assertFalse(status.getSpring().getApproved());
+                assertEquals("test-user", status.getFlink().getApprovedBy());
+            });
+    }
+    
+    @Test
+    void testApproveFilterForTarget_InvalidTarget() {
+        CreateFilterRequest createRequest = CreateFilterRequest.builder()
+            .name("Invalid Target Test Filter")
+            .consumerId("test-consumer")
+            .outputTopic("test-topic")
+            .targets(List.of("flink"))
+            .conditions(List.of(
+                FilterCondition.builder()
+                    .field("event_type")
+                    .operator("equals")
+                    .value("CarCreated")
+                    .valueType("string")
+                    .build()
+            ))
+            .build();
+        
+        Filter created = webTestClient.post()
+            .uri("/api/v1/filters?version=v1")
+            .bodyValue(createRequest)
+            .exchange()
+            .expectStatus().isCreated()
+            .expectBody(Filter.class)
+            .returnResult()
+            .getResponseBody();
+        
+        ApproveFilterRequest approveRequest = ApproveFilterRequest.builder()
+            .approvedBy("test-user")
+            .build();
+        
+        // Try to approve for invalid target
+        webTestClient.patch()
+            .uri("/api/v1/filters/{id}/approvals/invalid?version=v1", created.getId())
+            .bodyValue(approveRequest)
+            .exchange()
+            .expectStatus().isBadRequest();
+    }
+    
+    @Test
+    void testGetFilterDeployments() {
+        // Create a filter
+        CreateFilterRequest createRequest = CreateFilterRequest.builder()
+            .name("Get Deployments Test Filter")
+            .consumerId("test-consumer")
+            .outputTopic("test-topic")
+            .targets(List.of("flink", "spring"))
+            .conditions(List.of(
+                FilterCondition.builder()
+                    .field("event_type")
+                    .operator("equals")
+                    .value("CarCreated")
+                    .valueType("string")
+                    .build()
+            ))
+            .build();
+        
+        Filter created = webTestClient.post()
+            .uri("/api/v1/filters?version=v1")
+            .bodyValue(createRequest)
+            .exchange()
+            .expectStatus().isCreated()
+            .expectBody(Filter.class)
+            .returnResult()
+            .getResponseBody();
+        
+        // Get deployment status
+        webTestClient.get()
+            .uri("/api/v1/filters/{id}/deployments?version=v1", created.getId())
+            .exchange()
+            .expectStatus().isOk()
+            .expectBody(FilterDeploymentStatus.class)
+            .value(status -> {
+                assertFalse(status.getFlink().getDeployed());
+                assertFalse(status.getSpring().getDeployed());
             });
     }
     

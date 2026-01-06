@@ -38,8 +38,10 @@ public class FilterController {
         try {
             Filter filter = filterStorageService.create(version, request);
             
-            // Update Spring Boot YAML file
-            updateSpringYaml(version);
+            // Update Spring Boot YAML file only if filter targets include spring
+            if (filter.getTargets() != null && filter.getTargets().contains("spring")) {
+                updateSpringYaml(version);
+            }
             
             // Trigger CI/CD for change management
             jenkinsTriggerService.triggerSimpleBuild("create", filter.getId(), version);
@@ -111,8 +113,10 @@ public class FilterController {
         try {
             Filter filter = filterStorageService.update(version, id, request);
             
-            // Update Spring Boot YAML file
-            updateSpringYaml(version);
+            // Update Spring Boot YAML file only if filter targets include spring
+            if (filter.getTargets() != null && filter.getTargets().contains("spring")) {
+                updateSpringYaml(version);
+            }
             
             // Trigger CI/CD for change management
             jenkinsTriggerService.triggerSimpleBuild("update", id, version);
@@ -131,10 +135,14 @@ public class FilterController {
             @RequestParam(required = false, defaultValue = "v1") String version
     ) {
         try {
+            // Get filter before deleting to check targets
+            Filter filter = filterStorageService.get(version, id);
             filterStorageService.delete(version, id);
             
-            // Update Spring Boot YAML file
-            updateSpringYaml(version);
+            // Update Spring Boot YAML file only if filter targeted spring
+            if (filter.getTargets() != null && filter.getTargets().contains("spring")) {
+                updateSpringYaml(version);
+            }
             
             // Trigger CI/CD for change management
             jenkinsTriggerService.triggerSimpleBuild("delete", id, version);
@@ -333,6 +341,252 @@ public class FilterController {
     }
 
 
+    @PatchMapping("/{id}/approvals/{target}")
+    public ResponseEntity<Filter> approveFilterForTarget(
+            @PathVariable String id,
+            @PathVariable String target,
+            @Valid @RequestBody ApproveFilterRequest request,
+            @RequestParam(required = false, defaultValue = "v1") String version
+    ) {
+        try {
+            // Validate target
+            if (!"flink".equals(target) && !"spring".equals(target)) {
+                return ResponseEntity.status(HttpStatus.BAD_REQUEST).build();
+            }
+            
+            String approvedBy = request.getApprovedBy() != null ? request.getApprovedBy() : "system";
+            Filter filter = filterStorageService.approveForTarget(version, id, target, approvedBy);
+            
+            // Trigger CI/CD for change management
+            java.util.Map<String, String> params = new java.util.HashMap<>();
+            params.put("APPROVED_BY", approvedBy);
+            params.put("TARGET", target);
+            jenkinsTriggerService.triggerBuild("approve", id, version, params);
+            
+            return ResponseEntity.ok(filter);
+        } catch (FilterNotFoundException e) {
+            return ResponseEntity.notFound().build();
+        } catch (IllegalArgumentException e) {
+            return ResponseEntity.status(HttpStatus.BAD_REQUEST).build();
+        } catch (IOException e) {
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).build();
+        }
+    }
+    
+    @GetMapping("/{id}/approvals")
+    public ResponseEntity<FilterApprovalStatus> getFilterApprovals(
+            @PathVariable String id,
+            @RequestParam(required = false, defaultValue = "v1") String version
+    ) {
+        try {
+            Filter filter = filterStorageService.get(version, id);
+            
+            FilterApprovalStatus.TargetApprovalStatus flinkStatus = FilterApprovalStatus.TargetApprovalStatus.builder()
+                    .approved(filter.getApprovedForFlink())
+                    .approvedAt(filter.getApprovedForFlinkAt())
+                    .approvedBy(filter.getApprovedForFlinkBy())
+                    .build();
+            
+            FilterApprovalStatus.TargetApprovalStatus springStatus = FilterApprovalStatus.TargetApprovalStatus.builder()
+                    .approved(filter.getApprovedForSpring())
+                    .approvedAt(filter.getApprovedForSpringAt())
+                    .approvedBy(filter.getApprovedForSpringBy())
+                    .build();
+            
+            FilterApprovalStatus status = FilterApprovalStatus.builder()
+                    .flink(flinkStatus)
+                    .spring(springStatus)
+                    .build();
+            
+            return ResponseEntity.ok(status);
+        } catch (FilterNotFoundException e) {
+            return ResponseEntity.notFound().build();
+        } catch (IOException e) {
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).build();
+        }
+    }
+    
+    @PostMapping("/{id}/deployments/{target}")
+    public ResponseEntity<DeployFilterResponse> createDeploymentForTarget(
+            @PathVariable String id,
+            @PathVariable String target,
+            @RequestBody(required = false) DeployFilterRequest request,
+            @RequestParam(required = false, defaultValue = "v1") String version
+    ) {
+        try {
+            // Validate target
+            if (!"flink".equals(target) && !"spring".equals(target)) {
+                return ResponseEntity.status(HttpStatus.BAD_REQUEST)
+                        .body(DeployFilterResponse.builder()
+                                .filterId(id)
+                                .status("failed")
+                                .error("Invalid target: " + target + ". Must be 'flink' or 'spring'")
+                                .build());
+            }
+            
+            Filter filter = filterStorageService.get(version, id);
+            
+            // Check if filter has this target
+            if (filter.getTargets() == null || !filter.getTargets().contains(target)) {
+                return ResponseEntity.status(HttpStatus.BAD_REQUEST)
+                        .body(DeployFilterResponse.builder()
+                                .filterId(id)
+                                .status("failed")
+                                .error("Filter does not have target: " + target)
+                                .build());
+            }
+            
+            // Check if filter is approved for this target (unless force is true)
+            if (request == null || !request.isForce()) {
+                boolean isApproved = "flink".equals(target) 
+                        ? Boolean.TRUE.equals(filter.getApprovedForFlink())
+                        : Boolean.TRUE.equals(filter.getApprovedForSpring());
+                
+                if (!isApproved) {
+                    return ResponseEntity.status(HttpStatus.BAD_REQUEST)
+                            .body(DeployFilterResponse.builder()
+                                    .filterId(id)
+                                    .status("failed")
+                                    .error("Filter must be approved for " + target + " before deployment")
+                                    .build());
+                }
+            }
+            
+            if ("flink".equals(target)) {
+                // Deploy to Flink
+                if (!filterDeployerService.validateConnection()) {
+                    return ResponseEntity.status(HttpStatus.SERVICE_UNAVAILABLE)
+                            .body(DeployFilterResponse.builder()
+                                    .filterId(id)
+                                    .status("failed")
+                                    .error("Confluent Cloud credentials not configured")
+                                    .build());
+                }
+                
+                // Generate SQL
+                GenerateSQLResponse sqlResponse = filterGeneratorService.generateSQL(filter);
+                if (!sqlResponse.isValid()) {
+                    return ResponseEntity.status(HttpStatus.BAD_REQUEST)
+                            .body(DeployFilterResponse.builder()
+                                    .filterId(id)
+                                    .status("failed")
+                                    .error("Failed to generate valid SQL: " + String.join(", ", sqlResponse.getValidationErrors()))
+                                    .build());
+                }
+                
+                // Extract statement names
+                List<String> statementNames = filterDeployerService.extractStatementNames(sqlResponse.getSql());
+                
+                // Deploy statements
+                try {
+                    List<String> statementIds = filterDeployerService.deployStatements(
+                            sqlResponse.getStatements(),
+                            statementNames
+                    );
+                    
+                    // Update filter with deployment info
+                    filterStorageService.updateDeploymentForTarget(version, id, target, "deployed", statementIds, null);
+                    
+                    // Trigger CI/CD for change management
+                    java.util.Map<String, String> params = new java.util.HashMap<>();
+                    params.put("DEPLOYMENT_STATUS", "success");
+                    params.put("TARGET", target);
+                    params.put("FLINK_STATEMENT_IDS", String.join(",", statementIds));
+                    jenkinsTriggerService.triggerBuild("deploy", id, version, params);
+                    
+                    return ResponseEntity.status(HttpStatus.CREATED).body(DeployFilterResponse.builder()
+                            .filterId(id)
+                            .status("deployed")
+                            .flinkStatementIds(statementIds)
+                            .message("Filter deployed successfully to " + target)
+                            .build());
+                } catch (IOException e) {
+                    filterStorageService.updateDeploymentForTarget(version, id, target, "failed", null, e.getMessage());
+                    return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
+                            .body(DeployFilterResponse.builder()
+                                    .filterId(id)
+                                    .status("failed")
+                                    .error(e.getMessage())
+                                    .build());
+                }
+            } else {
+                // Deploy to Spring Boot (update filters.yml)
+                try {
+                    // Update Spring Boot YAML file
+                    updateSpringYaml(version);
+                    
+                    // Update filter with deployment info
+                    filterStorageService.updateDeploymentForTarget(version, id, target, "deployed", null, null);
+                    
+                    // Trigger CI/CD for change management
+                    java.util.Map<String, String> params = new java.util.HashMap<>();
+                    params.put("DEPLOYMENT_STATUS", "success");
+                    params.put("TARGET", target);
+                    jenkinsTriggerService.triggerBuild("deploy", id, version, params);
+                    
+                    return ResponseEntity.status(HttpStatus.CREATED).body(DeployFilterResponse.builder()
+                            .filterId(id)
+                            .status("deployed")
+                            .message("Filter deployed successfully to " + target)
+                            .build());
+                } catch (Exception e) {
+                    filterStorageService.updateDeploymentForTarget(version, id, target, "failed", null, e.getMessage());
+                    return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
+                            .body(DeployFilterResponse.builder()
+                                    .filterId(id)
+                                    .status("failed")
+                                    .error(e.getMessage())
+                                    .build());
+                }
+            }
+        } catch (FilterNotFoundException e) {
+            return ResponseEntity.notFound().build();
+        } catch (IllegalArgumentException e) {
+            return ResponseEntity.status(HttpStatus.BAD_REQUEST)
+                    .body(DeployFilterResponse.builder()
+                            .filterId(id)
+                            .status("failed")
+                            .error(e.getMessage())
+                            .build());
+        } catch (IOException e) {
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).build();
+        }
+    }
+    
+    @GetMapping("/{id}/deployments")
+    public ResponseEntity<FilterDeploymentStatus> getFilterDeployments(
+            @PathVariable String id,
+            @RequestParam(required = false, defaultValue = "v1") String version
+    ) {
+        try {
+            Filter filter = filterStorageService.get(version, id);
+            
+            FilterDeploymentStatus.TargetDeploymentStatus flinkStatus = FilterDeploymentStatus.TargetDeploymentStatus.builder()
+                    .deployed(filter.getDeployedToFlink())
+                    .deployedAt(filter.getDeployedToFlinkAt())
+                    .statementIds(filter.getFlinkStatementIds())
+                    .error(filter.getFlinkDeploymentError())
+                    .build();
+            
+            FilterDeploymentStatus.TargetDeploymentStatus springStatus = FilterDeploymentStatus.TargetDeploymentStatus.builder()
+                    .deployed(filter.getDeployedToSpring())
+                    .deployedAt(filter.getDeployedToSpringAt())
+                    .error(filter.getSpringDeploymentError())
+                    .build();
+            
+            FilterDeploymentStatus status = FilterDeploymentStatus.builder()
+                    .flink(flinkStatus)
+                    .spring(springStatus)
+                    .build();
+            
+            return ResponseEntity.ok(status);
+        } catch (FilterNotFoundException e) {
+            return ResponseEntity.notFound().build();
+        } catch (IOException e) {
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).build();
+        }
+    }
+
     /**
      * Update Spring Boot filters.yml file with current filters.
      * This method is called after create, update, delete, and deploy operations.
@@ -347,8 +601,13 @@ public class FilterController {
             // Get all filters for the version
             List<Filter> filters = filterStorageService.list(version);
             
+            // Filter to only include Spring Boot targets
+            List<Filter> springFilters = filters.stream()
+                    .filter(f -> f.getTargets() != null && f.getTargets().contains("spring"))
+                    .toList();
+            
             // Generate YAML
-            String yaml = springYamlGeneratorService.generateYaml(filters);
+            String yaml = springYamlGeneratorService.generateYaml(springFilters);
             
             // Write to file
             springYamlWriterService.writeFiltersYaml(yaml);

@@ -1,7 +1,6 @@
 package com.example.metadata.repository.mapper;
 
 import com.example.metadata.model.Filter;
-import com.example.metadata.model.FilterCondition;
 import com.example.metadata.repository.entity.FilterEntity;
 import org.springframework.stereotype.Component;
 
@@ -36,6 +35,19 @@ public class FilterMapper {
                 .deployedAt(entity.getDeployedAt())
                 .deploymentError(entity.getDeploymentError())
                 .flinkStatementIds(entity.getFlinkStatementIds())
+                .targets(entity.getTargets())
+                .approvedForFlink(entity.getApprovedForFlink())
+                .approvedForSpring(entity.getApprovedForSpring())
+                .approvedForFlinkAt(entity.getApprovedForFlinkAt())
+                .approvedForFlinkBy(entity.getApprovedForFlinkBy())
+                .approvedForSpringAt(entity.getApprovedForSpringAt())
+                .approvedForSpringBy(entity.getApprovedForSpringBy())
+                .deployedToFlink(entity.getDeployedToFlink())
+                .deployedToFlinkAt(entity.getDeployedToFlinkAt())
+                .deployedToSpring(entity.getDeployedToSpring())
+                .deployedToSpringAt(entity.getDeployedToSpringAt())
+                .flinkDeploymentError(entity.getFlinkDeploymentError())
+                .springDeploymentError(entity.getSpringDeploymentError())
                 .build();
     }
     
@@ -66,6 +78,19 @@ public class FilterMapper {
                 .deployedAt(model.getDeployedAt())
                 .deploymentError(model.getDeploymentError())
                 .flinkStatementIds(model.getFlinkStatementIds())
+                .targets(model.getTargets())
+                .approvedForFlink(model.getApprovedForFlink())
+                .approvedForSpring(model.getApprovedForSpring())
+                .approvedForFlinkAt(model.getApprovedForFlinkAt())
+                .approvedForFlinkBy(model.getApprovedForFlinkBy())
+                .approvedForSpringAt(model.getApprovedForSpringAt())
+                .approvedForSpringBy(model.getApprovedForSpringBy())
+                .deployedToFlink(model.getDeployedToFlink())
+                .deployedToFlinkAt(model.getDeployedToFlinkAt())
+                .deployedToSpring(model.getDeployedToSpring())
+                .deployedToSpringAt(model.getDeployedToSpringAt())
+                .flinkDeploymentError(model.getFlinkDeploymentError())
+                .springDeploymentError(model.getSpringDeploymentError())
                 .build();
     }
     

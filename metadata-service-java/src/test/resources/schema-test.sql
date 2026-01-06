@@ -16,6 +16,19 @@ CREATE TABLE IF NOT EXISTS filters (
     approved_by VARCHAR(255),
     deployed_at TIMESTAMP,
     deployment_error TEXT,
-    flink_statement_ids TEXT
+    flink_statement_ids TEXT,
+    targets VARCHAR(10000),
+    approved_for_flink BOOLEAN DEFAULT false,
+    approved_for_spring BOOLEAN DEFAULT false,
+    approved_for_flink_at TIMESTAMP,
+    approved_for_flink_by VARCHAR(255),
+    approved_for_spring_at TIMESTAMP,
+    approved_for_spring_by VARCHAR(255),
+    deployed_to_flink BOOLEAN DEFAULT false,
+    deployed_to_flink_at TIMESTAMP,
+    deployed_to_spring BOOLEAN DEFAULT false,
+    deployed_to_spring_at TIMESTAMP,
+    flink_deployment_error TEXT,
+    spring_deployment_error TEXT
 );
 
