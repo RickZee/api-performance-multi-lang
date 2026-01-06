@@ -1539,7 +1539,41 @@ sequenceDiagram
 
 ## 17. Testing and Validation
 
-### 17.1 Unit Testing
+For comprehensive testing documentation including detailed test catalog, coverage reports, and implementation details, see the [Testing Guide](docs/TESTING.md).
+
+### 17.1 Running Tests
+
+#### All Tests (Unit + Integration)
+```bash
+./gradlew test
+```
+
+#### Unit Tests Only
+```bash
+./gradlew test --tests "*ServiceTest"
+```
+
+#### Integration Tests Only
+```bash
+./gradlew test --tests "*IntegrationTest"
+# or
+./run-tests.sh --integration
+```
+
+#### Workflow Tests Only
+```bash
+./run-tests.sh --workflow
+# or
+./scripts/run-integration-tests-local.sh --workflow-only
+```
+
+#### Generate Coverage Report
+```bash
+./gradlew test jacocoTestReport
+open build/reports/jacoco/test/html/index.html
+```
+
+### 17.2 Unit Testing
 
 The Java implementation includes comprehensive unit tests:
 - `FilterControllerTest.java` - Controller unit tests
@@ -1549,29 +1583,81 @@ The Java implementation includes comprehensive unit tests:
 - `SpringYamlWriterServiceTest.java` - Spring YAML file writing tests
 - `JenkinsTriggerServiceTest.java` - Jenkins CI/CD triggering tests
 
-### 17.2 Integration Testing
+### 17.3 Integration Testing
 
-Integration tests verify end-to-end functionality:
-- `FilterE2EIntegrationTest.java` - End-to-end filter lifecycle tests
-- `SpringYamlUpdateIntegrationTest.java` - Spring YAML update integration tests
-- `JenkinsTriggerIntegrationTest.java` - Jenkins triggering integration tests
-- `ValidationIntegrationTest.java` - Schema validation integration tests
-- `ApiErrorHandlingIntegrationTest.java` - API error handling tests
-- `MultiVersionValidationIntegrationTest.java` - Multi-version schema tests
-- `GitSyncIntegrationTest.java` - Git synchronization tests
+Integration tests verify end-to-end functionality across 9 test classes:
 
-### 17.3 Test Coverage
+- `FilterE2EIntegrationTest.java` - End-to-end filter lifecycle tests (8 tests)
+- `SpringYamlUpdateIntegrationTest.java` - Spring YAML update integration tests (5 tests)
+- `JenkinsTriggerIntegrationTest.java` - Jenkins triggering integration tests (9 tests)
+- `ValidationIntegrationTest.java` - Schema validation integration tests (7 tests)
+- `ApiErrorHandlingIntegrationTest.java` - API error handling tests (18 tests)
+- `MultiVersionValidationIntegrationTest.java` - Multi-version schema tests (4 tests)
+- `GitSyncIntegrationTest.java` - Git synchronization tests (4 tests)
+- `GitSyncEdgeCasesIntegrationTest.java` - Git sync edge cases (4 tests)
+- `WorkflowIntegrationTest.java` - Comprehensive workflow tests (15 tests)
 
-- Schema validation: 95%+ coverage
-- Filter generation: 90%+ coverage
-- Git sync: 85%+ coverage
-- Compatibility checking: 90%+ coverage
-- Spring YAML generation: 90%+ coverage
-- Jenkins triggering: 85%+ coverage
+**Total Integration Tests**: 75 tests
 
-**Total Integration Tests**: 60 tests (see `TEST_COVERAGE.md` for details)
+For detailed test catalog and descriptions, see the [Testing Guide - Test Catalog](docs/TESTING.md#test-catalog).
 
-### 17.4 Manual Testing
+### 17.4 Test Coverage
+
+#### Coverage Metrics
+
+- **Target Coverage**: 70% minimum
+- **Class Coverage**: 60% minimum (excluding config, models, exceptions)
+- **Service Layer**: 80% minimum
+
+#### Component Coverage
+
+| Component | Coverage | Unit Tests | Integration Tests |
+|-----------|----------|------------|-------------------|
+| Schema validation | ✅ 95%+ | 15+ | 7 |
+| Filter generation | ✅ 90%+ | 15+ | 7 |
+| Git sync | ✅ 85%+ | 10+ | 8 |
+| Compatibility checking | ✅ 90%+ | 10+ | 4 |
+| Spring YAML generation | ✅ 95%+ | 27 | 6 |
+| Jenkins triggering | ✅ 95%+ | 10 | 8 |
+| Filter management | ✅ 85%+ | 20+ | 7 |
+
+#### Coverage Tool
+
+The project uses **JaCoCo** for code coverage analysis. Generate reports with:
+```bash
+./gradlew test jacocoTestReport
+./gradlew jacocoTestCoverageVerification
+```
+
+For detailed coverage information, see the [Testing Guide - Test Coverage](docs/TESTING.md#test-coverage).
+
+### 17.5 Test Infrastructure
+
+#### Mock Jenkins Server
+
+The test suite includes a `MockJenkinsServer` for CI/CD emulation:
+- Embedded HTTP server using Java's HttpServer
+- Captures build trigger requests with parameters
+- Supports Basic Auth and build token authentication
+- Can simulate failures and timeouts
+- Thread-safe request capture
+
+#### Test Utilities
+
+- `TestRepoSetup` - Creates test Git repository structure
+- `TestEventGenerator` - Generates test events for validation
+- `MockJenkinsServer` - Embedded Jenkins server for CI/CD testing
+
+#### Test Configuration
+
+- Uses H2 in-memory database for all tests
+- Temporary directories for test isolation
+- Git sync disabled in test mode (`test.mode=true`)
+- All tests use `@SpringBootTest` with random port for web tests
+
+For implementation details, see the [Testing Guide - Implementation Details](docs/TESTING.md#implementation-details).
+
+### 17.6 Manual Testing
 
 **Validation Test:**
 ```bash
@@ -1644,6 +1730,7 @@ Potential improvements for future versions:
 
 - [CDC Streaming Backend Implementation](../cdc-streaming/BACKEND_IMPLEMENTATION.md)
 - [Metadata Service Java README](README.md)
+- [Testing Guide](docs/TESTING.md) - Comprehensive testing documentation
 - [Producer API Documentation](../producer-api-go-rest/README.md)
 
 ---

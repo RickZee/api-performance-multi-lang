@@ -20,21 +20,14 @@ A Spring Boot-based metadata service that provides centralized schema validation
 - PostgreSQL 12+ (for filter storage)
 - Docker (optional, for containerized deployment)
 
-### Configuration
+#### Configuration
 
-The service can be configured via environment variables or `application.yml`:
+The service can be configured via environment variables or `application.yml`. For a complete list of configuration options, see the [Configuration Reference](METADATA_SERVICE_DOCUMENTATION.md#9-configuration-reference) in the comprehensive documentation.
 
-**Environment Variables:**
+**Required Environment Variables:**
 
 - `GIT_REPOSITORY` - Git repository URL containing schemas (required)
-- `GIT_BRANCH` - Git branch to use (default: `main`)
-- `LOCAL_CACHE_DIR` - Local directory for schema cache (default: `/tmp/schema-cache`)
-- `SERVER_PORT` - HTTP server port (default: `8080`)
-- `DEFAULT_VERSION` - Default schema version to use (default: `latest`)
-- `STRICT_MODE` - Enable strict validation mode (default: `true`)
 - `DATABASE_URL` - PostgreSQL connection URL (default: `jdbc:postgresql://localhost:5432/metadata_service`)
-- `DATABASE_USERNAME` - Database username (default: `postgres`)
-- `DATABASE_PASSWORD` - Database password (default: `postgres`)
 
 ### Running Locally
 
@@ -59,32 +52,12 @@ docker-compose --profile metadata-service-java up -d
 
 ## API Endpoints
 
-### Validation
+For detailed API documentation including request/response examples, see the [API Reference](METADATA_SERVICE_DOCUMENTATION.md#6-api-reference) section.
 
-- `POST /api/v1/validate` - Validate a single event
-- `POST /api/v1/validate/bulk` - Validate multiple events
-
-### Schemas
-
-- `GET /api/v1/schemas/versions` - List available schema versions
-- `GET /api/v1/schemas/:version` - Get schema by version
-
-### Filters
-
-- `POST /api/v1/filters` - Create filter
-- `GET /api/v1/filters` - List filters
-- `GET /api/v1/filters/:id` - Get filter
-- `PUT /api/v1/filters/:id` - Update filter
-- `DELETE /api/v1/filters/:id` - Delete filter
-- `POST /api/v1/filters/:id/generate` - Generate SQL
-- `POST /api/v1/filters/:id/validate` - Validate SQL
-- `POST /api/v1/filters/:id/approve` - Approve filter
-- `POST /api/v1/filters/:id/deploy` - Deploy filter
-- `GET /api/v1/filters/:id/status` - Get filter status
-- `GET /api/v1/filters/active` - Get active filters (for CDC Streaming Service)
-
-### Health
-
+**Key Endpoints:**
+- `POST /api/v1/validate` - Validate events
+- `GET /api/v1/schemas/:version` - Get schemas
+- `POST /api/v1/filters` - Filter management
 - `GET /api/v1/health` - Health check
 
 ## Building
@@ -95,6 +68,14 @@ docker-compose --profile metadata-service-java up -d
 
 ## Testing
 
+For comprehensive testing information including test catalog, coverage reports, and how to run specific test suites, see the [Testing Guide](docs/TESTING.md).
+
+**Quick Start:**
 ```bash
 ./gradlew test
 ```
+
+## Documentation
+
+- **[Comprehensive Documentation](METADATA_SERVICE_DOCUMENTATION.md)** - Complete service documentation including architecture, API reference, configuration, and workflows
+- **[Testing Guide](docs/TESTING.md)** - Testing documentation including test catalog, coverage reports, and implementation details
