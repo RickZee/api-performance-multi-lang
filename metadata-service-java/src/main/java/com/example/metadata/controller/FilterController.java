@@ -33,14 +33,15 @@ public class FilterController {
     @PostMapping
     public ResponseEntity<Filter> createFilter(
             @Valid @RequestBody CreateFilterRequest request,
+            @RequestParam(required = true) String schemaId,
             @RequestParam(required = false, defaultValue = "v1") String version
     ) {
         try {
-            Filter filter = filterStorageService.create(version, request);
+            Filter filter = filterStorageService.create(schemaId, version, request);
             
             // Update Spring Boot YAML file only if filter targets include spring
             if (filter.getTargets() != null && filter.getTargets().contains("spring")) {
-                updateSpringYaml(version);
+                updateSpringYaml(schemaId, version);
             }
             
             // Trigger CI/CD for change management
@@ -54,12 +55,13 @@ public class FilterController {
 
     @GetMapping
     public ResponseEntity<List<Filter>> listFilters(
+            @RequestParam(required = true) String schemaId,
             @RequestParam(required = false, defaultValue = "v1") String version,
             @RequestParam(required = false) Boolean enabled,
             @RequestParam(required = false) String status
     ) {
         try {
-            List<Filter> filters = filterStorageService.list(version);
+            List<Filter> filters = filterStorageService.list(schemaId, version);
             
             // Apply query parameter filters
             if (enabled != null) {
@@ -82,6 +84,7 @@ public class FilterController {
     @GetMapping("/{id}")
     public ResponseEntity<Filter> getFilter(
             @PathVariable String id,
+            @RequestParam(required = true) String schemaId,
             @RequestParam(required = false, defaultValue = "v1") String version
     ) {
         try {
@@ -89,7 +92,7 @@ public class FilterController {
             if (id == null || id.contains("..") || id.contains("/") || id.contains("\\")) {
                 return ResponseEntity.notFound().build();
             }
-            Filter filter = filterStorageService.get(version, id);
+            Filter filter = filterStorageService.get(schemaId, version, id);
             return ResponseEntity.ok(filter);
         } catch (FilterNotFoundException e) {
             return ResponseEntity.notFound().build();
@@ -108,14 +111,15 @@ public class FilterController {
     public ResponseEntity<Filter> updateFilter(
             @PathVariable String id,
             @RequestBody UpdateFilterRequest request,
+            @RequestParam(required = true) String schemaId,
             @RequestParam(required = false, defaultValue = "v1") String version
     ) {
         try {
-            Filter filter = filterStorageService.update(version, id, request);
+            Filter filter = filterStorageService.update(schemaId, version, id, request);
             
             // Update Spring Boot YAML file only if filter targets include spring
             if (filter.getTargets() != null && filter.getTargets().contains("spring")) {
-                updateSpringYaml(version);
+                updateSpringYaml(schemaId, version);
             }
             
             // Trigger CI/CD for change management
@@ -132,16 +136,17 @@ public class FilterController {
     @DeleteMapping("/{id}")
     public ResponseEntity<Void> deleteFilter(
             @PathVariable String id,
+            @RequestParam(required = true) String schemaId,
             @RequestParam(required = false, defaultValue = "v1") String version
     ) {
         try {
             // Get filter before deleting to check targets
-            Filter filter = filterStorageService.get(version, id);
-            filterStorageService.delete(version, id);
+            Filter filter = filterStorageService.get(schemaId, version, id);
+            filterStorageService.delete(schemaId, version, id);
             
             // Update Spring Boot YAML file only if filter targeted spring
             if (filter.getTargets() != null && filter.getTargets().contains("spring")) {
-                updateSpringYaml(version);
+                updateSpringYaml(schemaId, version);
             }
             
             // Trigger CI/CD for change management
@@ -158,10 +163,11 @@ public class FilterController {
     @GetMapping("/{id}/sql")
     public ResponseEntity<GenerateSQLResponse> getFilterSQL(
             @PathVariable String id,
+            @RequestParam(required = true) String schemaId,
             @RequestParam(required = false, defaultValue = "v1") String version
     ) {
         try {
-            Filter filter = filterStorageService.get(version, id);
+            Filter filter = filterStorageService.get(schemaId, version, id);
             GenerateSQLResponse response = filterGeneratorService.generateSQL(filter);
             return ResponseEntity.ok(response);
         } catch (FilterNotFoundException e) {
@@ -175,11 +181,12 @@ public class FilterController {
     public ResponseEntity<ValidateSQLResponse> createValidation(
             @PathVariable String id,
             @Valid @RequestBody ValidateSQLRequest request,
+            @RequestParam(required = true) String schemaId,
             @RequestParam(required = false, defaultValue = "v1") String version
     ) {
         try {
             // Verify filter exists
-            filterStorageService.get(version, id);
+            filterStorageService.get(schemaId, version, id);
         } catch (FilterNotFoundException e) {
             return ResponseEntity.notFound().build();
         } catch (IOException e) {
@@ -215,137 +222,13 @@ public class FilterController {
         return ResponseEntity.status(HttpStatus.CREATED).body(response);
     }
 
-    @PatchMapping("/{id}")
-    public ResponseEntity<Filter> updateFilterStatus(
-            @PathVariable String id,
-            @RequestBody(required = false) UpdateFilterStatusRequest request,
-            @RequestParam(required = false, defaultValue = "v1") String version
-    ) {
-        try {
-            Filter filter;
-            
-            if (request != null && request.getStatus() != null) {
-                String newStatus = request.getStatus();
-                
-                // Handle status updates
-                if ("approved".equals(newStatus)) {
-                    String approvedBy = request.getApprovedBy() != null ? request.getApprovedBy() : "system";
-                    filter = filterStorageService.approve(version, id, approvedBy);
-                    
-                    // Trigger CI/CD for change management (approval may trigger validation pipeline)
-                    java.util.Map<String, String> params = new java.util.HashMap<>();
-                    params.put("APPROVED_BY", approvedBy);
-                    jenkinsTriggerService.triggerBuild("approve", id, version, params);
-                } else {
-                    // For other status updates, we'd need a more generic updateStatus method
-                    // For now, only support "approved" status via PATCH
-                    return ResponseEntity.status(HttpStatus.BAD_REQUEST).build();
-                }
-            } else {
-                // If no status provided, return current filter
-                filter = filterStorageService.get(version, id);
-            }
-            
-            return ResponseEntity.ok(filter);
-        } catch (FilterNotFoundException e) {
-            return ResponseEntity.notFound().build();
-        } catch (IOException e) {
-            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).build();
-        }
-    }
-
-    @PostMapping("/{id}/deployments")
-    public ResponseEntity<DeployFilterResponse> createDeployment(
-            @PathVariable String id,
-            @RequestBody(required = false) DeployFilterRequest request,
-            @RequestParam(required = false, defaultValue = "v1") String version
-    ) {
-        try {
-            Filter filter = filterStorageService.get(version, id);
-
-            // Check if filter is approved (unless force is true)
-            if (request == null || !request.isForce()) {
-                if (!"approved".equals(filter.getStatus())) {
-                    return ResponseEntity.status(HttpStatus.BAD_REQUEST)
-                        .body(DeployFilterResponse.builder()
-                            .filterId(id)
-                            .status("failed")
-                            .error("Filter must be approved before deployment")
-                            .build());
-                }
-            }
-
-            // Check if Confluent Cloud credentials are configured
-            if (!filterDeployerService.validateConnection()) {
-                return ResponseEntity.status(HttpStatus.SERVICE_UNAVAILABLE)
-                    .body(DeployFilterResponse.builder()
-                        .filterId(id)
-                        .status("failed")
-                        .error("Confluent Cloud credentials not configured")
-                        .build());
-            }
-
-            // Generate SQL
-            GenerateSQLResponse sqlResponse = filterGeneratorService.generateSQL(filter);
-            if (!sqlResponse.isValid()) {
-                return ResponseEntity.status(HttpStatus.BAD_REQUEST)
-                    .body(DeployFilterResponse.builder()
-                        .filterId(id)
-                        .status("failed")
-                        .error("Failed to generate valid SQL: " + String.join(", ", sqlResponse.getValidationErrors()))
-                        .build());
-            }
-
-            // Extract statement names
-            List<String> statementNames = filterDeployerService.extractStatementNames(sqlResponse.getSql());
-
-            // Deploy statements
-            try {
-                List<String> statementIds = filterDeployerService.deployStatements(
-                    sqlResponse.getStatements(),
-                    statementNames
-                );
-
-                // Update filter with deployment info
-                filterStorageService.updateDeployment(version, id, "deployed", statementIds, null);
-
-                // Update Spring Boot YAML file after successful deployment
-                updateSpringYaml(version);
-
-                // Trigger CI/CD for change management (deployment verification pipeline)
-                java.util.Map<String, String> params = new java.util.HashMap<>();
-                params.put("DEPLOYMENT_STATUS", "success");
-                params.put("FLINK_STATEMENT_IDS", String.join(",", statementIds));
-                jenkinsTriggerService.triggerBuild("deploy", id, version, params);
-
-                return ResponseEntity.status(HttpStatus.CREATED).body(DeployFilterResponse.builder()
-                    .filterId(id)
-                    .status("deployed")
-                    .flinkStatementIds(statementIds)
-                    .message("Filter deployed successfully")
-                    .build());
-            } catch (IOException e) {
-                filterStorageService.updateDeployment(version, id, "failed", null, e.getMessage());
-                return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
-                    .body(DeployFilterResponse.builder()
-                        .filterId(id)
-                        .status("failed")
-                        .error(e.getMessage())
-                        .build());
-            }
-        } catch (FilterNotFoundException e) {
-            return ResponseEntity.notFound().build();
-        } catch (IOException e) {
-            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).build();
-        }
-    }
-
 
     @PatchMapping("/{id}/approvals/{target}")
     public ResponseEntity<Filter> approveFilterForTarget(
             @PathVariable String id,
             @PathVariable String target,
             @Valid @RequestBody ApproveFilterRequest request,
+            @RequestParam(required = true) String schemaId,
             @RequestParam(required = false, defaultValue = "v1") String version
     ) {
         try {
@@ -355,7 +238,7 @@ public class FilterController {
             }
             
             String approvedBy = request.getApprovedBy() != null ? request.getApprovedBy() : "system";
-            Filter filter = filterStorageService.approveForTarget(version, id, target, approvedBy);
+            Filter filter = filterStorageService.approveForTarget(schemaId, version, id, target, approvedBy);
             
             // Trigger CI/CD for change management
             java.util.Map<String, String> params = new java.util.HashMap<>();
@@ -376,10 +259,11 @@ public class FilterController {
     @GetMapping("/{id}/approvals")
     public ResponseEntity<FilterApprovalStatus> getFilterApprovals(
             @PathVariable String id,
+            @RequestParam(required = true) String schemaId,
             @RequestParam(required = false, defaultValue = "v1") String version
     ) {
         try {
-            Filter filter = filterStorageService.get(version, id);
+            Filter filter = filterStorageService.get(schemaId, version, id);
             
             FilterApprovalStatus.TargetApprovalStatus flinkStatus = FilterApprovalStatus.TargetApprovalStatus.builder()
                     .approved(filter.getApprovedForFlink())
@@ -411,6 +295,7 @@ public class FilterController {
             @PathVariable String id,
             @PathVariable String target,
             @RequestBody(required = false) DeployFilterRequest request,
+            @RequestParam(required = true) String schemaId,
             @RequestParam(required = false, defaultValue = "v1") String version
     ) {
         try {
@@ -424,7 +309,7 @@ public class FilterController {
                                 .build());
             }
             
-            Filter filter = filterStorageService.get(version, id);
+            Filter filter = filterStorageService.get(schemaId, version, id);
             
             // Check if filter has this target
             if (filter.getTargets() == null || !filter.getTargets().contains(target)) {
@@ -485,7 +370,7 @@ public class FilterController {
                     );
                     
                     // Update filter with deployment info
-                    filterStorageService.updateDeploymentForTarget(version, id, target, "deployed", statementIds, null);
+                    filterStorageService.updateDeploymentForTarget(schemaId, version, id, target, "deployed", statementIds, null);
                     
                     // Trigger CI/CD for change management
                     java.util.Map<String, String> params = new java.util.HashMap<>();
@@ -501,7 +386,7 @@ public class FilterController {
                             .message("Filter deployed successfully to " + target)
                             .build());
                 } catch (IOException e) {
-                    filterStorageService.updateDeploymentForTarget(version, id, target, "failed", null, e.getMessage());
+                    filterStorageService.updateDeploymentForTarget(schemaId, version, id, target, "failed", null, e.getMessage());
                     return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
                             .body(DeployFilterResponse.builder()
                                     .filterId(id)
@@ -513,10 +398,10 @@ public class FilterController {
                 // Deploy to Spring Boot (update filters.yml)
                 try {
                     // Update Spring Boot YAML file
-                    updateSpringYaml(version);
+                    updateSpringYaml(schemaId, version);
                     
                     // Update filter with deployment info
-                    filterStorageService.updateDeploymentForTarget(version, id, target, "deployed", null, null);
+                    filterStorageService.updateDeploymentForTarget(schemaId, version, id, target, "deployed", null, null);
                     
                     // Trigger CI/CD for change management
                     java.util.Map<String, String> params = new java.util.HashMap<>();
@@ -530,7 +415,7 @@ public class FilterController {
                             .message("Filter deployed successfully to " + target)
                             .build());
                 } catch (Exception e) {
-                    filterStorageService.updateDeploymentForTarget(version, id, target, "failed", null, e.getMessage());
+                    filterStorageService.updateDeploymentForTarget(schemaId, version, id, target, "failed", null, e.getMessage());
                     return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
                             .body(DeployFilterResponse.builder()
                                     .filterId(id)
@@ -556,10 +441,11 @@ public class FilterController {
     @GetMapping("/{id}/deployments")
     public ResponseEntity<FilterDeploymentStatus> getFilterDeployments(
             @PathVariable String id,
+            @RequestParam(required = true) String schemaId,
             @RequestParam(required = false, defaultValue = "v1") String version
     ) {
         try {
-            Filter filter = filterStorageService.get(version, id);
+            Filter filter = filterStorageService.get(schemaId, version, id);
             
             FilterDeploymentStatus.TargetDeploymentStatus flinkStatus = FilterDeploymentStatus.TargetDeploymentStatus.builder()
                     .deployed(filter.getDeployedToFlink())
@@ -592,14 +478,14 @@ public class FilterController {
      * This method is called after create, update, delete, and deploy operations.
      * Errors are logged but do not fail the API operation.
      */
-    private void updateSpringYaml(String version) {
+    private void updateSpringYaml(String schemaId, String version) {
         if (!springYamlWriterService.isEnabled()) {
             return;
         }
 
         try {
             // Get all filters for the version
-            List<Filter> filters = filterStorageService.list(version);
+            List<Filter> filters = filterStorageService.list(schemaId, version);
             
             // Filter to only include Spring Boot targets
             List<Filter> springFilters = filters.stream()

@@ -4,6 +4,7 @@ import com.example.metadata.config.AppConfig;
 import com.example.metadata.model.CreateFilterRequest;
 import com.example.metadata.model.Filter;
 import com.example.metadata.model.FilterCondition;
+import com.example.metadata.model.FilterConditions;
 import com.example.metadata.model.UpdateFilterRequest;
 import com.example.metadata.service.FilterStorageService;
 import com.example.metadata.service.SpringYamlGeneratorService;
@@ -113,10 +114,12 @@ class SpringYamlUpdateIntegrationTest {
         CreateFilterRequest request = CreateFilterRequest.builder()
             .name("Test Filter")
             .description("Test description")
-            .consumerId("test-consumer")
+            .consumerGroup("test-consumer")
             .outputTopic("filtered-test-events")
             .enabled(true)
-            .conditions(List.of(
+            .conditions(FilterConditions.builder()
+                .logic("AND")
+                .conditions(List.of(
                 FilterCondition.builder()
                     .field("event_type")
                     .operator("equals")
@@ -124,13 +127,13 @@ class SpringYamlUpdateIntegrationTest {
                     .valueType("string")
                     .build()
             ))
-            .conditionLogic("AND")
+            .build())
             .build();
 
-        Filter filter = filterStorageService.create("v1", request);
+        Filter filter = filterStorageService.create("test-schema-id", "v1", request);
         
         // Manually trigger YAML update (simulating what FilterController does)
-        List<Filter> filters = filterStorageService.list("v1");
+        List<Filter> filters = filterStorageService.list("test-schema-id", "v1");
         String yaml = springYamlGeneratorService.generateYaml(filters);
         springYamlWriterService.writeFiltersYaml(yaml);
 
@@ -146,10 +149,12 @@ class SpringYamlUpdateIntegrationTest {
         // Create initial filter
         CreateFilterRequest createRequest = CreateFilterRequest.builder()
             .name("Original Filter")
-            .consumerId("test-consumer")
+            .consumerGroup("test-consumer")
             .outputTopic("filtered-original")
             .enabled(true)
-            .conditions(List.of(
+            .conditions(FilterConditions.builder()
+                .logic("AND")
+                .conditions(List.of(
                 FilterCondition.builder()
                     .field("event_type")
                     .operator("equals")
@@ -157,9 +162,10 @@ class SpringYamlUpdateIntegrationTest {
                     .valueType("string")
                     .build()
             ))
+            .build())
             .build();
 
-        Filter filter = filterStorageService.create("v1", createRequest);
+        Filter filter = filterStorageService.create("test-schema-id", "v1", createRequest);
         
         // Update filter
         UpdateFilterRequest updateRequest = UpdateFilterRequest.builder()
@@ -167,10 +173,10 @@ class SpringYamlUpdateIntegrationTest {
             .description("Updated description")
             .build();
 
-        filterStorageService.update("v1", filter.getId(), updateRequest);
+        filterStorageService.update("test-schema-id", "v1", filter.getId(), updateRequest);
         
         // Manually trigger YAML update
-        List<Filter> filters = filterStorageService.list("v1");
+        List<Filter> filters = filterStorageService.list("test-schema-id", "v1");
         String yaml = springYamlGeneratorService.generateYaml(filters);
         springYamlWriterService.writeFiltersYaml(yaml);
 
@@ -184,10 +190,12 @@ class SpringYamlUpdateIntegrationTest {
         // Create two filters
         CreateFilterRequest request1 = CreateFilterRequest.builder()
             .name("Filter 1")
-            .consumerId("consumer-1")
+            .consumerGroup("consumer-1")
             .outputTopic("filtered-1")
             .enabled(true)
-            .conditions(List.of(
+            .conditions(FilterConditions.builder()
+                .logic("AND")
+                .conditions(List.of(
                 FilterCondition.builder()
                     .field("event_type")
                     .operator("equals")
@@ -195,14 +203,17 @@ class SpringYamlUpdateIntegrationTest {
                     .valueType("string")
                     .build()
             ))
+            .build())
             .build();
 
         CreateFilterRequest request2 = CreateFilterRequest.builder()
             .name("Filter 2")
-            .consumerId("consumer-2")
+            .consumerGroup("consumer-2")
             .outputTopic("filtered-2")
             .enabled(true)
-            .conditions(List.of(
+            .conditions(FilterConditions.builder()
+                .logic("AND")
+                .conditions(List.of(
                 FilterCondition.builder()
                     .field("event_type")
                     .operator("equals")
@@ -210,13 +221,14 @@ class SpringYamlUpdateIntegrationTest {
                     .valueType("string")
                     .build()
             ))
+            .build())
             .build();
 
-        Filter filter1 = filterStorageService.create("v1", request1);
-        Filter filter2 = filterStorageService.create("v1", request2);
+        Filter filter1 = filterStorageService.create("test-schema-id", "v1", request1);
+        Filter filter2 = filterStorageService.create("test-schema-id", "v1", request2);
         
         // Generate initial YAML
-        List<Filter> filters = filterStorageService.list("v1");
+        List<Filter> filters = filterStorageService.list("test-schema-id", "v1");
         String yaml = springYamlGeneratorService.generateYaml(filters);
         springYamlWriterService.writeFiltersYaml(yaml);
         
@@ -225,10 +237,10 @@ class SpringYamlUpdateIntegrationTest {
         assertThat(initialYaml).contains("id: " + filter2.getId());
         
         // Delete one filter
-        filterStorageService.delete("v1", filter1.getId());
+        filterStorageService.delete("test-schema-id", "v1", filter1.getId());
         
         // Regenerate YAML
-        filters = filterStorageService.list("v1");
+        filters = filterStorageService.list("test-schema-id", "v1");
         yaml = springYamlGeneratorService.generateYaml(filters);
         springYamlWriterService.writeFiltersYaml(yaml);
         
@@ -242,10 +254,12 @@ class SpringYamlUpdateIntegrationTest {
         CreateFilterRequest request = CreateFilterRequest.builder()
             .name("Format Test Filter")
             .description("Testing YAML format")
-            .consumerId("test-consumer")
+            .consumerGroup("test-consumer")
             .outputTopic("filtered-format-test")
             .enabled(true)
-            .conditions(List.of(
+            .conditions(FilterConditions.builder()
+                .logic("AND")
+                .conditions(List.of(
                 FilterCondition.builder()
                     .field("event_type")
                     .operator("equals")
@@ -253,13 +267,13 @@ class SpringYamlUpdateIntegrationTest {
                     .valueType("string")
                     .build()
             ))
-            .conditionLogic("AND")
+            .build())
             .build();
 
         // Create filter (result not used, but operation is verified via YAML)
-        filterStorageService.create("v1", request);
+        filterStorageService.create("test-schema-id", "v1", request);
         
-        List<Filter> filters = filterStorageService.list("v1");
+        List<Filter> filters = filterStorageService.list("test-schema-id", "v1");
         String yaml = springYamlGeneratorService.generateYaml(filters);
         springYamlWriterService.writeFiltersYaml(yaml);
 
@@ -285,9 +299,11 @@ class SpringYamlUpdateIntegrationTest {
         for (int i = 1; i <= 3; i++) {
             CreateFilterRequest request = CreateFilterRequest.builder()
                 .name("Filter " + i)
-                .consumerId("consumer-" + i)
+                .consumerGroup("consumer-" + i)
                 .outputTopic("filtered-" + i)
                 .enabled(true)
+                .conditions(FilterConditions.builder()
+                .logic("AND")
                 .conditions(List.of(
                     FilterCondition.builder()
                         .field("event_type")
@@ -296,12 +312,13 @@ class SpringYamlUpdateIntegrationTest {
                         .valueType("string")
                         .build()
                 ))
+                .build())
                 .build();
             // Create filter (result not used, but operation is verified via YAML)
-            filterStorageService.create("v1", request);
+            filterStorageService.create("test-schema-id", "v1", request);
         }
         
-        List<Filter> filters = filterStorageService.list("v1");
+        List<Filter> filters = filterStorageService.list("test-schema-id", "v1");
         String yaml = springYamlGeneratorService.generateYaml(filters);
         springYamlWriterService.writeFiltersYaml(yaml);
 

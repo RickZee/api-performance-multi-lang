@@ -19,13 +19,13 @@ public class FilterMapper {
         
         return Filter.builder()
                 .id(entity.getId())
+                .schemaId(entity.getSchemaId())
                 .name(entity.getName())
                 .description(entity.getDescription())
-                .consumerId(entity.getConsumerId())
+                .consumerGroup(entity.getConsumerGroup())
                 .outputTopic(entity.getOutputTopic())
                 .conditions(entity.getConditions())
                 .enabled(entity.getEnabled())
-                .conditionLogic(entity.getConditionLogic())
                 .status(entity.getStatus())
                 .version(entity.getVersion())
                 .createdAt(entity.getCreatedAt())
@@ -35,6 +35,7 @@ public class FilterMapper {
                 .deployedAt(entity.getDeployedAt())
                 .deploymentError(entity.getDeploymentError())
                 .flinkStatementIds(entity.getFlinkStatementIds())
+                .springFilterId(entity.getSpringFilterId())
                 .targets(entity.getTargets())
                 .approvedForFlink(entity.getApprovedForFlink())
                 .approvedForSpring(entity.getApprovedForSpring())
@@ -54,21 +55,21 @@ public class FilterMapper {
     /**
      * Convert Filter model to FilterEntity
      */
-    public FilterEntity toEntity(Filter model, String schemaVersion) {
+    public FilterEntity toEntity(Filter model, String schemaId, String schemaVersion) {
         if (model == null) {
             return null;
         }
         
         return FilterEntity.builder()
                 .id(model.getId())
+                .schemaId(schemaId)
                 .schemaVersion(schemaVersion)
                 .name(model.getName())
                 .description(model.getDescription())
-                .consumerId(model.getConsumerId())
+                .consumerGroup(model.getConsumerGroup())
                 .outputTopic(model.getOutputTopic())
                 .conditions(model.getConditions())
                 .enabled(model.isEnabled())
-                .conditionLogic(model.getConditionLogic())
                 .status(model.getStatus())
                 .version(model.getVersion())
                 .createdAt(model.getCreatedAt())
@@ -78,6 +79,7 @@ public class FilterMapper {
                 .deployedAt(model.getDeployedAt())
                 .deploymentError(model.getDeploymentError())
                 .flinkStatementIds(model.getFlinkStatementIds())
+                .springFilterId(model.getSpringFilterId())
                 .targets(model.getTargets())
                 .approvedForFlink(model.getApprovedForFlink())
                 .approvedForSpring(model.getApprovedForSpring())

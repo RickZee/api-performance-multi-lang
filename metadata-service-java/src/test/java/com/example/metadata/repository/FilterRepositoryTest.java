@@ -1,6 +1,7 @@
 package com.example.metadata.repository;
 
 import com.example.metadata.model.FilterCondition;
+import com.example.metadata.model.FilterConditions;
 import com.example.metadata.repository.entity.FilterEntity;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -43,13 +44,16 @@ class FilterRepositoryTest {
 
         testFilter = FilterEntity.builder()
                 .id("test-filter-1")
+                .schemaId("test-schema-id")
                 .schemaVersion("v1")
                 .name("Test Filter")
                 .description("Test Description")
                 .outputTopic("test-topic")
-                .conditions(Arrays.asList(condition))
+                .conditions(FilterConditions.builder()
+                    .logic("AND")
+                    .conditions(Arrays.asList(condition))
+                    .build())
                 .enabled(true)
-                .conditionLogic("AND")
                 .status("approved")
                 .version(1)
                 .createdAt(Instant.now())
@@ -74,12 +78,15 @@ class FilterRepositoryTest {
 
         FilterEntity filter2 = FilterEntity.builder()
                 .id("test-filter-2")
+                .schemaId("test-schema-id-2")
                 .schemaVersion("v2")
                 .name("Test Filter 2")
                 .outputTopic("test-topic-2")
-                .conditions(Arrays.asList())
+                .conditions(FilterConditions.builder()
+                    .logic("AND")
+                    .conditions(Arrays.asList())
+                    .build())
                 .enabled(true)
-                .conditionLogic("AND")
                 .status("approved")
                 .version(1)
                 .createdAt(Instant.now())
@@ -111,12 +118,15 @@ class FilterRepositoryTest {
     void testFindBySchemaVersionAndEnabledTrue() {
         FilterEntity disabledFilter = FilterEntity.builder()
                 .id("disabled-filter")
+                .schemaId("test-schema-id")
                 .schemaVersion("v1")
                 .name("Disabled Filter")
                 .outputTopic("disabled-topic")
-                .conditions(Arrays.asList())
+                .conditions(FilterConditions.builder()
+                    .logic("AND")
+                    .conditions(Arrays.asList())
+                    .build())
                 .enabled(false)
-                .conditionLogic("AND")
                 .status("approved")
                 .version(1)
                 .createdAt(Instant.now())
@@ -135,12 +145,15 @@ class FilterRepositoryTest {
     void testFindActiveFiltersBySchemaVersion() {
         FilterEntity deletedFilter = FilterEntity.builder()
                 .id("deleted-filter")
+                .schemaId("test-schema-id")
                 .schemaVersion("v1")
                 .name("Deleted Filter")
                 .outputTopic("deleted-topic")
-                .conditions(Arrays.asList())
+                .conditions(FilterConditions.builder()
+                    .logic("AND")
+                    .conditions(Arrays.asList())
+                    .build())
                 .enabled(true)
-                .conditionLogic("AND")
                 .status("deleted")
                 .version(1)
                 .createdAt(Instant.now())

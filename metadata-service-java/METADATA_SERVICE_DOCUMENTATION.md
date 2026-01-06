@@ -574,44 +574,31 @@ GET /api/v1/schemas/v1?type=car
 | GET | `/api/v1/filters` | List all filters (supports query parameters) |
 | GET | `/api/v1/filters/:id` | Get filter by ID (includes status) |
 | PUT | `/api/v1/filters/:id` | Update filter |
-| PATCH | `/api/v1/filters/:id` | Update filter status (deprecated - use per-target approval) |
 | DELETE | `/api/v1/filters/:id` | Delete filter |
 | GET | `/api/v1/filters/:id/sql` | Get generated Flink SQL for filter (only for Flink targets) |
 | POST | `/api/v1/filters/:id/validations` | Create SQL validation |
-| POST | `/api/v1/filters/:id/deployments` | Create deployment (deprecated - use per-target deployment) |
 | PATCH | `/api/v1/filters/:id/approvals/{target}` | Approve filter for specific target (flink or spring) |
 | GET | `/api/v1/filters/:id/approvals` | Get approval status for all targets |
 | POST | `/api/v1/filters/:id/deployments/{target}` | Deploy filter to specific target (flink or spring) |
 | GET | `/api/v1/filters/:id/deployments` | Get deployment status for all targets |
 
+**Query Parameters for Filter Endpoints:**
+- `schemaId` (required) - Unique schema identifier (e.g., UUID or unique name). Used in addition to `version` for schema identification.
+- `version` (optional, default: `v1`) - Schema version string to retrieve filters for (e.g., "v1", "v2")
+
 **Query Parameters for `GET /api/v1/filters`:**
+- `schemaId` (required) - Unique schema identifier
 - `version` (optional, default: `v1`) - Schema version to retrieve filters for
 - `enabled` (optional) - Filter by enabled status (true/false)
 - `status` (optional) - Filter by status (e.g., "deployed", "approved", "pending_approval")
 
-**Example:**
+**Examples:**
 ```
-GET /api/v1/filters?version=v1&enabled=true&status=deployed
-```
-
-#### 9.3.1 Filter Status Updates
-
-**PATCH `/api/v1/filters/:id`**
-
-Updates filter status. Currently supports approving filters.
-
-**Request Example:**
-```json
-{
-  "status": "approved",
-  "approvedBy": "reviewer@example.com",
-  "notes": "Approved for production deployment"
-}
+GET /api/v1/filters?schemaId=my-schema-uuid&version=v1&enabled=true&status=deployed
+GET /api/v1/filters?schemaId=my-schema-uuid&version=v1
 ```
 
-**Response:** Returns the updated filter with status included.
-
-#### 9.3.2 Get Filter SQL
+#### 9.3.1 Get Filter SQL
 
 **GET `/api/v1/filters/:id/sql`**
 
@@ -630,7 +617,7 @@ Retrieves the generated Flink SQL for a filter. This is a read-only operation.
 }
 ```
 
-#### 9.3.3 SQL Validation
+#### 9.3.2 SQL Validation
 
 **POST `/api/v1/filters/:id/validations`**
 
@@ -651,7 +638,7 @@ Creates a validation check for SQL syntax. Returns 201 Created on success.
 }
 ```
 
-#### 9.3.4 Per-Target Approval
+#### 9.3.3 Per-Target Approval
 
 **PATCH `/api/v1/filters/:id/approvals/{target}`**
 
@@ -670,7 +657,7 @@ Approves a filter for a specific deployment target (`flink` or `spring`). Return
 
 **Response:** Returns the updated filter with approval status for the target.
 
-#### 9.3.5 Get Approval Status
+#### 9.3.4 Get Approval Status
 
 **GET `/api/v1/filters/:id/approvals`**
 
@@ -692,7 +679,7 @@ Retrieves approval status for all targets.
 }
 ```
 
-#### 9.3.6 Per-Target Deployment
+#### 9.3.5 Per-Target Deployment
 
 **POST `/api/v1/filters/:id/deployments/{target}`**
 
@@ -727,7 +714,7 @@ Deploys a filter to a specific target (`flink` or `spring`). Returns 201 Created
 }
 ```
 
-#### 9.3.7 Get Deployment Status
+#### 9.3.6 Get Deployment Status
 
 **GET `/api/v1/filters/:id/deployments`**
 
@@ -751,36 +738,6 @@ Retrieves deployment status for all targets.
 }
 ```
 
-#### 9.3.8 Legacy Filter Deployment (Deprecated)
-
-**POST `/api/v1/filters/:id/deployments`**
-
-**Deprecated:** Use `POST /api/v1/filters/:id/deployments/{target}` instead.
-
-Creates a deployment to Confluent Cloud. Returns 201 Created on success.
-
-**Response Example:**
-```json
-[
-  {
-    "id": "service-events-for-dealer-001",
-    "name": "Service Events for Dealer 001",
-    "outputTopic": "service-events-dealer-001",
-    "enabled": true,
-    "status": "deployed",
-    "conditions": [
-      {
-        "field": "event_type",
-        "operator": "equals",
-        "value": "CarServiceDone",
-        "valueType": "string"
-      }
-    ],
-    "conditionLogic": "AND",
-    "version": 2
-  }
-]
-```
 
 **Use Cases:**
 - CDC Streaming Service dynamic filter loading
@@ -1132,14 +1089,14 @@ The Metadata Service stores filter configurations in PostgreSQL for improved con
 ```sql
 CREATE TABLE filters (
     id VARCHAR(255) PRIMARY KEY,
+    schema_id VARCHAR(255) NOT NULL,
     schema_version VARCHAR(50) NOT NULL,
     name VARCHAR(255) NOT NULL,
     description TEXT,
-    consumer_id VARCHAR(255),
+    consumer_group VARCHAR(255),
     output_topic VARCHAR(255) NOT NULL,
     conditions JSONB NOT NULL,
     enabled BOOLEAN NOT NULL DEFAULT true,
-    condition_logic VARCHAR(10) NOT NULL DEFAULT 'AND',
     status VARCHAR(50) NOT NULL DEFAULT 'pending_approval',
     version INTEGER NOT NULL DEFAULT 1,
     created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -1148,7 +1105,21 @@ CREATE TABLE filters (
     approved_by VARCHAR(255),
     deployed_at TIMESTAMP WITH TIME ZONE,
     deployment_error TEXT,
-    flink_statement_ids JSONB
+    flink_statement_ids JSONB,
+    spring_filter_id VARCHAR(255),
+    targets JSONB DEFAULT '["flink", "spring"]'::jsonb,
+    approved_for_flink BOOLEAN DEFAULT false,
+    approved_for_spring BOOLEAN DEFAULT false,
+    approved_for_flink_at TIMESTAMP WITH TIME ZONE,
+    approved_for_flink_by VARCHAR(255),
+    approved_for_spring_at TIMESTAMP WITH TIME ZONE,
+    approved_for_spring_by VARCHAR(255),
+    deployed_to_flink BOOLEAN DEFAULT false,
+    deployed_to_flink_at TIMESTAMP WITH TIME ZONE,
+    deployed_to_spring BOOLEAN DEFAULT false,
+    deployed_to_spring_at TIMESTAMP WITH TIME ZONE,
+    flink_deployment_error TEXT,
+    spring_deployment_error TEXT
 );
 ```
 
@@ -1156,22 +1127,33 @@ CREATE TABLE filters (
 
 The following indexes are created for optimal query performance:
 
+- `idx_filters_schema_id` - On `schema_id` column
 - `idx_filters_schema_version` - On `schema_version` column
+- `idx_filters_schema_id_version` - Composite index on `(schema_id, schema_version)`
 - `idx_filters_status` - On `status` column
 - `idx_filters_enabled` - On `enabled` column
 - `idx_filters_schema_version_enabled` - Composite index on `(schema_version, enabled)`
 - `idx_filters_schema_version_status` - Composite index on `(schema_version, status)`
 
-#### 6.1.3 JSONB Columns
+#### 6.1.3 Schema Identification
 
-- **`conditions`**: Stores filter conditions array as JSONB for efficient querying and indexing
+- **`schema_id`**: Unique identifier for the schema (e.g., UUID or unique name). Required field that provides a unique way to identify schemas.
+- **`schema_version`**: Version string (e.g., "v1", "v2") matching the Git folder structure. Required field.
+
+#### 6.1.4 JSONB Columns
+
+- **`conditions`**: Stores filter conditions as a JSONB object with `logic` (AND/OR) and `conditions` array for efficient querying and indexing
 - **`flink_statement_ids`**: Stores array of Flink statement IDs deployed for this filter
+- **`targets`**: Stores array of deployment targets (e.g., `["flink", "spring"]`)
 
-#### 6.1.4 Database Migration
+#### 6.1.5 Database Migration
 
 Database schema is managed using Flyway. Migration scripts are located in `src/main/resources/db/migration/`:
 
 - `V1__create_filters_table.sql` - Creates the filters table and indexes
+- `V2__add_filter_targets.sql` - Adds multi-target support with per-target approval and deployment tracking
+- `V3__refactor_filter_structure.sql` - Renames `consumer_id` to `consumer_group`, moves `condition_logic` into `conditions` JSONB, and adds `spring_filter_id`
+- `V4__add_schema_id.sql` - Adds `schema_id` column for unique schema identification
 
 Migrations run automatically on application startup when `spring.flyway.enabled=true`.
 
@@ -1179,11 +1161,13 @@ Migrations run automatically on application startup when `spring.flyway.enabled=
 
 Filters are stored in PostgreSQL with the following characteristics:
 
-- **Schema Version Association**: Each filter is associated with a schema version (v1, v2, etc.) matching the Git folder structure
+- **Schema Identification**: Each filter is associated with both a `schema_id` (required unique identifier) and `schema_version` (required version string like "v1", "v2") matching the Git folder structure
+- **Multi-Target Support**: Filters can target Flink, Spring Boot, or both with separate approval and deployment workflows per target
 - **Optimistic Locking**: Uses `version` field for optimistic locking to prevent concurrent update conflicts
-- **JSONB Storage**: Filter conditions stored as JSONB for flexibility and efficient querying
+- **JSONB Storage**: Filter conditions stored as JSONB object with `logic` and `conditions` array for flexibility and efficient querying
 - **Audit Trail**: Timestamps (`created_at`, `updated_at`, `approved_at`, `deployed_at`) track filter lifecycle
 - **Status Management**: Filter status (`pending_approval`, `approved`, `deployed`, `failed`, etc.) tracks deployment state
+- **Per-Target Tracking**: Separate approval and deployment status tracking for Flink and Spring Boot targets
 
 ### 6.3 Backward Compatibility
 
@@ -1628,12 +1612,23 @@ curl -X POST http://localhost:8080/api/v1/validate \
 
 **Filter Creation Test:**
 ```bash
-curl -X POST http://localhost:8080/api/v1/filters \
+curl -X POST "http://localhost:8080/api/v1/filters?schemaId=my-schema-uuid&version=v1" \
   -H "Content-Type: application/json" \
   -d '{
     "name": "Test Filter",
+    "consumerGroup": "test-consumer",
     "outputTopic": "test-topic",
-    "conditions": [...]
+    "conditions": {
+      "logic": "AND",
+      "conditions": [
+        {
+          "field": "event_type",
+          "operator": "equals",
+          "value": "CarCreated",
+          "valueType": "string"
+        }
+      ]
+    }
   }'
 ```
 
@@ -2048,3 +2043,4 @@ Potential improvements for future versions:
 - Updated architecture diagrams to include new services
 - Expanded configuration reference with Spring Boot and Jenkins settings
 - Updated test coverage information
+- Made `schema_id` required for all filter operations (removed backward compatibility)

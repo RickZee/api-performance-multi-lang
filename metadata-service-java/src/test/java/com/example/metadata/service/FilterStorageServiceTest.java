@@ -2,6 +2,7 @@ package com.example.metadata.service;
 
 import com.example.metadata.exception.FilterNotFoundException;
 import com.example.metadata.model.*;
+import com.example.metadata.model.FilterConditions;
 import com.example.metadata.testutil.TestRepoSetup;
 import org.junit.jupiter.api.*;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -91,8 +92,10 @@ public class FilterStorageServiceTest {
         CreateFilterRequest request = CreateFilterRequest.builder()
             .name("Test Filter")
             .description("Test Description")
-            .consumerId("test-consumer")
+            .consumerGroup("test-consumer")
             .outputTopic("test-topic")
+            .conditions(FilterConditions.builder()
+                .logic("AND")
             .conditions(List.of(
                 FilterCondition.builder()
                     .field("event_type")
@@ -101,11 +104,11 @@ public class FilterStorageServiceTest {
                     .valueType("string")
                     .build()
             ))
+                .build())
             .enabled(true)
-            .conditionLogic("AND")
             .build();
         
-        Filter filter = filterStorageService.create("v1", request);
+        Filter filter = filterStorageService.create("test-schema-id", "v1", request);
         
         assertNotNull(filter.getId());
         assertEquals("Test Filter", filter.getName());
@@ -127,8 +130,10 @@ public class FilterStorageServiceTest {
     void testGetFilter() throws IOException {
         CreateFilterRequest request = CreateFilterRequest.builder()
             .name("Get Test Filter")
-            .consumerId("test-consumer")
+            .consumerGroup("test-consumer")
             .outputTopic("test-topic")
+            .conditions(FilterConditions.builder()
+                .logic("AND")
             .conditions(List.of(
                 FilterCondition.builder()
                     .field("event_type")
@@ -136,10 +141,11 @@ public class FilterStorageServiceTest {
                     .value("CarCreated")
                     .build()
             ))
+                .build())
             .build();
         
-        Filter created = filterStorageService.create("v1", request);
-        Filter retrieved = filterStorageService.get("v1", created.getId());
+        Filter created = filterStorageService.create("test-schema-id", "v1", request);
+        Filter retrieved = filterStorageService.get("test-schema-id", "v1", created.getId());
         
         assertEquals(created.getId(), retrieved.getId());
         assertEquals(created.getName(), retrieved.getName());
@@ -148,7 +154,7 @@ public class FilterStorageServiceTest {
     @Test
     void testGetFilter_NotFound() {
         assertThrows(FilterNotFoundException.class, () -> {
-            filterStorageService.get("v1", "non-existent-id");
+            filterStorageService.get("test-schema-id", "v1", "non-existent-id");
         });
     }
     
@@ -156,8 +162,10 @@ public class FilterStorageServiceTest {
     void testListFilters() throws IOException {
         CreateFilterRequest request = CreateFilterRequest.builder()
             .name("List Test Filter")
-            .consumerId("test-consumer")
+            .consumerGroup("test-consumer")
             .outputTopic("test-topic")
+            .conditions(FilterConditions.builder()
+                .logic("AND")
             .conditions(List.of(
                 FilterCondition.builder()
                     .field("event_type")
@@ -165,10 +173,11 @@ public class FilterStorageServiceTest {
                     .value("CarCreated")
                     .build()
             ))
+                .build())
             .build();
         
-        Filter created = filterStorageService.create("v1", request);
-        List<Filter> filters = filterStorageService.list("v1");
+        Filter created = filterStorageService.create("test-schema-id", "v1", request);
+        List<Filter> filters = filterStorageService.list("test-schema-id", "v1");
         
         assertTrue(filters.size() > 0);
         boolean found = filters.stream()
@@ -180,8 +189,10 @@ public class FilterStorageServiceTest {
     void testUpdateFilter() throws IOException {
         CreateFilterRequest createRequest = CreateFilterRequest.builder()
             .name("Update Test Filter")
-            .consumerId("test-consumer")
+            .consumerGroup("test-consumer")
             .outputTopic("test-topic")
+            .conditions(FilterConditions.builder()
+                .logic("AND")
             .conditions(List.of(
                 FilterCondition.builder()
                     .field("event_type")
@@ -189,68 +200,76 @@ public class FilterStorageServiceTest {
                     .value("CarCreated")
                     .build()
             ))
+                .build())
             .build();
         
-        Filter created = filterStorageService.create("v1", createRequest);
+        Filter created = filterStorageService.create("test-schema-id", "v1", createRequest);
         
         UpdateFilterRequest updateRequest = UpdateFilterRequest.builder()
             .name("Updated Filter Name")
             .description("Updated Description")
             .build();
         
-        Filter updated = filterStorageService.update("v1", created.getId(), updateRequest);
+        Filter updated = filterStorageService.update("test-schema-id", "v1", created.getId(), updateRequest);
         
         assertEquals("Updated Filter Name", updated.getName());
         assertEquals("Updated Description", updated.getDescription());
         // Version is automatically incremented by Hibernate @Version on save
         // After save, version should be incremented, but we need to reload to see it
-        Filter reloaded = filterStorageService.get("v1", updated.getId());
+        Filter reloaded = filterStorageService.get("test-schema-id", "v1", updated.getId());
         assertTrue(reloaded.getVersion() >= updated.getVersion()); // Version should increment
     }
     
     @Test
-    void testApproveFilter() throws IOException {
+    void testApproveFilterForAllTargets() throws IOException {
         CreateFilterRequest request = CreateFilterRequest.builder()
-            .name("Approve Test Filter")
-            .consumerId("test-consumer")
+            .name("Approve All Targets Test Filter")
+            .consumerGroup("test-consumer")
             .outputTopic("test-topic")
-            .conditions(List.of(
-                FilterCondition.builder()
-                    .field("event_type")
-                    .operator("equals")
-                    .value("CarCreated")
-                    .build()
-            ))
+            .targets(List.of("flink", "spring"))
+            .conditions(FilterConditions.builder()
+                .logic("AND")
+                .conditions(List.of(
+                    FilterCondition.builder()
+                        .field("event_type")
+                        .operator("equals")
+                        .value("CarCreated")
+                        .build()
+                ))
+                .build())
             .build();
         
-        Filter created = filterStorageService.create("v1", request);
-        Filter approved = filterStorageService.approve("v1", created.getId(), "test-user");
+        Filter created = filterStorageService.create("test-schema-id", "v1", request);
+        Filter approvedFlink = filterStorageService.approveForTarget("test-schema-id", "v1", created.getId(), "flink", "test-user");
+        Filter approvedBoth = filterStorageService.approveForTarget("test-schema-id", "v1", created.getId(), "spring", "test-user");
         
-        assertEquals("approved", approved.getStatus());
-        assertEquals("test-user", approved.getApprovedBy());
-        assertNotNull(approved.getApprovedAt());
-        // Legacy approve should approve for all targets
-        assertTrue(approved.getApprovedForFlink());
-        assertTrue(approved.getApprovedForSpring());
+        assertEquals("approved", approvedBoth.getStatus());
+        assertTrue(approvedBoth.getApprovedForFlink());
+        assertTrue(approvedBoth.getApprovedForSpring());
+        assertEquals("test-user", approvedBoth.getApprovedForFlinkBy());
+        assertEquals("test-user", approvedBoth.getApprovedForSpringBy());
     }
     
     @Test
     void testCreateFilter_WithTargets() throws IOException {
         CreateFilterRequest request = CreateFilterRequest.builder()
             .name("Single Target Filter")
-            .consumerId("test-consumer")
+            .consumerGroup("test-consumer")
             .outputTopic("test-topic")
             .targets(List.of("flink"))
-            .conditions(List.of(
-                FilterCondition.builder()
-                    .field("event_type")
-                    .operator("equals")
-                    .value("CarCreated")
-                    .build()
-            ))
+            .conditions(FilterConditions.builder()
+                .logic("AND")
+                .conditions(List.of(
+                    FilterCondition.builder()
+                        .field("event_type")
+                        .operator("equals")
+                        .value("CarCreated")
+                        .build()
+                ))
+                .build())
             .build();
         
-        Filter filter = filterStorageService.create("v1", request);
+        Filter filter = filterStorageService.create("test-schema-id", "v1", request);
         
         assertNotNull(filter.getTargets());
         assertEquals(1, filter.getTargets().size());
@@ -262,20 +281,23 @@ public class FilterStorageServiceTest {
     void testApproveForTarget_Flink() throws IOException {
         CreateFilterRequest request = CreateFilterRequest.builder()
             .name("Approve Target Test Filter")
-            .consumerId("test-consumer")
+            .consumerGroup("test-consumer")
             .outputTopic("test-topic")
             .targets(List.of("flink", "spring"))
-            .conditions(List.of(
-                FilterCondition.builder()
-                    .field("event_type")
-                    .operator("equals")
-                    .value("CarCreated")
-                    .build()
-            ))
+            .conditions(FilterConditions.builder()
+                .logic("AND")
+                .conditions(List.of(
+                    FilterCondition.builder()
+                        .field("event_type")
+                        .operator("equals")
+                        .value("CarCreated")
+                        .build()
+                ))
+                .build())
             .build();
         
-        Filter created = filterStorageService.create("v1", request);
-        Filter approved = filterStorageService.approveForTarget("v1", created.getId(), "flink", "test-user");
+        Filter created = filterStorageService.create("test-schema-id", "v1", request);
+        Filter approved = filterStorageService.approveForTarget("test-schema-id", "v1", created.getId(), "flink", "test-user");
         
         assertTrue(approved.getApprovedForFlink());
         assertFalse(approved.getApprovedForSpring());
@@ -289,20 +311,23 @@ public class FilterStorageServiceTest {
     void testApproveForTarget_Spring() throws IOException {
         CreateFilterRequest request = CreateFilterRequest.builder()
             .name("Approve Spring Test Filter")
-            .consumerId("test-consumer")
+            .consumerGroup("test-consumer")
             .outputTopic("test-topic")
             .targets(List.of("flink", "spring"))
-            .conditions(List.of(
-                FilterCondition.builder()
-                    .field("event_type")
-                    .operator("equals")
-                    .value("CarCreated")
-                    .build()
-            ))
+            .conditions(FilterConditions.builder()
+                .logic("AND")
+                .conditions(List.of(
+                    FilterCondition.builder()
+                        .field("event_type")
+                        .operator("equals")
+                        .value("CarCreated")
+                        .build()
+                ))
+                .build())
             .build();
         
-        Filter created = filterStorageService.create("v1", request);
-        Filter approved = filterStorageService.approveForTarget("v1", created.getId(), "spring", "test-user");
+        Filter created = filterStorageService.create("test-schema-id", "v1", request);
+        Filter approved = filterStorageService.approveForTarget("test-schema-id", "v1", created.getId(), "spring", "test-user");
         
         assertFalse(approved.getApprovedForFlink());
         assertTrue(approved.getApprovedForSpring());
@@ -314,21 +339,24 @@ public class FilterStorageServiceTest {
     void testApproveForTarget_Both() throws IOException {
         CreateFilterRequest request = CreateFilterRequest.builder()
             .name("Approve Both Test Filter")
-            .consumerId("test-consumer")
+            .consumerGroup("test-consumer")
             .outputTopic("test-topic")
             .targets(List.of("flink", "spring"))
-            .conditions(List.of(
-                FilterCondition.builder()
-                    .field("event_type")
-                    .operator("equals")
-                    .value("CarCreated")
-                    .build()
-            ))
+            .conditions(FilterConditions.builder()
+                .logic("AND")
+                .conditions(List.of(
+                    FilterCondition.builder()
+                        .field("event_type")
+                        .operator("equals")
+                        .value("CarCreated")
+                        .build()
+                ))
+                .build())
             .build();
         
-        Filter created = filterStorageService.create("v1", request);
-        Filter approvedFlink = filterStorageService.approveForTarget("v1", created.getId(), "flink", "test-user");
-        Filter approvedBoth = filterStorageService.approveForTarget("v1", created.getId(), "spring", "test-user");
+        Filter created = filterStorageService.create("test-schema-id", "v1", request);
+        Filter approvedFlink = filterStorageService.approveForTarget("test-schema-id", "v1", created.getId(), "flink", "test-user");
+        Filter approvedBoth = filterStorageService.approveForTarget("test-schema-id", "v1", created.getId(), "spring", "test-user");
         
         assertTrue(approvedBoth.getApprovedForFlink());
         assertTrue(approvedBoth.getApprovedForSpring());
@@ -339,22 +367,25 @@ public class FilterStorageServiceTest {
     void testApproveForTarget_InvalidTarget() throws IOException {
         CreateFilterRequest request = CreateFilterRequest.builder()
             .name("Invalid Target Test Filter")
-            .consumerId("test-consumer")
+            .consumerGroup("test-consumer")
             .outputTopic("test-topic")
             .targets(List.of("flink"))
-            .conditions(List.of(
-                FilterCondition.builder()
-                    .field("event_type")
-                    .operator("equals")
-                    .value("CarCreated")
-                    .build()
-            ))
+            .conditions(FilterConditions.builder()
+                .logic("AND")
+                .conditions(List.of(
+                    FilterCondition.builder()
+                        .field("event_type")
+                        .operator("equals")
+                        .value("CarCreated")
+                        .build()
+                ))
+                .build())
             .build();
         
-        Filter created = filterStorageService.create("v1", request);
+        Filter created = filterStorageService.create("test-schema-id", "v1", request);
         
         assertThrows(IllegalArgumentException.class, () -> {
-            filterStorageService.approveForTarget("v1", created.getId(), "invalid", "test-user");
+            filterStorageService.approveForTarget("test-schema-id", "v1", created.getId(), "invalid", "test-user");
         });
     }
     
@@ -362,22 +393,25 @@ public class FilterStorageServiceTest {
     void testApproveForTarget_TargetNotInFilter() throws IOException {
         CreateFilterRequest request = CreateFilterRequest.builder()
             .name("Single Target Test Filter")
-            .consumerId("test-consumer")
+            .consumerGroup("test-consumer")
             .outputTopic("test-topic")
             .targets(List.of("flink"))
-            .conditions(List.of(
-                FilterCondition.builder()
-                    .field("event_type")
-                    .operator("equals")
-                    .value("CarCreated")
-                    .build()
-            ))
+            .conditions(FilterConditions.builder()
+                .logic("AND")
+                .conditions(List.of(
+                    FilterCondition.builder()
+                        .field("event_type")
+                        .operator("equals")
+                        .value("CarCreated")
+                        .build()
+                ))
+                .build())
             .build();
         
-        Filter created = filterStorageService.create("v1", request);
+        Filter created = filterStorageService.create("test-schema-id", "v1", request);
         
         assertThrows(IOException.class, () -> {
-            filterStorageService.approveForTarget("v1", created.getId(), "spring", "test-user");
+            filterStorageService.approveForTarget("test-schema-id", "v1", created.getId(), "spring", "test-user");
         });
     }
     
@@ -385,23 +419,26 @@ public class FilterStorageServiceTest {
     void testUpdateDeploymentForTarget_Flink() throws IOException {
         CreateFilterRequest request = CreateFilterRequest.builder()
             .name("Deploy Flink Test Filter")
-            .consumerId("test-consumer")
+            .consumerGroup("test-consumer")
             .outputTopic("test-topic")
             .targets(List.of("flink", "spring"))
-            .conditions(List.of(
-                FilterCondition.builder()
-                    .field("event_type")
-                    .operator("equals")
-                    .value("CarCreated")
-                    .build()
-            ))
+            .conditions(FilterConditions.builder()
+                .logic("AND")
+                .conditions(List.of(
+                    FilterCondition.builder()
+                        .field("event_type")
+                        .operator("equals")
+                        .value("CarCreated")
+                        .build()
+                ))
+                .build())
             .build();
         
-        Filter created = filterStorageService.create("v1", request);
-        filterStorageService.approveForTarget("v1", created.getId(), "flink", "test-user");
+        Filter created = filterStorageService.create("test-schema-id", "v1", request);
+        filterStorageService.approveForTarget("test-schema-id", "v1", created.getId(), "flink", "test-user");
         
         List<String> statementIds = List.of("stmt-123", "stmt-456");
-        Filter deployed = filterStorageService.updateDeploymentForTarget("v1", created.getId(), "flink", "deployed", statementIds, null);
+        Filter deployed = filterStorageService.updateDeploymentForTarget("test-schema-id", "v1", created.getId(), "flink", "deployed", statementIds, null);
         
         assertTrue(deployed.getDeployedToFlink());
         assertFalse(deployed.getDeployedToSpring());
@@ -413,22 +450,25 @@ public class FilterStorageServiceTest {
     void testUpdateDeploymentForTarget_Spring() throws IOException {
         CreateFilterRequest request = CreateFilterRequest.builder()
             .name("Deploy Spring Test Filter")
-            .consumerId("test-consumer")
+            .consumerGroup("test-consumer")
             .outputTopic("test-topic")
             .targets(List.of("flink", "spring"))
-            .conditions(List.of(
-                FilterCondition.builder()
-                    .field("event_type")
-                    .operator("equals")
-                    .value("CarCreated")
-                    .build()
-            ))
+            .conditions(FilterConditions.builder()
+                .logic("AND")
+                .conditions(List.of(
+                    FilterCondition.builder()
+                        .field("event_type")
+                        .operator("equals")
+                        .value("CarCreated")
+                        .build()
+                ))
+                .build())
             .build();
         
-        Filter created = filterStorageService.create("v1", request);
-        Filter approved = filterStorageService.approveForTarget("v1", created.getId(), "spring", "test-user");
+        Filter created = filterStorageService.create("test-schema-id", "v1", request);
+        Filter approved = filterStorageService.approveForTarget("test-schema-id", "v1", created.getId(), "spring", "test-user");
         
-        Filter deployed = filterStorageService.updateDeploymentForTarget("v1", approved.getId(), "spring", "deployed", null, null);
+        Filter deployed = filterStorageService.updateDeploymentForTarget("test-schema-id", "v1", approved.getId(), "spring", "deployed", null, null);
         
         assertFalse(deployed.getDeployedToFlink());
         assertTrue(deployed.getDeployedToSpring());
@@ -439,25 +479,28 @@ public class FilterStorageServiceTest {
     void testUpdateDeploymentForTarget_Both() throws IOException {
         CreateFilterRequest request = CreateFilterRequest.builder()
             .name("Deploy Both Test Filter")
-            .consumerId("test-consumer")
+            .consumerGroup("test-consumer")
             .outputTopic("test-topic")
             .targets(List.of("flink", "spring"))
-            .conditions(List.of(
-                FilterCondition.builder()
-                    .field("event_type")
-                    .operator("equals")
-                    .value("CarCreated")
-                    .build()
-            ))
+            .conditions(FilterConditions.builder()
+                .logic("AND")
+                .conditions(List.of(
+                    FilterCondition.builder()
+                        .field("event_type")
+                        .operator("equals")
+                        .value("CarCreated")
+                        .build()
+                ))
+                .build())
             .build();
         
-        Filter created = filterStorageService.create("v1", request);
-        Filter approvedFlink = filterStorageService.approveForTarget("v1", created.getId(), "flink", "test-user");
-        Filter approvedBoth = filterStorageService.approveForTarget("v1", created.getId(), "spring", "test-user");
+        Filter created = filterStorageService.create("test-schema-id", "v1", request);
+        Filter approvedFlink = filterStorageService.approveForTarget("test-schema-id", "v1", created.getId(), "flink", "test-user");
+        Filter approvedBoth = filterStorageService.approveForTarget("test-schema-id", "v1", created.getId(), "spring", "test-user");
         
         List<String> statementIds = List.of("stmt-123");
-        Filter deployedFlink = filterStorageService.updateDeploymentForTarget("v1", approvedBoth.getId(), "flink", "deployed", statementIds, null);
-        Filter deployedBoth = filterStorageService.updateDeploymentForTarget("v1", deployedFlink.getId(), "spring", "deployed", null, null);
+        Filter deployedFlink = filterStorageService.updateDeploymentForTarget("test-schema-id", "v1", approvedBoth.getId(), "flink", "deployed", statementIds, null);
+        Filter deployedBoth = filterStorageService.updateDeploymentForTarget("test-schema-id", "v1", deployedFlink.getId(), "spring", "deployed", null, null);
         
         assertTrue(deployedBoth.getDeployedToFlink());
         assertTrue(deployedBoth.getDeployedToSpring());
@@ -468,9 +511,11 @@ public class FilterStorageServiceTest {
     void testUpdateDeploymentForTarget_Failed() throws IOException {
         CreateFilterRequest request = CreateFilterRequest.builder()
             .name("Failed Deployment Test Filter")
-            .consumerId("test-consumer")
+            .consumerGroup("test-consumer")
             .outputTopic("test-topic")
             .targets(List.of("flink"))
+            .conditions(FilterConditions.builder()
+                .logic("AND")
             .conditions(List.of(
                 FilterCondition.builder()
                     .field("event_type")
@@ -478,12 +523,13 @@ public class FilterStorageServiceTest {
                     .value("CarCreated")
                     .build()
             ))
+                .build())
             .build();
         
-        Filter created = filterStorageService.create("v1", request);
-        Filter approved = filterStorageService.approveForTarget("v1", created.getId(), "flink", "test-user");
+        Filter created = filterStorageService.create("test-schema-id", "v1", request);
+        Filter approved = filterStorageService.approveForTarget("test-schema-id", "v1", created.getId(), "flink", "test-user");
         
-        Filter failed = filterStorageService.updateDeploymentForTarget("v1", approved.getId(), "flink", "failed", null, "Deployment error");
+        Filter failed = filterStorageService.updateDeploymentForTarget("test-schema-id", "v1", approved.getId(), "flink", "failed", null, "Deployment error");
         
         assertFalse(failed.getDeployedToFlink());
         assertEquals("failed", failed.getStatus());
@@ -494,8 +540,10 @@ public class FilterStorageServiceTest {
     void testDeleteFilter() throws IOException {
         CreateFilterRequest request = CreateFilterRequest.builder()
             .name("Delete Test Filter")
-            .consumerId("test-consumer")
+            .consumerGroup("test-consumer")
             .outputTopic("test-topic")
+            .conditions(FilterConditions.builder()
+                .logic("AND")
             .conditions(List.of(
                 FilterCondition.builder()
                     .field("event_type")
@@ -503,13 +551,14 @@ public class FilterStorageServiceTest {
                     .value("CarCreated")
                     .build()
             ))
+                .build())
             .build();
         
-        Filter created = filterStorageService.create("v1", request);
-        filterStorageService.delete("v1", created.getId());
+        Filter created = filterStorageService.create("test-schema-id", "v1", request);
+        filterStorageService.delete("test-schema-id", "v1", created.getId());
         
         assertThrows(FilterNotFoundException.class, () -> {
-            filterStorageService.get("v1", created.getId());
+            filterStorageService.get("test-schema-id", "v1", created.getId());
         });
     }
 }

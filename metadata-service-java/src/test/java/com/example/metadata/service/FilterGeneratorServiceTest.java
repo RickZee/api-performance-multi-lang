@@ -2,6 +2,7 @@ package com.example.metadata.service;
 
 import com.example.metadata.model.Filter;
 import com.example.metadata.model.FilterCondition;
+import com.example.metadata.model.FilterConditions;
 import com.example.metadata.model.GenerateSQLResponse;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -29,21 +30,23 @@ class FilterGeneratorServiceTest {
             .outputTopic("filtered-service-events-dealer-001")
             .enabled(true)
             .targets(new ArrayList<>(Arrays.asList("flink")))
-            .conditions(List.of(
-                FilterCondition.builder()
-                    .field("event_type")
-                    .operator("equals")
-                    .value("CarServiceDone")
-                    .valueType("string")
-                    .build(),
-                FilterCondition.builder()
-                    .field("header_data.dealerId")
-                    .operator("equals")
-                    .value("DEALER-001")
-                    .valueType("string")
-                    .build()
-            ))
-            .conditionLogic("AND")
+            .conditions(FilterConditions.builder()
+                .logic("AND")
+                .conditions(List.of(
+                    FilterCondition.builder()
+                        .field("event_type")
+                        .operator("equals")
+                        .value("CarServiceDone")
+                        .valueType("string")
+                        .build(),
+                    FilterCondition.builder()
+                        .field("header_data.dealerId")
+                        .operator("equals")
+                        .value("DEALER-001")
+                        .valueType("string")
+                        .build()
+                ))
+                .build())
             .build();
         
         GenerateSQLResponse response = generatorService.generateSQL(filter);
@@ -66,7 +69,10 @@ class FilterGeneratorServiceTest {
             .outputTopic("test-topic")
             .enabled(false)
             .targets(new ArrayList<>(Arrays.asList("flink")))
-            .conditions(List.of())
+            .conditions(FilterConditions.builder()
+                .logic("AND")
+                .conditions(List.of())
+                .build())
             .build();
         
         GenerateSQLResponse response = generatorService.generateSQL(filter);
@@ -84,15 +90,17 @@ class FilterGeneratorServiceTest {
             .outputTopic("test-topic")
             .enabled(true)
             .targets(new ArrayList<>(Arrays.asList("spring")))
-            .conditions(List.of(
-                FilterCondition.builder()
-                    .field("event_type")
-                    .operator("equals")
-                    .value("CarCreated")
-                    .valueType("string")
-                    .build()
-            ))
-            .conditionLogic("AND")
+            .conditions(FilterConditions.builder()
+                .logic("AND")
+                .conditions(List.of(
+                    FilterCondition.builder()
+                        .field("event_type")
+                        .operator("equals")
+                        .value("CarCreated")
+                        .valueType("string")
+                        .build()
+                ))
+                .build())
             .build();
         
         GenerateSQLResponse response = generatorService.generateSQL(filter);
@@ -110,15 +118,17 @@ class FilterGeneratorServiceTest {
             .outputTopic("test-topic")
             .enabled(true)
             .targets(new ArrayList<>(Arrays.asList("flink")))
-            .conditions(List.of(
-                FilterCondition.builder()
-                    .field("event_type")
-                    .operator("in")
-                    .values(List.of("CarCreated", "CarServiceDone"))
-                    .valueType("string")
-                    .build()
-            ))
-            .conditionLogic("AND")
+            .conditions(FilterConditions.builder()
+                .logic("AND")
+                .conditions(List.of(
+                    FilterCondition.builder()
+                        .field("event_type")
+                        .operator("in")
+                        .values(List.of("CarCreated", "CarServiceDone"))
+                        .valueType("string")
+                        .build()
+                ))
+                .build())
             .build();
         
         GenerateSQLResponse response = generatorService.generateSQL(filter);
@@ -137,21 +147,23 @@ class FilterGeneratorServiceTest {
             .outputTopic("test-topic")
             .enabled(true)
             .targets(new ArrayList<>(Arrays.asList("flink")))
-            .conditions(List.of(
-                FilterCondition.builder()
-                    .field("event_type")
-                    .operator("equals")
-                    .value("CarCreated")
-                    .valueType("string")
-                    .build(),
-                FilterCondition.builder()
-                    .field("event_type")
-                    .operator("equals")
-                    .value("CarServiceDone")
-                    .valueType("string")
-                    .build()
-            ))
-            .conditionLogic("OR")
+            .conditions(FilterConditions.builder()
+                .logic("OR")
+                .conditions(List.of(
+                    FilterCondition.builder()
+                        .field("event_type")
+                        .operator("equals")
+                        .value("CarCreated")
+                        .valueType("string")
+                        .build(),
+                    FilterCondition.builder()
+                        .field("event_type")
+                        .operator("equals")
+                        .value("CarServiceDone")
+                        .valueType("string")
+                        .build()
+                ))
+                .build())
             .build();
         
         GenerateSQLResponse response = generatorService.generateSQL(filter);
@@ -168,16 +180,18 @@ class FilterGeneratorServiceTest {
             .outputTopic("test-topic")
             .enabled(true)
             .targets(new ArrayList<>(Arrays.asList("flink")))
-            .conditions(List.of(
-                FilterCondition.builder()
-                    .field("year")
-                    .operator("between")
-                    .min(2020)
-                    .max(2024)
-                    .valueType("integer")
-                    .build()
-            ))
-            .conditionLogic("AND")
+            .conditions(FilterConditions.builder()
+                .logic("AND")
+                .conditions(List.of(
+                    FilterCondition.builder()
+                        .field("year")
+                        .operator("between")
+                        .min(2020)
+                        .max(2024)
+                        .valueType("integer")
+                        .build()
+                ))
+                .build())
             .build();
         
         GenerateSQLResponse response = generatorService.generateSQL(filter);

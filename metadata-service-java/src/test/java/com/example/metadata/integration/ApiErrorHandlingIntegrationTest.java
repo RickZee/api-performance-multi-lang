@@ -1,5 +1,6 @@
 package com.example.metadata.integration;
 
+import com.example.metadata.model.ApproveFilterRequest;
 import com.example.metadata.service.GitSyncService;
 import com.example.metadata.testutil.TestEventGenerator;
 import com.example.metadata.testutil.TestRepoSetup;
@@ -214,28 +215,28 @@ public class ApiErrorHandlingIntegrationTest {
     void testCreateFilter_InvalidRequest() {
         // Missing required fields
         webTestClient.post()
-            .uri("/api/v1/filters?version=v1")
+            .uri("/api/v1/filters?schemaId=test-schema-id&version=v1")
             .bodyValue("{}")
             .exchange()
             .expectStatus().isBadRequest();
         
         // Empty name
         webTestClient.post()
-            .uri("/api/v1/filters?version=v1")
+            .uri("/api/v1/filters?schemaId=test-schema-id&version=v1")
             .bodyValue("{\"name\": \"\", \"consumerId\": \"test\", \"outputTopic\": \"test\", \"conditions\": []}")
             .exchange()
             .expectStatus().isBadRequest();
         
         // Missing consumerId
         webTestClient.post()
-            .uri("/api/v1/filters?version=v1")
+            .uri("/api/v1/filters?schemaId=test-schema-id&version=v1")
             .bodyValue("{\"name\": \"Test\", \"outputTopic\": \"test\", \"conditions\": []}")
             .exchange()
             .expectStatus().isBadRequest();
         
         // Empty conditions array
         webTestClient.post()
-            .uri("/api/v1/filters?version=v1")
+            .uri("/api/v1/filters?schemaId=test-schema-id&version=v1")
             .bodyValue("{\"name\": \"Test\", \"consumerId\": \"test\", \"outputTopic\": \"test\", \"conditions\": []}")
             .exchange()
             .expectStatus().isBadRequest();
@@ -244,7 +245,7 @@ public class ApiErrorHandlingIntegrationTest {
     @Test
     void testGetFilter_InvalidId() {
         webTestClient.get()
-            .uri("/api/v1/filters/../etc/passwd?version=v1")
+            .uri("/api/v1/filters/../etc/passwd?schemaId=test-schema-id&version=v1")
             .exchange()
             .expectStatus().isNotFound();
     }
@@ -252,7 +253,7 @@ public class ApiErrorHandlingIntegrationTest {
     @Test
     void testUpdateFilter_NotFound() {
         webTestClient.put()
-            .uri("/api/v1/filters/non-existent-id?version=v1")
+            .uri("/api/v1/filters/non-existent-id?schemaId=test-schema-id&version=v1")
             .contentType(org.springframework.http.MediaType.APPLICATION_JSON)
             .bodyValue("{\"name\": \"Updated\"}")
             .exchange()
@@ -262,7 +263,7 @@ public class ApiErrorHandlingIntegrationTest {
     @Test
     void testDeleteFilter_NotFound() {
         webTestClient.delete()
-            .uri("/api/v1/filters/non-existent-id?version=v1")
+            .uri("/api/v1/filters/non-existent-id?schemaId=test-schema-id&version=v1")
             .exchange()
             .expectStatus().isNotFound();
     }
@@ -270,17 +271,20 @@ public class ApiErrorHandlingIntegrationTest {
     @Test
     void testGenerateSQL_NotFound() {
         webTestClient.get()
-            .uri("/api/v1/filters/non-existent-id/sql?version=v1")
+            .uri("/api/v1/filters/non-existent-id/sql?schemaId=test-schema-id&version=v1")
             .exchange()
             .expectStatus().isNotFound();
     }
     
     @Test
     void testApproveFilter_NotFound() {
+        ApproveFilterRequest approveRequest = ApproveFilterRequest.builder()
+            .approvedBy("user")
+            .build();
+        
         webTestClient.patch()
-            .uri("/api/v1/filters/non-existent-id?version=v1")
-            .contentType(org.springframework.http.MediaType.APPLICATION_JSON)
-            .bodyValue("{\"status\": \"approved\", \"approvedBy\": \"user\"}")
+            .uri("/api/v1/filters/non-existent-id/approvals/flink?schemaId=test-schema-id&version=v1")
+            .bodyValue(approveRequest)
             .exchange()
             .expectStatus().isNotFound();
     }

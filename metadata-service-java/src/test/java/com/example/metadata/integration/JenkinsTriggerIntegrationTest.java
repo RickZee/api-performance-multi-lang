@@ -147,22 +147,24 @@ class JenkinsTriggerIntegrationTest {
         CreateFilterRequest request = CreateFilterRequest.builder()
             .name("Test Filter for Jenkins")
             .description("Test filter to verify Jenkins triggering")
-            .consumerId("test-consumer")
+            .consumerGroup("test-consumer")
             .outputTopic("test-topic")
-            .conditions(List.of(
-                FilterCondition.builder()
-                    .field("event_type")
-                    .operator("equals")
-                    .value("CarCreated")
-                    .valueType("string")
-                    .build()
-            ))
+            .conditions(FilterConditions.builder()
+                .logic("AND")
+                .conditions(List.of(
+                    FilterCondition.builder()
+                        .field("event_type")
+                        .operator("equals")
+                        .value("CarCreated")
+                        .valueType("string")
+                        .build()
+                ))
+                .build())
             .enabled(true)
-            .conditionLogic("AND")
             .build();
 
         Filter created = webTestClient.post()
-            .uri("/api/v1/filters?version=v1")
+            .uri("/api/v1/filters?schemaId=test-schema-id&version=v1")
             .bodyValue(request)
             .exchange()
             .expectStatus().isCreated()
@@ -202,7 +204,7 @@ class JenkinsTriggerIntegrationTest {
             .build();
 
         webTestClient.put()
-            .uri("/api/v1/filters/{id}?version=v1", filterId)
+            .uri("/api/v1/filters/{id}?schemaId=test-schema-id&version=v1", filterId)
             .bodyValue(request)
             .exchange()
             .expectStatus().isOk()
@@ -223,14 +225,21 @@ class JenkinsTriggerIntegrationTest {
     @Order(4)
     @DisplayName("Approving a filter should trigger Jenkins build with approver info")
     void testApproveFilterTriggersJenkins() throws InterruptedException {
-        UpdateFilterStatusRequest request = UpdateFilterStatusRequest.builder()
-            .status("approved")
+        ApproveFilterRequest approveRequest = ApproveFilterRequest.builder()
             .approvedBy("test-reviewer@example.com")
             .build();
 
+        // Approve for Flink
         webTestClient.patch()
-            .uri("/api/v1/filters/{id}?version=v1", filterId)
-            .bodyValue(request)
+            .uri("/api/v1/filters/{id}/approvals/flink?schemaId=test-schema-id&version=v1", filterId)
+            .bodyValue(approveRequest)
+            .exchange()
+            .expectStatus().isOk();
+
+        // Approve for Spring
+        webTestClient.patch()
+            .uri("/api/v1/filters/{id}/approvals/spring?schemaId=test-schema-id&version=v1", filterId)
+            .bodyValue(approveRequest)
             .exchange()
             .expectStatus().isOk()
             .expectBody(Filter.class)
@@ -254,21 +263,24 @@ class JenkinsTriggerIntegrationTest {
         // First create a filter to delete
         CreateFilterRequest createRequest = CreateFilterRequest.builder()
             .name("Filter to Delete")
-            .consumerId("test-consumer")
+            .consumerGroup("test-consumer")
             .outputTopic("test-topic")
-            .conditions(List.of(
-                FilterCondition.builder()
-                    .field("event_type")
-                    .operator("equals")
-                    .value("CarCreated")
-                    .valueType("string")
-                    .build()
-            ))
+            .conditions(FilterConditions.builder()
+                .logic("AND")
+                .conditions(List.of(
+                    FilterCondition.builder()
+                        .field("event_type")
+                        .operator("equals")
+                        .value("CarCreated")
+                        .valueType("string")
+                        .build()
+                ))
+                .build())
             .enabled(true)
             .build();
 
         Filter toDelete = webTestClient.post()
-            .uri("/api/v1/filters?version=v1")
+            .uri("/api/v1/filters?schemaId=test-schema-id&version=v1")
             .bodyValue(createRequest)
             .exchange()
             .expectStatus().isCreated()
@@ -282,7 +294,7 @@ class JenkinsTriggerIntegrationTest {
 
         // Now delete it
         webTestClient.delete()
-            .uri("/api/v1/filters/{id}?version=v1", toDelete.getId())
+            .uri("/api/v1/filters/{id}?schemaId=test-schema-id&version=v1", toDelete.getId())
             .exchange()
             .expectStatus().isNoContent();
 
@@ -291,7 +303,7 @@ class JenkinsTriggerIntegrationTest {
 
         // Verify it's deleted
         webTestClient.get()
-            .uri("/api/v1/filters/{id}?version=v1", toDelete.getId())
+            .uri("/api/v1/filters/{id}?schemaId=test-schema-id&version=v1", toDelete.getId())
             .exchange()
             .expectStatus().isNotFound();
         
@@ -323,8 +335,10 @@ class JenkinsTriggerIntegrationTest {
         try {
             CreateFilterRequest request = CreateFilterRequest.builder()
                 .name("Filter with Jenkins Failure")
-                .consumerId("test-consumer")
+                .consumerGroup("test-consumer")
                 .outputTopic("test-topic")
+                .conditions(FilterConditions.builder()
+                .logic("AND")
                 .conditions(List.of(
                     FilterCondition.builder()
                         .field("event_type")
@@ -333,12 +347,13 @@ class JenkinsTriggerIntegrationTest {
                         .valueType("string")
                         .build()
                 ))
+                .build())
                 .enabled(true)
                 .build();
 
             // Filter creation should still succeed even if Jenkins fails
             Filter created = webTestClient.post()
-                .uri("/api/v1/filters?version=v1")
+                .uri("/api/v1/filters?schemaId=test-schema-id&version=v1")
                 .bodyValue(request)
                 .exchange()
                 .expectStatus().isCreated()
@@ -351,7 +366,7 @@ class JenkinsTriggerIntegrationTest {
             
             // Clean up
             webTestClient.delete()
-                .uri("/api/v1/filters/{id}?version=v1", created.getId())
+                .uri("/api/v1/filters/{id}?schemaId=test-schema-id&version=v1", created.getId())
                 .exchange()
                 .expectStatus().isNoContent();
         } finally {
@@ -370,8 +385,10 @@ class JenkinsTriggerIntegrationTest {
         try {
             CreateFilterRequest request = CreateFilterRequest.builder()
                 .name("Filter without Create Trigger")
-                .consumerId("test-consumer")
+                .consumerGroup("test-consumer")
                 .outputTopic("test-topic")
+                .conditions(FilterConditions.builder()
+                .logic("AND")
                 .conditions(List.of(
                     FilterCondition.builder()
                         .field("event_type")
@@ -380,12 +397,13 @@ class JenkinsTriggerIntegrationTest {
                         .valueType("string")
                         .build()
                 ))
+                .build())
                 .enabled(true)
                 .build();
 
             // Filter should still be created
             Filter created = webTestClient.post()
-                .uri("/api/v1/filters?version=v1")
+                .uri("/api/v1/filters?schemaId=test-schema-id&version=v1")
                 .bodyValue(request)
                 .exchange()
                 .expectStatus().isCreated()
@@ -397,7 +415,7 @@ class JenkinsTriggerIntegrationTest {
             
             // Clean up
             webTestClient.delete()
-                .uri("/api/v1/filters/{id}?version=v1", created.getId())
+                .uri("/api/v1/filters/{id}?schemaId=test-schema-id&version=v1", created.getId())
                 .exchange()
                 .expectStatus().isNoContent();
         } finally {

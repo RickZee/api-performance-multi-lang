@@ -1,6 +1,6 @@
 package com.example.metadata.repository.entity;
 
-import com.example.metadata.model.FilterCondition;
+import com.example.metadata.model.FilterConditions;
 import com.example.metadata.repository.converter.FilterConditionsConverter;
 import com.example.metadata.repository.converter.StringListConverter;
 import jakarta.persistence.*;
@@ -31,6 +31,9 @@ public class FilterEntity {
     @Column(name = "id", length = 255)
     private String id;
     
+    @Column(name = "schema_id", nullable = false, length = 255)
+    private String schemaId;
+    
     @Column(name = "schema_version", nullable = false, length = 50)
     private String schemaVersion;
     
@@ -40,8 +43,8 @@ public class FilterEntity {
     @Column(name = "description", columnDefinition = "TEXT")
     private String description;
     
-    @Column(name = "consumer_id", length = 255)
-    private String consumerId;
+    @Column(name = "consumer_group", length = 255)
+    private String consumerGroup;
     
     @Column(name = "output_topic", nullable = false, length = 255)
     private String outputTopic;
@@ -49,15 +52,14 @@ public class FilterEntity {
     @Convert(converter = FilterConditionsConverter.class)
     @Column(name = "conditions", nullable = false, length = 10000)
     @Builder.Default
-    private List<FilterCondition> conditions = new ArrayList<>();
+    private FilterConditions conditions = FilterConditions.builder()
+        .logic("AND")
+        .conditions(new ArrayList<>())
+        .build();
     
     @Column(name = "enabled", nullable = false)
     @Builder.Default
     private Boolean enabled = true;
-    
-    @Column(name = "condition_logic", nullable = false, length = 10)
-    @Builder.Default
-    private String conditionLogic = "AND";
     
     @Column(name = "status", nullable = false, length = 50)
     @Builder.Default
@@ -89,6 +91,9 @@ public class FilterEntity {
     @Convert(converter = StringListConverter.class)
     @Column(name = "flink_statement_ids", length = 10000)
     private List<String> flinkStatementIds;
+    
+    @Column(name = "spring_filter_id", length = 255)
+    private String springFilterId;
     
     @Convert(converter = StringListConverter.class)
     @Column(name = "targets", length = 10000)

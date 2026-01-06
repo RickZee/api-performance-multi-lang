@@ -19,20 +19,17 @@ public class UpdateFilterRequest {
     @JsonProperty("description")
     private String description;
     
-    @JsonProperty("consumerId")
-    private String consumerId;
+    @JsonProperty("consumerGroup")
+    private String consumerGroup;
     
     @JsonProperty("outputTopic")
     private String outputTopic;
     
     @JsonProperty("conditions")
-    private List<FilterCondition> conditions;
+    private FilterConditions conditions;
     
     @JsonProperty("enabled")
     private Boolean enabled;
-    
-    @JsonProperty("conditionLogic")
-    private String conditionLogic;
     
     @JsonProperty("targets")
     private List<String> targets;

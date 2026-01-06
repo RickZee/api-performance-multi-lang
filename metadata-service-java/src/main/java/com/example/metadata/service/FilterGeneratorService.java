@@ -88,8 +88,15 @@ public class FilterGeneratorService {
         List<String> whereClauses = new ArrayList<>();
         whereClauses.add("`__op` = 'c'"); // Always filter for create operations
 
-        for (FilterCondition condition : filter.getConditions()) {
-            String whereClause = generateWhereClause(condition, filter.getConditionLogic());
+        if (filter.getConditions() == null || filter.getConditions().getConditions() == null) {
+            throw new Exception("Filter conditions are required");
+        }
+        
+        String conditionLogic = filter.getConditions().getLogic() != null ? filter.getConditions().getLogic() : "AND";
+        List<FilterCondition> conditions = filter.getConditions().getConditions();
+
+        for (FilterCondition condition : conditions) {
+            String whereClause = generateWhereClause(condition, conditionLogic);
             if (whereClause != null && !whereClause.isEmpty()) {
                 whereClauses.add(whereClause);
             }
@@ -97,11 +104,11 @@ public class FilterGeneratorService {
 
         String whereSQL = String.join(" AND ", whereClauses);
         
-        if ("OR".equals(filter.getConditionLogic()) && filter.getConditions().size() > 1) {
+        if ("OR".equals(conditionLogic) && conditions.size() > 1) {
             // For OR logic, group conditions
             List<String> orClauses = new ArrayList<>();
             orClauses.add("`__op` = 'c'");
-            for (FilterCondition condition : filter.getConditions()) {
+            for (FilterCondition condition : conditions) {
                 String clause = generateWhereClause(condition, "");
                 if (clause != null && !clause.isEmpty()) {
                     orClauses.add(clause);

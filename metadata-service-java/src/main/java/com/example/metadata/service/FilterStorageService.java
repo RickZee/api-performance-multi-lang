@@ -2,6 +2,7 @@ package com.example.metadata.service;
 
 import com.example.metadata.exception.FilterNotFoundException;
 import com.example.metadata.model.Filter;
+import com.example.metadata.model.FilterConditions;
 import com.example.metadata.model.CreateFilterRequest;
 import com.example.metadata.model.UpdateFilterRequest;
 import com.example.metadata.repository.FilterRepository;
@@ -47,7 +48,11 @@ public class FilterStorageService {
     }
 
     @Transactional
-    public Filter create(String schemaVersion, CreateFilterRequest request) throws IOException {
+    public Filter create(String schemaId, String schemaVersion, CreateFilterRequest request) throws IOException {
+        if (schemaId == null || schemaId.trim().isEmpty()) {
+            throw new IllegalArgumentException("schemaId is required");
+        }
+        
         String filterId = generateFilterId(request.getName());
         
         // Check if filter already exists
@@ -62,15 +67,23 @@ public class FilterStorageService {
             targets = new ArrayList<>(Arrays.asList("flink", "spring"));
         }
         
+        // Ensure conditions has a default if not provided
+        FilterConditions conditions = request.getConditions();
+        if (conditions == null) {
+            conditions = FilterConditions.builder()
+                .logic("AND")
+                .conditions(new ArrayList<>())
+                .build();
+        }
+        
         Filter filter = Filter.builder()
                 .id(filterId)
                 .name(request.getName())
                 .description(request.getDescription())
-                .consumerId(request.getConsumerId())
+                .consumerGroup(request.getConsumerGroup())
                 .outputTopic(request.getOutputTopic())
-                .conditions(request.getConditions())
+                .conditions(conditions)
                 .enabled(request.isEnabled())
-                .conditionLogic(request.getConditionLogic() != null ? request.getConditionLogic() : "AND")
                 .status("pending_approval")
                 .targets(targets)
                 .approvedForFlink(false)
@@ -82,7 +95,7 @@ public class FilterStorageService {
                 .version(1)
                 .build();
         
-        saveToDatabase(schemaVersion, filter);
+        saveToDatabase(schemaId, schemaVersion, filter);
         
         // Dual-write mode: also write to files if enabled
         if (dualWriteEnabled) {
@@ -99,7 +112,11 @@ public class FilterStorageService {
         return filter;
     }
 
-    public Filter get(String schemaVersion, String filterId) throws IOException {
+    public Filter get(String schemaId, String schemaVersion, String filterId) throws IOException {
+        if (schemaId == null || schemaId.trim().isEmpty()) {
+            throw new IllegalArgumentException("schemaId is required");
+        }
+        
         // Try database first
         Optional<FilterEntity> entityOpt = filterRepository.findByIdAndSchemaVersion(filterId, schemaVersion);
         if (entityOpt.isPresent()) {
@@ -114,7 +131,11 @@ public class FilterStorageService {
         throw new FilterNotFoundException(filterId, schemaVersion);
     }
 
-    public List<Filter> list(String schemaVersion) throws IOException {
+    public List<Filter> list(String schemaId, String schemaVersion) throws IOException {
+        if (schemaId == null || schemaId.trim().isEmpty()) {
+            throw new IllegalArgumentException("schemaId is required");
+        }
+        
         // Try database first
         List<FilterEntity> entities = filterRepository.findBySchemaVersion(schemaVersion);
         if (!entities.isEmpty()) {
@@ -130,7 +151,11 @@ public class FilterStorageService {
     }
 
     @Transactional
-    public Filter update(String schemaVersion, String filterId, UpdateFilterRequest request) throws IOException {
+    public Filter update(String schemaId, String schemaVersion, String filterId, UpdateFilterRequest request) throws IOException {
+        if (schemaId == null || schemaId.trim().isEmpty()) {
+            throw new IllegalArgumentException("schemaId is required");
+        }
+        
         FilterEntity entity = filterRepository.findByIdAndSchemaVersion(filterId, schemaVersion)
                 .orElseThrow(() -> new FilterNotFoundException(filterId, schemaVersion));
         
@@ -143,20 +168,17 @@ public class FilterStorageService {
         if (request.getDescription() != null) {
             filter.setDescription(request.getDescription());
         }
-        if (request.getConsumerId() != null) {
-            filter.setConsumerId(request.getConsumerId());
+        if (request.getConsumerGroup() != null) {
+            filter.setConsumerGroup(request.getConsumerGroup());
         }
         if (request.getOutputTopic() != null) {
             filter.setOutputTopic(request.getOutputTopic());
         }
-        if (request.getConditions() != null && !request.getConditions().isEmpty()) {
+        if (request.getConditions() != null) {
             filter.setConditions(request.getConditions());
         }
         if (request.getEnabled() != null) {
             filter.setEnabled(request.getEnabled());
-        }
-        if (request.getConditionLogic() != null) {
-            filter.setConditionLogic(request.getConditionLogic());
         }
         if (request.getTargets() != null && !request.getTargets().isEmpty()) {
             filter.setTargets(request.getTargets());
@@ -165,7 +187,7 @@ public class FilterStorageService {
         filter.setUpdatedAt(Instant.now());
         // Don't manually increment version - Hibernate @Version will handle it automatically
         
-        saveToDatabase(schemaVersion, filter);
+        saveToDatabase(schemaId, schemaVersion, filter);
         
         // Dual-write mode: also write to files if enabled
         if (dualWriteEnabled) {
@@ -182,7 +204,11 @@ public class FilterStorageService {
     }
 
     @Transactional
-    public void delete(String schemaVersion, String filterId) throws IOException {
+    public void delete(String schemaId, String schemaVersion, String filterId) throws IOException {
+        if (schemaId == null || schemaId.trim().isEmpty()) {
+            throw new IllegalArgumentException("schemaId is required");
+        }
+        
         FilterEntity entity = filterRepository.findByIdAndSchemaVersion(filterId, schemaVersion)
                 .orElseThrow(() -> new FilterNotFoundException(filterId, schemaVersion));
         
@@ -201,61 +227,14 @@ public class FilterStorageService {
     }
 
     /**
-     * @deprecated Use approveForTarget instead for per-target approval
-     */
-    @Deprecated
-    @Transactional
-    public Filter approve(String schemaVersion, String filterId, String approvedBy) throws IOException {
-        FilterEntity entity = filterRepository.findByIdAndSchemaVersion(filterId, schemaVersion)
-                .orElseThrow(() -> new FilterNotFoundException(filterId, schemaVersion));
-        
-        Filter filter = filterMapper.toModel(entity);
-        
-        if (!"pending_approval".equals(filter.getStatus())) {
-            throw new IOException("Filter is not in pending_approval status");
-        }
-        
-        // For backward compatibility, approve for all targets
-        Instant now = Instant.now();
-        filter.setStatus("approved");
-        filter.setApprovedBy(approvedBy);
-        filter.setApprovedAt(now);
-        if (filter.getTargets() != null) {
-            if (filter.getTargets().contains("flink")) {
-                filter.setApprovedForFlink(true);
-                filter.setApprovedForFlinkAt(now);
-                filter.setApprovedForFlinkBy(approvedBy);
-            }
-            if (filter.getTargets().contains("spring")) {
-                filter.setApprovedForSpring(true);
-                filter.setApprovedForSpringAt(now);
-                filter.setApprovedForSpringBy(approvedBy);
-            }
-        }
-        filter.setUpdatedAt(now);
-        
-        saveToDatabase(schemaVersion, filter);
-        
-        // Dual-write mode: also write to files if enabled
-        if (dualWriteEnabled) {
-            try {
-                saveToFiles(schemaVersion, filter);
-            } catch (Exception e) {
-                log.warn("Failed to write filter to files in dual-write mode: {}", e.getMessage());
-            }
-        }
-        
-        log.info("Filter approved: schemaVersion={}, filterId={}, approvedBy={}", 
-                schemaVersion, filterId, approvedBy);
-        
-        return filter;
-    }
-    
-    /**
      * Approve filter for a specific target (flink or spring).
      */
     @Transactional
-    public Filter approveForTarget(String schemaVersion, String filterId, String target, String approvedBy) throws IOException {
+    public Filter approveForTarget(String schemaId, String schemaVersion, String filterId, String target, String approvedBy) throws IOException {
+        if (schemaId == null || schemaId.trim().isEmpty()) {
+            throw new IllegalArgumentException("schemaId is required");
+        }
+        
         FilterEntity entity = filterRepository.findByIdAndSchemaVersion(filterId, schemaVersion)
                 .orElseThrow(() -> new FilterNotFoundException(filterId, schemaVersion));
         
@@ -306,7 +285,7 @@ public class FilterStorageService {
         
         filter.setUpdatedAt(now);
         
-        saveToDatabase(schemaVersion, filter);
+        saveToDatabase(schemaId, schemaVersion, filter);
         
         // Dual-write mode: also write to files if enabled
         if (dualWriteEnabled) {
@@ -324,53 +303,15 @@ public class FilterStorageService {
     }
 
     /**
-     * @deprecated Use updateDeploymentForTarget instead for per-target deployment tracking
-     */
-    @Deprecated
-    @Transactional
-    public Filter updateDeployment(String schemaVersion, String filterId, String status, 
-                                   List<String> flinkStatementIds, String error) throws IOException {
-        FilterEntity entity = filterRepository.findByIdAndSchemaVersion(filterId, schemaVersion)
-                .orElseThrow(() -> new FilterNotFoundException(filterId, schemaVersion));
-        
-        Filter filter = filterMapper.toModel(entity);
-        
-        filter.setStatus(status);
-        filter.setFlinkStatementIds(flinkStatementIds);
-        if (error != null) {
-            filter.setDeploymentError(error);
-        }
-        if ("deployed".equals(status)) {
-            Instant now = Instant.now();
-            filter.setDeployedAt(now);
-            // For backward compatibility, set deployed_to_flink if filter has flink target
-            if (filter.getTargets() != null && filter.getTargets().contains("flink")) {
-                filter.setDeployedToFlink(true);
-                filter.setDeployedToFlinkAt(now);
-            }
-        }
-        filter.setUpdatedAt(Instant.now());
-        
-        saveToDatabase(schemaVersion, filter);
-        
-        // Dual-write mode: also write to files if enabled
-        if (dualWriteEnabled) {
-            try {
-                saveToFiles(schemaVersion, filter);
-            } catch (Exception e) {
-                log.warn("Failed to write filter to files in dual-write mode: {}", e.getMessage());
-            }
-        }
-        
-        return filter;
-    }
-    
-    /**
      * Update deployment status for a specific target (flink or spring).
      */
     @Transactional
-    public Filter updateDeploymentForTarget(String schemaVersion, String filterId, String target, 
+    public Filter updateDeploymentForTarget(String schemaId, String schemaVersion, String filterId, String target, 
                                             String status, List<String> statementIds, String error) throws IOException {
+        if (schemaId == null || schemaId.trim().isEmpty()) {
+            throw new IllegalArgumentException("schemaId is required");
+        }
+        
         FilterEntity entity = filterRepository.findByIdAndSchemaVersion(filterId, schemaVersion)
                 .orElseThrow(() -> new FilterNotFoundException(filterId, schemaVersion));
         
@@ -429,7 +370,7 @@ public class FilterStorageService {
         
         filter.setUpdatedAt(now);
         
-        saveToDatabase(schemaVersion, filter);
+        saveToDatabase(schemaId, schemaVersion, filter);
         
         // Dual-write mode: also write to files if enabled
         if (dualWriteEnabled) {
@@ -450,7 +391,11 @@ public class FilterStorageService {
      * Get active filters (enabled and not deleted) for a specific schema version.
      * Used by CDC Streaming Service for dynamic filter loading.
      */
-    public List<Filter> getActiveFilters(String schemaVersion) {
+    public List<Filter> getActiveFilters(String schemaId, String schemaVersion) {
+        if (schemaId == null || schemaId.trim().isEmpty()) {
+            throw new IllegalArgumentException("schemaId is required");
+        }
+        
         log.debug("Getting active filters for schema version: {}", schemaVersion);
         List<FilterEntity> entities = filterRepository.findActiveFiltersBySchemaVersion(schemaVersion);
         log.debug("Found {} active filter entities for schema version {}", entities.size(), schemaVersion);
@@ -464,7 +409,7 @@ public class FilterStorageService {
     
     // Private helper methods
     
-    private void saveToDatabase(String schemaVersion, Filter filter) {
+    private void saveToDatabase(String schemaId, String schemaVersion, Filter filter) {
         // Check if entity exists to preserve version for optimistic locking
         Optional<FilterEntity> existingEntity = filterRepository.findByIdAndSchemaVersion(filter.getId(), schemaVersion);
         
@@ -472,13 +417,13 @@ public class FilterStorageService {
         if (existingEntity.isPresent()) {
             // For updates, preserve the existing entity and update its fields
             entity = existingEntity.get();
+            entity.setSchemaId(schemaId);
             entity.setName(filter.getName());
             entity.setDescription(filter.getDescription());
-            entity.setConsumerId(filter.getConsumerId());
+            entity.setConsumerGroup(filter.getConsumerGroup());
             entity.setOutputTopic(filter.getOutputTopic());
             entity.setConditions(filter.getConditions());
             entity.setEnabled(filter.isEnabled());
-            entity.setConditionLogic(filter.getConditionLogic());
             entity.setStatus(filter.getStatus());
             entity.setUpdatedAt(filter.getUpdatedAt());
             entity.setApprovedBy(filter.getApprovedBy());
@@ -486,6 +431,7 @@ public class FilterStorageService {
             entity.setDeployedAt(filter.getDeployedAt());
             entity.setDeploymentError(filter.getDeploymentError());
             entity.setFlinkStatementIds(filter.getFlinkStatementIds());
+            entity.setSpringFilterId(filter.getSpringFilterId());
             entity.setTargets(filter.getTargets());
             entity.setApprovedForFlink(filter.getApprovedForFlink());
             entity.setApprovedForSpring(filter.getApprovedForSpring());
@@ -502,7 +448,7 @@ public class FilterStorageService {
             // Version will be automatically incremented by Hibernate @Version
         } else {
             // For new entities, use mapper
-            entity = filterMapper.toEntity(filter, schemaVersion);
+            entity = filterMapper.toEntity(filter, schemaId, schemaVersion);
         }
         
         filterRepository.save(entity);

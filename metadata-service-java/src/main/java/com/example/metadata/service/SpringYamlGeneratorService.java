@@ -102,9 +102,11 @@ public class SpringYamlGeneratorService {
         }
         lines.add("    outputTopic: " + outputTopic);
         
-        String conditionLogic = filter.getConditionLogic();
-        if (conditionLogic == null || conditionLogic.isEmpty()) {
-            conditionLogic = "AND";
+        String conditionLogic = "AND";
+        List<FilterCondition> conditions = new ArrayList<>();
+        if (filter.getConditions() != null) {
+            conditionLogic = filter.getConditions().getLogic() != null ? filter.getConditions().getLogic() : "AND";
+            conditions = filter.getConditions().getConditions() != null ? filter.getConditions().getConditions() : new ArrayList<>();
         }
         lines.add("    conditionLogic: " + conditionLogic);
         
@@ -112,9 +114,9 @@ public class SpringYamlGeneratorService {
         lines.add("    enabled: " + filter.isEnabled());
         
         // Add conditions
-        if (filter.getConditions() != null && !filter.getConditions().isEmpty()) {
+        if (conditions != null && !conditions.isEmpty()) {
             lines.add("    conditions:");
-            for (FilterCondition condition : filter.getConditions()) {
+            for (FilterCondition condition : conditions) {
                 lines.addAll(formatCondition(condition));
             }
         } else {

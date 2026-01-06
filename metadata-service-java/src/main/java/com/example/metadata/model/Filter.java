@@ -17,26 +17,26 @@ public class Filter {
     @JsonProperty("id")
     private String id;
     
+    @JsonProperty("schemaId")
+    private String schemaId;
+    
     @JsonProperty("name")
     private String name;
     
     @JsonProperty("description")
     private String description;
     
-    @JsonProperty("consumerId")
-    private String consumerId;
+    @JsonProperty("consumerGroup")
+    private String consumerGroup;
     
     @JsonProperty("outputTopic")
     private String outputTopic;
     
     @JsonProperty("conditions")
-    private List<FilterCondition> conditions;
+    private FilterConditions conditions;
     
     @JsonProperty("enabled")
     private boolean enabled;
-    
-    @JsonProperty("conditionLogic")
-    private String conditionLogic;
     
     @JsonProperty("status")
     private String status;
@@ -61,6 +61,9 @@ public class Filter {
     
     @JsonProperty("flinkStatementIds")
     private List<String> flinkStatementIds;
+    
+    @JsonProperty("springFilterId")
+    private String springFilterId;
     
     @JsonProperty("version")
     private int version;

@@ -186,30 +186,32 @@ class WorkflowIntegrationTest {
         CreateFilterRequest request = CreateFilterRequest.builder()
             .name("Service Events for Dealer 001")
             .description("Routes service events from Tesla Service Center SF to dedicated topic")
-            .consumerId("dealer-001-service-consumer")
+            .consumerGroup("dealer-001-service-consumer")
             .outputTopic("filtered-service-events-dealer-001")
-            .conditions(List.of(
-                FilterCondition.builder()
-                    .field("event_type")
-                    .operator("equals")
-                    .value("CarServiceDone")
-                    .valueType("string")
-                    .logicalOperator("AND")
-                    .build(),
-                FilterCondition.builder()
-                    .field("header_data.dealerId")
-                    .operator("equals")
-                    .value("DEALER-001")
-                    .valueType("string")
-                    .logicalOperator("AND")
-                    .build()
-            ))
+            .conditions(FilterConditions.builder()
+                .logic("AND")
+                .conditions(List.of(
+                    FilterCondition.builder()
+                        .field("event_type")
+                        .operator("equals")
+                        .value("CarServiceDone")
+                        .valueType("string")
+                        .logicalOperator("AND")
+                        .build(),
+                    FilterCondition.builder()
+                        .field("header_data.dealerId")
+                        .operator("equals")
+                        .value("DEALER-001")
+                        .valueType("string")
+                        .logicalOperator("AND")
+                        .build()
+                ))
+                .build())
             .enabled(true)
-            .conditionLogic("AND")
             .build();
 
         Filter created = webTestClient.post()
-            .uri("/api/v1/filters?version=v1")
+            .uri("/api/v1/filters?schemaId=test-schema-id&version=v1")
             .bodyValue(request)
             .exchange()
             .expectStatus().isCreated()
@@ -243,7 +245,7 @@ class WorkflowIntegrationTest {
         assertThat(filterId).isNotNull();
 
         webTestClient.get()
-            .uri("/api/v1/filters/{id}/sql?version=v1", filterId)
+            .uri("/api/v1/filters/{id}/sql?schemaId=test-schema-id&version=v1", filterId)
             .exchange()
             .expectStatus().isOk()
             .expectBody(GenerateSQLResponse.class)
@@ -261,7 +263,7 @@ class WorkflowIntegrationTest {
     @Order(3)
     @DisplayName("Workflow 1: Validate SQL")
     void testWorkflow1_ValidateSQL() throws IOException {
-        Filter filter = filterStorageService.get("v1", filterId);
+        Filter filter = filterStorageService.get("test-schema-id", "v1", filterId);
         GenerateSQLResponse sqlResponse = filterGeneratorService.generateSQL(filter);
 
         ValidateSQLRequest request = ValidateSQLRequest.builder()
@@ -269,7 +271,7 @@ class WorkflowIntegrationTest {
             .build();
 
         webTestClient.post()
-            .uri("/api/v1/filters/{id}/validations?version=v1", filterId)
+            .uri("/api/v1/filters/{id}/validations?schemaId=test-schema-id&version=v1", filterId)
             .bodyValue(request)
             .exchange()
             .expectStatus().isCreated()
@@ -283,21 +285,30 @@ class WorkflowIntegrationTest {
     @Order(4)
     @DisplayName("Workflow 1: Approve Filter with Jenkins Trigger")
     void testWorkflow1_ApproveFilter() throws InterruptedException {
-        UpdateFilterStatusRequest request = UpdateFilterStatusRequest.builder()
-            .status("approved")
+        ApproveFilterRequest approveRequest = ApproveFilterRequest.builder()
             .approvedBy("test-reviewer@example.com")
             .build();
 
+        // Approve for Flink
         webTestClient.patch()
-            .uri("/api/v1/filters/{id}?version=v1", filterId)
-            .bodyValue(request)
+            .uri("/api/v1/filters/{id}/approvals/flink?schemaId=test-schema-id&version=v1", filterId)
+            .bodyValue(approveRequest)
+            .exchange()
+            .expectStatus().isOk();
+
+        // Approve for Spring
+        webTestClient.patch()
+            .uri("/api/v1/filters/{id}/approvals/spring?schemaId=test-schema-id&version=v1", filterId)
+            .bodyValue(approveRequest)
             .exchange()
             .expectStatus().isOk()
             .expectBody(Filter.class)
             .value(filter -> {
                 assertThat(filter.getStatus()).isEqualTo("approved");
-                assertThat(filter.getApprovedBy()).isEqualTo("test-reviewer@example.com");
-                assertThat(filter.getApprovedAt()).isNotNull();
+                assertThat(filter.getApprovedForFlink()).isTrue();
+                assertThat(filter.getApprovedForSpring()).isTrue();
+                assertThat(filter.getApprovedForFlinkBy()).isEqualTo("test-reviewer@example.com");
+                assertThat(filter.getApprovedForSpringBy()).isEqualTo("test-reviewer@example.com");
             });
 
         // Wait for async Jenkins call
@@ -316,7 +327,7 @@ class WorkflowIntegrationTest {
         // For now, we verify the deployment endpoint exists and Jenkins is triggered
         
         // Verify filter is approved before deployment
-        Filter filter = filterStorageService.get("v1", filterId);
+        Filter filter = filterStorageService.get("test-schema-id", "v1", filterId);
         assertThat(filter.getStatus()).isEqualTo("approved");
 
         // Wait for async Jenkins call
@@ -338,7 +349,7 @@ class WorkflowIntegrationTest {
             .build();
 
         webTestClient.put()
-            .uri("/api/v1/filters/{id}?version=v1", filterId)
+            .uri("/api/v1/filters/{id}?schemaId=test-schema-id&version=v1", filterId)
             .bodyValue(request)
             .exchange()
             .expectStatus().isOk()
@@ -366,21 +377,24 @@ class WorkflowIntegrationTest {
         // Create a separate filter to delete
         CreateFilterRequest createRequest = CreateFilterRequest.builder()
             .name("Filter to Delete")
-            .consumerId("test-consumer")
+            .consumerGroup("test-consumer")
             .outputTopic("test-topic")
-            .conditions(List.of(
-                FilterCondition.builder()
-                    .field("event_type")
-                    .operator("equals")
-                    .value("CarCreated")
-                    .valueType("string")
-                    .build()
-            ))
+            .conditions(FilterConditions.builder()
+                .logic("AND")
+                .conditions(List.of(
+                    FilterCondition.builder()
+                        .field("event_type")
+                        .operator("equals")
+                        .value("CarCreated")
+                        .valueType("string")
+                        .build()
+                ))
+                .build())
             .enabled(true)
             .build();
 
         Filter toDelete = webTestClient.post()
-            .uri("/api/v1/filters?version=v1")
+            .uri("/api/v1/filters?schemaId=test-schema-id&version=v1")
             .bodyValue(createRequest)
             .exchange()
             .expectStatus().isCreated()
@@ -393,7 +407,7 @@ class WorkflowIntegrationTest {
 
         // Delete the filter
         webTestClient.delete()
-            .uri("/api/v1/filters/{id}?version=v1", toDelete.getId())
+            .uri("/api/v1/filters/{id}?schemaId=test-schema-id&version=v1", toDelete.getId())
             .exchange()
             .expectStatus().isNoContent();
 
@@ -498,9 +512,11 @@ class WorkflowIntegrationTest {
         for (int i = 1; i <= 3; i++) {
             CreateFilterRequest request = CreateFilterRequest.builder()
                 .name("Filter " + i)
-                .consumerId("consumer-" + i)
+                .consumerGroup("consumer-" + i)
                 .outputTopic("filtered-" + i)
                 .enabled(true)
+                .conditions(FilterConditions.builder()
+                .logic("AND")
                 .conditions(List.of(
                     FilterCondition.builder()
                         .field("event_type")
@@ -509,12 +525,13 @@ class WorkflowIntegrationTest {
                         .valueType("string")
                         .build()
                 ))
-                .build();
-            filterStorageService.create("v1", request);
+                .build())
+            .build();
+            filterStorageService.create("test-schema-id", "v1", request);
         }
 
         // Manually trigger YAML generation (simulating what FilterController does)
-        List<Filter> filters = filterStorageService.list("v1");
+        List<Filter> filters = filterStorageService.list("test-schema-id", "v1");
         String yaml = springYamlGeneratorService.generateYaml(filters);
         springYamlWriterService.writeFiltersYaml(yaml);
 
@@ -532,21 +549,24 @@ class WorkflowIntegrationTest {
         // Create filter
         CreateFilterRequest createRequest = CreateFilterRequest.builder()
             .name("CI/CD Test Filter")
-            .consumerId("test-consumer")
+            .consumerGroup("test-consumer")
             .outputTopic("test-topic")
-            .conditions(List.of(
-                FilterCondition.builder()
-                    .field("event_type")
-                    .operator("equals")
-                    .value("CarCreated")
-                    .valueType("string")
-                    .build()
-            ))
+            .conditions(FilterConditions.builder()
+                .logic("AND")
+                .conditions(List.of(
+                    FilterCondition.builder()
+                        .field("event_type")
+                        .operator("equals")
+                        .value("CarCreated")
+                        .valueType("string")
+                        .build()
+                ))
+                .build())
             .enabled(true)
             .build();
 
         Filter testFilter = webTestClient.post()
-            .uri("/api/v1/filters?version=v1")
+            .uri("/api/v1/filters?schemaId=test-schema-id&version=v1")
             .bodyValue(createRequest)
             .exchange()
             .expectStatus().isCreated()
@@ -564,7 +584,7 @@ class WorkflowIntegrationTest {
             .build();
 
         webTestClient.put()
-            .uri("/api/v1/filters/{id}?version=v1", testFilter.getId())
+            .uri("/api/v1/filters/{id}?schemaId=test-schema-id&version=v1", testFilter.getId())
             .bodyValue(updateRequest)
             .exchange()
             .expectStatus().isOk();
@@ -573,14 +593,21 @@ class WorkflowIntegrationTest {
         assertThat(mockJenkins.wasTriggered("update")).isTrue();
         mockJenkins.reset();
 
-        // Approve filter
-        UpdateFilterStatusRequest approveRequest = UpdateFilterStatusRequest.builder()
-            .status("approved")
+        // Approve filter for both targets
+        ApproveFilterRequest approveRequest = ApproveFilterRequest.builder()
             .approvedBy("test-reviewer")
             .build();
 
+        // Approve for Flink
         webTestClient.patch()
-            .uri("/api/v1/filters/{id}?version=v1", testFilter.getId())
+            .uri("/api/v1/filters/{id}/approvals/flink?schemaId=test-schema-id&version=v1", testFilter.getId())
+            .bodyValue(approveRequest)
+            .exchange()
+            .expectStatus().isOk();
+
+        // Approve for Spring
+        webTestClient.patch()
+            .uri("/api/v1/filters/{id}/approvals/spring?schemaId=test-schema-id&version=v1", testFilter.getId())
             .bodyValue(approveRequest)
             .exchange()
             .expectStatus().isOk();
@@ -591,7 +618,7 @@ class WorkflowIntegrationTest {
 
         // Delete filter
         webTestClient.delete()
-            .uri("/api/v1/filters/{id}?version=v1", testFilter.getId())
+            .uri("/api/v1/filters/{id}?schemaId=test-schema-id&version=v1", testFilter.getId())
             .exchange()
             .expectStatus().isNoContent();
 
@@ -609,22 +636,25 @@ class WorkflowIntegrationTest {
         try {
             CreateFilterRequest request = CreateFilterRequest.builder()
                 .name("Filter with Jenkins Failure")
-                .consumerId("test-consumer")
+                .consumerGroup("test-consumer")
                 .outputTopic("test-topic")
-                .conditions(List.of(
-                    FilterCondition.builder()
-                        .field("event_type")
-                        .operator("equals")
-                        .value("CarCreated")
-                        .valueType("string")
-                        .build()
-                ))
+                .conditions(FilterConditions.builder()
+                    .logic("AND")
+                    .conditions(List.of(
+                        FilterCondition.builder()
+                            .field("event_type")
+                            .operator("equals")
+                            .value("CarCreated")
+                            .valueType("string")
+                            .build()
+                    ))
+                    .build())
                 .enabled(true)
                 .build();
 
             // Filter creation should still succeed even if Jenkins fails
             Filter created = webTestClient.post()
-                .uri("/api/v1/filters?version=v1")
+                .uri("/api/v1/filters?schemaId=test-schema-id&version=v1")
                 .bodyValue(request)
                 .exchange()
                 .expectStatus().isCreated()
@@ -642,7 +672,7 @@ class WorkflowIntegrationTest {
 
             // Clean up
             webTestClient.delete()
-                .uri("/api/v1/filters/{id}?version=v1", created.getId())
+                .uri("/api/v1/filters/{id}?schemaId=test-schema-id&version=v1", created.getId())
                 .exchange()
                 .expectStatus().isNoContent();
         } finally {

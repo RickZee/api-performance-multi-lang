@@ -137,9 +137,11 @@ public class FilterE2EIntegrationTest {
         CreateFilterRequest request = CreateFilterRequest.builder()
             .name("Service Events for Dealer 001")
             .description("Routes service events from Tesla Service Center SF to dedicated topic")
-            .consumerId("dealer-001-service-consumer")
+            .consumerGroup("dealer-001-service-consumer")
             .outputTopic("filtered-service-events-dealer-001")
-            .conditions(List.of(
+            .conditions(FilterConditions.builder()
+                .logic("AND")
+                .conditions(List.of(
                 FilterCondition.builder()
                     .field("event_type")
                     .operator("equals")
@@ -155,12 +157,12 @@ public class FilterE2EIntegrationTest {
                     .logicalOperator("AND")
                     .build()
             ))
+            .build())
             .enabled(true)
-            .conditionLogic("AND")
             .build();
         
         Filter created = webTestClient.post()
-            .uri("/api/v1/filters?version=v1")
+            .uri("/api/v1/filters?schemaId=test-schema-id&version=v1")
             .bodyValue(request)
             .exchange()
             .expectStatus().isCreated()
@@ -182,7 +184,7 @@ public class FilterE2EIntegrationTest {
         Assertions.assertFalse(filterId.isEmpty(), "Filter ID should not be empty");
         
         webTestClient.get()
-            .uri("/api/v1/filters/{id}/sql?version=v1", filterId)
+            .uri("/api/v1/filters/{id}/sql?schemaId=test-schema-id&version=v1", filterId)
             .exchange()
             .expectStatus().isOk()
             .expectBody(GenerateSQLResponse.class)
@@ -199,7 +201,7 @@ public class FilterE2EIntegrationTest {
     @Test
     @Order(3)
     void testValidateSQL() throws IOException {
-        Filter filter = filterStorageService.get("v1", filterId);
+        Filter filter = filterStorageService.get("test-schema-id", "v1", filterId);
         GenerateSQLResponse sqlResponse = filterGeneratorService.generateSQL(filter);
         
         ValidateSQLRequest request = ValidateSQLRequest.builder()
@@ -207,7 +209,7 @@ public class FilterE2EIntegrationTest {
             .build();
         
         webTestClient.post()
-            .uri("/api/v1/filters/{id}/validations?version=v1", filterId)
+            .uri("/api/v1/filters/{id}/validations?schemaId=test-schema-id&version=v1", filterId)
             .bodyValue(request)
             .exchange()
             .expectStatus().isCreated()
@@ -220,21 +222,31 @@ public class FilterE2EIntegrationTest {
     @Test
     @Order(4)
     void testApproveFilter() {
-        UpdateFilterStatusRequest request = UpdateFilterStatusRequest.builder()
-            .status("approved")
+        // Approve for both targets
+        ApproveFilterRequest approveRequest = ApproveFilterRequest.builder()
             .approvedBy("test-user")
             .build();
         
+        // Approve for Flink
         webTestClient.patch()
-            .uri("/api/v1/filters/{id}?version=v1", filterId)
-            .bodyValue(request)
+            .uri("/api/v1/filters/{id}/approvals/flink?schemaId=test-schema-id&version=v1", filterId)
+            .bodyValue(approveRequest)
+            .exchange()
+            .expectStatus().isOk();
+        
+        // Approve for Spring
+        webTestClient.patch()
+            .uri("/api/v1/filters/{id}/approvals/spring?schemaId=test-schema-id&version=v1", filterId)
+            .bodyValue(approveRequest)
             .exchange()
             .expectStatus().isOk()
             .expectBody(Filter.class)
             .value(filter -> {
                 Assertions.assertEquals("approved", filter.getStatus());
-                Assertions.assertEquals("test-user", filter.getApprovedBy());
-                Assertions.assertNotNull(filter.getApprovedAt());
+                Assertions.assertTrue(filter.getApprovedForFlink());
+                Assertions.assertTrue(filter.getApprovedForSpring());
+                Assertions.assertEquals("test-user", filter.getApprovedForFlinkBy());
+                Assertions.assertEquals("test-user", filter.getApprovedForSpringBy());
             });
     }
     
@@ -242,7 +254,7 @@ public class FilterE2EIntegrationTest {
     @Order(5)
     void testGetFilterStatus() {
         webTestClient.get()
-            .uri("/api/v1/filters/{id}?version=v1", filterId)
+            .uri("/api/v1/filters/{id}?schemaId=test-schema-id&version=v1", filterId)
             .exchange()
             .expectStatus().isOk()
             .expectBody(Filter.class)
@@ -256,7 +268,7 @@ public class FilterE2EIntegrationTest {
     @Order(6)
     void testListFilters() {
         webTestClient.get()
-            .uri("/api/v1/filters?version=v1")
+            .uri("/api/v1/filters?schemaId=test-schema-id&version=v1")
             .exchange()
             .expectStatus().isOk()
             .expectBodyList(Filter.class)
@@ -277,7 +289,7 @@ public class FilterE2EIntegrationTest {
             .build();
         
         webTestClient.put()
-            .uri("/api/v1/filters/{id}?version=v1", filterId)
+            .uri("/api/v1/filters/{id}?schemaId=test-schema-id&version=v1", filterId)
             .bodyValue(request)
             .exchange()
             .expectStatus().isOk()
@@ -298,7 +310,7 @@ public class FilterE2EIntegrationTest {
         if (filterIdToDelete == null || filterIdToDelete.isEmpty()) {
             // Get filters from the API
             List<Filter> filters = webTestClient.get()
-                .uri("/api/v1/filters?version=v1")
+                .uri("/api/v1/filters?schemaId=test-schema-id&version=v1")
                 .exchange()
                 .expectStatus().isOk()
                 .expectBodyList(Filter.class)
@@ -313,19 +325,19 @@ public class FilterE2EIntegrationTest {
         
         // Verify filter exists via API before deletion
         webTestClient.get()
-            .uri("/api/v1/filters/{id}?version=v1", filterIdToDelete)
+            .uri("/api/v1/filters/{id}?schemaId=test-schema-id&version=v1", filterIdToDelete)
             .exchange()
             .expectStatus().isOk();
         
         // Delete the filter
         webTestClient.delete()
-            .uri("/api/v1/filters/{id}?version=v1", filterIdToDelete)
+            .uri("/api/v1/filters/{id}?schemaId=test-schema-id&version=v1", filterIdToDelete)
             .exchange()
             .expectStatus().isNoContent();
         
         // Verify deletion
         webTestClient.get()
-            .uri("/api/v1/filters/{id}?version=v1", filterIdToDelete)
+            .uri("/api/v1/filters/{id}?schemaId=test-schema-id&version=v1", filterIdToDelete)
             .exchange()
             .expectStatus().isNotFound();
     }

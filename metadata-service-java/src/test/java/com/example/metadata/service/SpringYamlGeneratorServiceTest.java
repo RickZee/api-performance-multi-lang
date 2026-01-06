@@ -2,6 +2,7 @@ package com.example.metadata.service;
 
 import com.example.metadata.model.Filter;
 import com.example.metadata.model.FilterCondition;
+import com.example.metadata.model.FilterConditions;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
@@ -113,7 +114,10 @@ class SpringYamlGeneratorServiceTest {
             .build());
         
         Filter filter = createTestFilter("test-filter", "Test", "filtered-test");
-        filter.setConditions(conditions);
+        filter.setConditions(FilterConditions.builder()
+            .logic("AND")
+            .conditions(conditions)
+            .build());
         
         String yaml = service.generateYaml(List.of(filter));
         
@@ -187,7 +191,10 @@ class SpringYamlGeneratorServiceTest {
     @Test
     void testHandleORConditionLogic() {
         Filter filter = createTestFilter("test-filter", "Test", "filtered-test");
-        filter.setConditionLogic("OR");
+        filter.setConditions(FilterConditions.builder()
+            .logic("OR")
+            .conditions(filter.getConditions() != null ? filter.getConditions().getConditions() : List.of())
+            .build());
         
         String yaml = service.generateYaml(List.of(filter));
         
@@ -197,7 +204,10 @@ class SpringYamlGeneratorServiceTest {
     @Test
     void testDefaultToANDConditionLogic() {
         Filter filter = createTestFilter("test-filter", "Test", "filtered-test");
-        filter.setConditionLogic(null);
+        filter.setConditions(FilterConditions.builder()
+            .logic("AND")
+            .conditions(filter.getConditions() != null ? filter.getConditions().getConditions() : List.of())
+            .build());
         
         String yaml = service.generateYaml(List.of(filter));
         
@@ -242,8 +252,10 @@ class SpringYamlGeneratorServiceTest {
             .name(name)
             .outputTopic(outputTopic)
             .enabled(true)
-            .conditionLogic("AND")
-            .conditions(List.of(condition))
+            .conditions(FilterConditions.builder()
+                .logic("AND")
+                .conditions(List.of(condition))
+                .build())
             .status("deployed")
             .build();
     }

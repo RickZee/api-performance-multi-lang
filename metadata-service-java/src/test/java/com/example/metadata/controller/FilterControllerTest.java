@@ -1,6 +1,7 @@
 package com.example.metadata.controller;
 
 import com.example.metadata.model.*;
+import com.example.metadata.model.FilterConditions;
 import com.example.metadata.testutil.MockJenkinsServer;
 import com.example.metadata.testutil.TestRepoSetup;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -125,22 +126,24 @@ public class FilterControllerTest {
         CreateFilterRequest request = CreateFilterRequest.builder()
             .name("Test Filter")
             .description("Test Description")
-            .consumerId("test-consumer")
+            .consumerGroup("test-consumer")
             .outputTopic("test-topic")
-            .conditions(List.of(
-                FilterCondition.builder()
-                    .field("event_type")
-                    .operator("equals")
-                    .value("CarCreated")
-                    .valueType("string")
-                    .build()
-            ))
+            .conditions(FilterConditions.builder()
+                .logic("AND")
+                .conditions(List.of(
+                    FilterCondition.builder()
+                        .field("event_type")
+                        .operator("equals")
+                        .value("CarCreated")
+                        .valueType("string")
+                        .build()
+                ))
+                .build())
             .enabled(true)
-            .conditionLogic("AND")
             .build();
         
         webTestClient.post()
-            .uri("/api/v1/filters?version=v1")
+            .uri("/api/v1/filters?schemaId=test-schema-id&version=v1")
             .bodyValue(request)
             .exchange()
             .expectStatus().isCreated()
@@ -160,23 +163,25 @@ public class FilterControllerTest {
         CreateFilterRequest request = CreateFilterRequest.builder()
             .name("Single Target Filter")
             .description("Test Description")
-            .consumerId("test-consumer")
+            .consumerGroup("test-consumer")
             .outputTopic("test-topic")
             .targets(List.of("flink"))
-            .conditions(List.of(
-                FilterCondition.builder()
-                    .field("event_type")
-                    .operator("equals")
-                    .value("CarCreated")
-                    .valueType("string")
-                    .build()
-            ))
+            .conditions(FilterConditions.builder()
+                .logic("AND")
+                .conditions(List.of(
+                    FilterCondition.builder()
+                        .field("event_type")
+                        .operator("equals")
+                        .value("CarCreated")
+                        .valueType("string")
+                        .build()
+                ))
+                .build())
             .enabled(true)
-            .conditionLogic("AND")
             .build();
         
         webTestClient.post()
-            .uri("/api/v1/filters?version=v1")
+            .uri("/api/v1/filters?schemaId=test-schema-id&version=v1")
             .bodyValue(request)
             .exchange()
             .expectStatus().isCreated()
@@ -194,21 +199,24 @@ public class FilterControllerTest {
         // First create a filter
         CreateFilterRequest createRequest = CreateFilterRequest.builder()
             .name("Approve Target Test Filter")
-            .consumerId("test-consumer")
+            .consumerGroup("test-consumer")
             .outputTopic("test-topic")
             .targets(List.of("flink", "spring"))
-            .conditions(List.of(
-                FilterCondition.builder()
-                    .field("event_type")
-                    .operator("equals")
-                    .value("CarCreated")
-                    .valueType("string")
-                    .build()
-            ))
+            .conditions(FilterConditions.builder()
+                .logic("AND")
+                .conditions(List.of(
+                    FilterCondition.builder()
+                        .field("event_type")
+                        .operator("equals")
+                        .value("CarCreated")
+                        .valueType("string")
+                        .build()
+                ))
+                .build())
             .build();
         
         Filter created = webTestClient.post()
-            .uri("/api/v1/filters?version=v1")
+            .uri("/api/v1/filters?schemaId=test-schema-id&version=v1")
             .bodyValue(createRequest)
             .exchange()
             .expectStatus().isCreated()
@@ -223,7 +231,7 @@ public class FilterControllerTest {
             .build();
         
         webTestClient.patch()
-            .uri("/api/v1/filters/{id}/approvals/flink?version=v1", created.getId())
+            .uri("/api/v1/filters/{id}/approvals/flink?schemaId=test-schema-id&version=v1", created.getId())
             .bodyValue(approveRequest)
             .exchange()
             .expectStatus().isOk()
@@ -240,21 +248,24 @@ public class FilterControllerTest {
         // First create a filter
         CreateFilterRequest createRequest = CreateFilterRequest.builder()
             .name("Approve Spring Test Filter")
-            .consumerId("test-consumer")
+            .consumerGroup("test-consumer")
             .outputTopic("test-topic")
             .targets(List.of("flink", "spring"))
-            .conditions(List.of(
-                FilterCondition.builder()
-                    .field("event_type")
-                    .operator("equals")
-                    .value("CarCreated")
-                    .valueType("string")
-                    .build()
-            ))
+            .conditions(FilterConditions.builder()
+                .logic("AND")
+                .conditions(List.of(
+                    FilterCondition.builder()
+                        .field("event_type")
+                        .operator("equals")
+                        .value("CarCreated")
+                        .valueType("string")
+                        .build()
+                ))
+                .build())
             .build();
         
         Filter created = webTestClient.post()
-            .uri("/api/v1/filters?version=v1")
+            .uri("/api/v1/filters?schemaId=test-schema-id&version=v1")
             .bodyValue(createRequest)
             .exchange()
             .expectStatus().isCreated()
@@ -268,7 +279,7 @@ public class FilterControllerTest {
             .build();
         
         webTestClient.patch()
-            .uri("/api/v1/filters/{id}/approvals/spring?version=v1", created.getId())
+            .uri("/api/v1/filters/{id}/approvals/spring?schemaId=test-schema-id&version=v1", created.getId())
             .bodyValue(approveRequest)
             .exchange()
             .expectStatus().isOk()
@@ -284,21 +295,24 @@ public class FilterControllerTest {
         // First create and approve a filter
         CreateFilterRequest createRequest = CreateFilterRequest.builder()
             .name("Get Approvals Test Filter")
-            .consumerId("test-consumer")
+            .consumerGroup("test-consumer")
             .outputTopic("test-topic")
             .targets(List.of("flink", "spring"))
-            .conditions(List.of(
-                FilterCondition.builder()
-                    .field("event_type")
-                    .operator("equals")
-                    .value("CarCreated")
-                    .valueType("string")
-                    .build()
-            ))
+            .conditions(FilterConditions.builder()
+                .logic("AND")
+                .conditions(List.of(
+                    FilterCondition.builder()
+                        .field("event_type")
+                        .operator("equals")
+                        .value("CarCreated")
+                        .valueType("string")
+                        .build()
+                ))
+                .build())
             .build();
         
         Filter created = webTestClient.post()
-            .uri("/api/v1/filters?version=v1")
+            .uri("/api/v1/filters?schemaId=test-schema-id&version=v1")
             .bodyValue(createRequest)
             .exchange()
             .expectStatus().isCreated()
@@ -312,14 +326,14 @@ public class FilterControllerTest {
             .build();
         
         webTestClient.patch()
-            .uri("/api/v1/filters/{id}/approvals/flink?version=v1", created.getId())
+            .uri("/api/v1/filters/{id}/approvals/flink?schemaId=test-schema-id&version=v1", created.getId())
             .bodyValue(approveRequest)
             .exchange()
             .expectStatus().isOk();
         
         // Get approval status
         webTestClient.get()
-            .uri("/api/v1/filters/{id}/approvals?version=v1", created.getId())
+            .uri("/api/v1/filters/{id}/approvals?schemaId=test-schema-id&version=v1", created.getId())
             .exchange()
             .expectStatus().isOk()
             .expectBody(FilterApprovalStatus.class)
@@ -334,21 +348,24 @@ public class FilterControllerTest {
     void testApproveFilterForTarget_InvalidTarget() {
         CreateFilterRequest createRequest = CreateFilterRequest.builder()
             .name("Invalid Target Test Filter")
-            .consumerId("test-consumer")
+            .consumerGroup("test-consumer")
             .outputTopic("test-topic")
             .targets(List.of("flink"))
-            .conditions(List.of(
-                FilterCondition.builder()
-                    .field("event_type")
-                    .operator("equals")
-                    .value("CarCreated")
-                    .valueType("string")
-                    .build()
-            ))
+            .conditions(FilterConditions.builder()
+                .logic("AND")
+                .conditions(List.of(
+                    FilterCondition.builder()
+                        .field("event_type")
+                        .operator("equals")
+                        .value("CarCreated")
+                        .valueType("string")
+                        .build()
+                ))
+                .build())
             .build();
         
         Filter created = webTestClient.post()
-            .uri("/api/v1/filters?version=v1")
+            .uri("/api/v1/filters?schemaId=test-schema-id&version=v1")
             .bodyValue(createRequest)
             .exchange()
             .expectStatus().isCreated()
@@ -362,7 +379,7 @@ public class FilterControllerTest {
         
         // Try to approve for invalid target
         webTestClient.patch()
-            .uri("/api/v1/filters/{id}/approvals/invalid?version=v1", created.getId())
+            .uri("/api/v1/filters/{id}/approvals/invalid?schemaId=test-schema-id&version=v1", created.getId())
             .bodyValue(approveRequest)
             .exchange()
             .expectStatus().isBadRequest();
@@ -373,21 +390,24 @@ public class FilterControllerTest {
         // Create a filter
         CreateFilterRequest createRequest = CreateFilterRequest.builder()
             .name("Get Deployments Test Filter")
-            .consumerId("test-consumer")
+            .consumerGroup("test-consumer")
             .outputTopic("test-topic")
             .targets(List.of("flink", "spring"))
-            .conditions(List.of(
-                FilterCondition.builder()
-                    .field("event_type")
-                    .operator("equals")
-                    .value("CarCreated")
-                    .valueType("string")
-                    .build()
-            ))
+            .conditions(FilterConditions.builder()
+                .logic("AND")
+                .conditions(List.of(
+                    FilterCondition.builder()
+                        .field("event_type")
+                        .operator("equals")
+                        .value("CarCreated")
+                        .valueType("string")
+                        .build()
+                ))
+                .build())
             .build();
         
         Filter created = webTestClient.post()
-            .uri("/api/v1/filters?version=v1")
+            .uri("/api/v1/filters?schemaId=test-schema-id&version=v1")
             .bodyValue(createRequest)
             .exchange()
             .expectStatus().isCreated()
@@ -397,7 +417,7 @@ public class FilterControllerTest {
         
         // Get deployment status
         webTestClient.get()
-            .uri("/api/v1/filters/{id}/deployments?version=v1", created.getId())
+            .uri("/api/v1/filters/{id}/deployments?schemaId=test-schema-id&version=v1", created.getId())
             .exchange()
             .expectStatus().isOk()
             .expectBody(FilterDeploymentStatus.class)
@@ -411,13 +431,16 @@ public class FilterControllerTest {
     void testCreateFilter_InvalidRequest() {
         CreateFilterRequest request = CreateFilterRequest.builder()
             .name("") // Empty name should fail validation
-            .consumerId("test-consumer")
+            .consumerGroup("test-consumer")
             .outputTopic("test-topic")
-            .conditions(List.of())
+            .conditions(FilterConditions.builder()
+                .logic("AND")
+                .conditions(List.of())
+                .build())
             .build();
         
         webTestClient.post()
-            .uri("/api/v1/filters?version=v1")
+            .uri("/api/v1/filters?schemaId=test-schema-id&version=v1")
             .bodyValue(request)
             .exchange()
             .expectStatus().isBadRequest();
@@ -426,7 +449,7 @@ public class FilterControllerTest {
     @Test
     void testGetFilter_NotFound() {
         webTestClient.get()
-            .uri("/api/v1/filters/non-existent-id?version=v1")
+            .uri("/api/v1/filters/non-existent-id?schemaId=test-schema-id&version=v1")
             .exchange()
             .expectStatus().isNotFound();
     }
@@ -440,19 +463,22 @@ public class FilterControllerTest {
         // First create a filter
         CreateFilterRequest createRequest = CreateFilterRequest.builder()
             .name("SQL Test Filter")
-            .consumerId("test-consumer")
+            .consumerGroup("test-consumer")
             .outputTopic("test-topic")
-            .conditions(List.of(
-                FilterCondition.builder()
-                    .field("event_type")
-                    .operator("equals")
-                    .value("CarCreated")
-                    .build()
-            ))
+            .conditions(FilterConditions.builder()
+                .logic("AND")
+                .conditions(List.of(
+                    FilterCondition.builder()
+                        .field("event_type")
+                        .operator("equals")
+                        .value("CarCreated")
+                        .build()
+                ))
+                .build())
             .build();
         
         Filter created = webTestClient.post()
-            .uri("/api/v1/filters?version=v1")
+            .uri("/api/v1/filters?schemaId=test-schema-id&version=v1")
             .bodyValue(createRequest)
             .exchange()
             .expectStatus().isCreated()
@@ -462,7 +488,7 @@ public class FilterControllerTest {
         
         // Then validate SQL
         webTestClient.post()
-            .uri("/api/v1/filters/{id}/validations?version=v1", created.getId())
+            .uri("/api/v1/filters/{id}/validations?schemaId=test-schema-id&version=v1", created.getId())
             .bodyValue(request)
             .exchange()
             .expectStatus().isCreated()

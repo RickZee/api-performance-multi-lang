@@ -23,26 +23,20 @@ public class CreateFilterRequest {
     @JsonProperty("description")
     private String description;
     
-    @NotBlank(message = "Consumer ID is required")
-    @JsonProperty("consumerId")
-    private String consumerId;
+    @NotBlank(message = "Consumer group is required")
+    @JsonProperty("consumerGroup")
+    private String consumerGroup;
     
     @NotBlank(message = "Output topic is required")
     @JsonProperty("outputTopic")
     private String outputTopic;
     
-    @NotEmpty(message = "At least one condition is required")
-    @Size(min = 1, message = "At least one condition is required")
     @JsonProperty("conditions")
-    private List<FilterCondition> conditions;
+    private FilterConditions conditions;
     
     @JsonProperty("enabled")
     @Builder.Default
     private boolean enabled = true;
-    
-    @JsonProperty("conditionLogic")
-    @Builder.Default
-    private String conditionLogic = "AND";
     
     @JsonProperty("targets")
     private List<String> targets;
