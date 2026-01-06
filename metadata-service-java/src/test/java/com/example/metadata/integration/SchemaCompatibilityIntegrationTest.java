@@ -674,14 +674,14 @@ class SchemaCompatibilityIntegrationTest {
     @DisplayName("API: Check compatibility - identical schemas")
     void testApi_CompatibilityCheck_IdenticalSchemas() {
         webTestClient.post()
-            .uri("/api/v1/schemas/compatibility")
+            .uri("/api/v1/schemas/compatibility-checks")
             .bodyValue(Map.of(
                 "oldVersion", "v1",
                 "newVersion", "v1",
                 "type", "event"
             ))
             .exchange()
-            .expectStatus().isOk()
+            .expectStatus().isCreated()
             .expectBody()
             .jsonPath("$.compatible").isEqualTo(true)
             .jsonPath("$.oldVersion").isEqualTo("v1")
@@ -717,14 +717,14 @@ class SchemaCompatibilityIntegrationTest {
         
         // Check compatibility via API
         webTestClient.post()
-            .uri("/api/v1/schemas/compatibility")
+            .uri("/api/v1/schemas/compatibility-checks")
             .bodyValue(Map.of(
                 "oldVersion", "v1",
                 "newVersion", "v2",
                 "type", "event"
             ))
             .exchange()
-            .expectStatus().isOk()
+            .expectStatus().isCreated()
             .expectBody()
             .jsonPath("$.compatible").isEqualTo(true)
             .jsonPath("$.oldVersion").isEqualTo("v1")
@@ -790,14 +790,14 @@ class SchemaCompatibilityIntegrationTest {
         
         // Check compatibility via API for car entity
         webTestClient.post()
-            .uri("/api/v1/schemas/compatibility")
+            .uri("/api/v1/schemas/compatibility-checks")
             .bodyValue(Map.of(
                 "oldVersion", "v1",
                 "newVersion", "v2",
                 "type", "car"
             ))
             .exchange()
-            .expectStatus().isOk()
+            .expectStatus().isCreated()
             .expectBody()
             .jsonPath("$.compatible").isEqualTo(false)
             .jsonPath("$.oldVersion").isEqualTo("v1")
@@ -841,14 +841,14 @@ class SchemaCompatibilityIntegrationTest {
         
         // Check compatibility via API for entity type
         webTestClient.post()
-            .uri("/api/v1/schemas/compatibility")
+            .uri("/api/v1/schemas/compatibility-checks")
             .bodyValue(Map.of(
                 "oldVersion", "v1",
                 "newVersion", "v2",
                 "type", "car"
             ))
             .exchange()
-            .expectStatus().isOk()
+            .expectStatus().isCreated()
             .expectBody()
             .jsonPath("$.compatible").isEqualTo(true)
             .jsonPath("$.oldVersion").isEqualTo("v1")
@@ -870,7 +870,7 @@ class SchemaCompatibilityIntegrationTest {
     @DisplayName("API: Check compatibility - missing version returns 404")
     void testApi_CompatibilityCheck_MissingVersion() {
         webTestClient.post()
-            .uri("/api/v1/schemas/compatibility")
+            .uri("/api/v1/schemas/compatibility-checks")
             .bodyValue(Map.of(
                 "oldVersion", "v1",
                 "newVersion", "v999",
@@ -885,7 +885,7 @@ class SchemaCompatibilityIntegrationTest {
     @DisplayName("API: Check compatibility - missing entity type returns 404")
     void testApi_CompatibilityCheck_MissingEntityType() {
         webTestClient.post()
-            .uri("/api/v1/schemas/compatibility")
+            .uri("/api/v1/schemas/compatibility-checks")
             .bodyValue(Map.of(
                 "oldVersion", "v1",
                 "newVersion", "v1",
@@ -900,13 +900,13 @@ class SchemaCompatibilityIntegrationTest {
     @DisplayName("API: Check compatibility - default type is event")
     void testApi_CompatibilityCheck_DefaultType() {
         webTestClient.post()
-            .uri("/api/v1/schemas/compatibility")
+            .uri("/api/v1/schemas/compatibility-checks")
             .bodyValue(Map.of(
                 "oldVersion", "v1",
                 "newVersion", "v1"
             ))
             .exchange()
-            .expectStatus().isOk()
+            .expectStatus().isCreated()
             .expectBody()
             .jsonPath("$.compatible").isEqualTo(true)
             .jsonPath("$.oldVersion").isEqualTo("v1")
@@ -918,7 +918,7 @@ class SchemaCompatibilityIntegrationTest {
     @DisplayName("API: Check compatibility - validation error for missing required fields")
     void testApi_CompatibilityCheck_ValidationError() {
         webTestClient.post()
-            .uri("/api/v1/schemas/compatibility")
+            .uri("/api/v1/schemas/compatibility-checks")
             .bodyValue(Map.of(
                 "oldVersion", "v1"
                 // Missing newVersion

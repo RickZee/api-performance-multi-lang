@@ -62,8 +62,8 @@ public class SchemaController {
         }
     }
     
-    @PostMapping("/compatibility")
-    public ResponseEntity<CompatibilityResponse> checkCompatibility(
+    @PostMapping("/compatibility-checks")
+    public ResponseEntity<CompatibilityResponse> createCompatibilityCheck(
             @Valid @RequestBody CompatibilityRequest request
     ) {
         try {
@@ -102,7 +102,7 @@ public class SchemaController {
             // Check compatibility
             CompatibilityService.CompatibilityResult result = compatibilityService.checkCompatibility(oldSchema, newSchema);
             
-            return ResponseEntity.ok(CompatibilityResponse.builder()
+            return ResponseEntity.status(org.springframework.http.HttpStatus.CREATED).body(CompatibilityResponse.builder()
                 .compatible(result.isCompatible())
                 .reason(result.getReason())
                 .breakingChanges(result.getBreakingChanges())

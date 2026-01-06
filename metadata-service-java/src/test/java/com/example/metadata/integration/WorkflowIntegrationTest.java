@@ -242,8 +242,8 @@ class WorkflowIntegrationTest {
     void testWorkflow1_GenerateSQL() {
         assertThat(filterId).isNotNull();
 
-        webTestClient.post()
-            .uri("/api/v1/filters/{id}/generate?version=v1", filterId)
+        webTestClient.get()
+            .uri("/api/v1/filters/{id}/sql?version=v1", filterId)
             .exchange()
             .expectStatus().isOk()
             .expectBody(GenerateSQLResponse.class)
@@ -269,10 +269,10 @@ class WorkflowIntegrationTest {
             .build();
 
         webTestClient.post()
-            .uri("/api/v1/filters/{id}/validate?version=v1", filterId)
+            .uri("/api/v1/filters/{id}/validations?version=v1", filterId)
             .bodyValue(request)
             .exchange()
-            .expectStatus().isOk()
+            .expectStatus().isCreated()
             .expectBody(ValidateSQLResponse.class)
             .value(response -> {
                 assertThat(response.isValid()).isTrue();
@@ -283,12 +283,13 @@ class WorkflowIntegrationTest {
     @Order(4)
     @DisplayName("Workflow 1: Approve Filter with Jenkins Trigger")
     void testWorkflow1_ApproveFilter() throws InterruptedException {
-        ApproveFilterRequest request = ApproveFilterRequest.builder()
+        UpdateFilterStatusRequest request = UpdateFilterStatusRequest.builder()
+            .status("approved")
             .approvedBy("test-reviewer@example.com")
             .build();
 
-        webTestClient.post()
-            .uri("/api/v1/filters/{id}/approve?version=v1", filterId)
+        webTestClient.patch()
+            .uri("/api/v1/filters/{id}?version=v1", filterId)
             .bodyValue(request)
             .exchange()
             .expectStatus().isOk()
@@ -573,12 +574,13 @@ class WorkflowIntegrationTest {
         mockJenkins.reset();
 
         // Approve filter
-        ApproveFilterRequest approveRequest = ApproveFilterRequest.builder()
+        UpdateFilterStatusRequest approveRequest = UpdateFilterStatusRequest.builder()
+            .status("approved")
             .approvedBy("test-reviewer")
             .build();
 
-        webTestClient.post()
-            .uri("/api/v1/filters/{id}/approve?version=v1", testFilter.getId())
+        webTestClient.patch()
+            .uri("/api/v1/filters/{id}?version=v1", testFilter.getId())
             .bodyValue(approveRequest)
             .exchange()
             .expectStatus().isOk();

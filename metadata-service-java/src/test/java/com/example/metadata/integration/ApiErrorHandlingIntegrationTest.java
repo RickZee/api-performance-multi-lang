@@ -269,18 +269,18 @@ public class ApiErrorHandlingIntegrationTest {
     
     @Test
     void testGenerateSQL_NotFound() {
-        webTestClient.post()
-            .uri("/api/v1/filters/non-existent-id/generate?version=v1")
+        webTestClient.get()
+            .uri("/api/v1/filters/non-existent-id/sql?version=v1")
             .exchange()
             .expectStatus().isNotFound();
     }
     
     @Test
     void testApproveFilter_NotFound() {
-        webTestClient.post()
-            .uri("/api/v1/filters/non-existent-id/approve?version=v1")
+        webTestClient.patch()
+            .uri("/api/v1/filters/non-existent-id?version=v1")
             .contentType(org.springframework.http.MediaType.APPLICATION_JSON)
-            .bodyValue("{\"approvedBy\": \"user\"}")
+            .bodyValue("{\"status\": \"approved\", \"approvedBy\": \"user\"}")
             .exchange()
             .expectStatus().isNotFound();
     }

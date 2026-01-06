@@ -2,6 +2,7 @@ package com.example.metadata.controller;
 
 import com.example.metadata.model.SchemaResponse;
 import com.example.metadata.model.VersionsResponse;
+import com.example.metadata.service.CompatibilityService;
 import com.example.metadata.service.GitSyncService;
 import com.example.metadata.service.SchemaCacheService;
 import org.junit.jupiter.api.BeforeEach;
@@ -32,6 +33,9 @@ class SchemaControllerTest {
     
     @MockBean
     private GitSyncService gitSyncService;
+    
+    @MockBean
+    private CompatibilityService compatibilityService;
     
     @Test
     void testGetVersions() throws IOException {

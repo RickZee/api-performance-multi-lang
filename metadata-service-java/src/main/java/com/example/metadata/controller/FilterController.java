@@ -16,7 +16,6 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
 import java.io.IOException;
-import java.time.Instant;
 import java.util.List;
 
 @RestController
@@ -53,10 +52,25 @@ public class FilterController {
 
     @GetMapping
     public ResponseEntity<List<Filter>> listFilters(
-            @RequestParam(required = false, defaultValue = "v1") String version
+            @RequestParam(required = false, defaultValue = "v1") String version,
+            @RequestParam(required = false) Boolean enabled,
+            @RequestParam(required = false) String status
     ) {
         try {
             List<Filter> filters = filterStorageService.list(version);
+            
+            // Apply query parameter filters
+            if (enabled != null) {
+                filters = filters.stream()
+                    .filter(f -> f.isEnabled() == enabled)
+                    .toList();
+            }
+            if (status != null) {
+                filters = filters.stream()
+                    .filter(f -> status.equals(f.getStatus()))
+                    .toList();
+            }
+            
             return ResponseEntity.ok(filters);
         } catch (IOException e) {
             return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).build();
@@ -133,8 +147,8 @@ public class FilterController {
         }
     }
 
-    @PostMapping("/{id}/generate")
-    public ResponseEntity<GenerateSQLResponse> generateSQL(
+    @GetMapping("/{id}/sql")
+    public ResponseEntity<GenerateSQLResponse> getFilterSQL(
             @PathVariable String id,
             @RequestParam(required = false, defaultValue = "v1") String version
     ) {
@@ -149,12 +163,21 @@ public class FilterController {
         }
     }
 
-    @PostMapping("/{id}/validate")
-    public ResponseEntity<ValidateSQLResponse> validateSQL(
+    @PostMapping("/{id}/validations")
+    public ResponseEntity<ValidateSQLResponse> createValidation(
             @PathVariable String id,
-            @RequestBody ValidateSQLRequest request,
+            @Valid @RequestBody ValidateSQLRequest request,
             @RequestParam(required = false, defaultValue = "v1") String version
     ) {
+        try {
+            // Verify filter exists
+            filterStorageService.get(version, id);
+        } catch (FilterNotFoundException e) {
+            return ResponseEntity.notFound().build();
+        } catch (IOException e) {
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).build();
+        }
+        
         // Basic SQL validation - check for common syntax errors
         ValidateSQLResponse response = ValidateSQLResponse.builder()
             .valid(true)
@@ -164,7 +187,7 @@ public class FilterController {
         if (sql == null || sql.trim().isEmpty()) {
             response.setValid(false);
             response.setErrors(List.of("SQL is empty"));
-            return ResponseEntity.ok(response);
+            return ResponseEntity.status(HttpStatus.CREATED).body(response);
         }
 
         // Basic validation checks
@@ -181,23 +204,39 @@ public class FilterController {
             response.setErrors(errors);
         }
 
-        return ResponseEntity.ok(response);
+        return ResponseEntity.status(HttpStatus.CREATED).body(response);
     }
 
-    @PostMapping("/{id}/approve")
-    public ResponseEntity<Filter> approveFilter(
+    @PatchMapping("/{id}")
+    public ResponseEntity<Filter> updateFilterStatus(
             @PathVariable String id,
-            @RequestBody(required = false) ApproveFilterRequest request,
+            @RequestBody(required = false) UpdateFilterStatusRequest request,
             @RequestParam(required = false, defaultValue = "v1") String version
     ) {
         try {
-            String approvedBy = request.getApprovedBy() != null ? request.getApprovedBy() : "system";
-            Filter filter = filterStorageService.approve(version, id, approvedBy);
+            Filter filter;
             
-            // Trigger CI/CD for change management (approval may trigger validation pipeline)
-            java.util.Map<String, String> params = new java.util.HashMap<>();
-            params.put("APPROVED_BY", approvedBy);
-            jenkinsTriggerService.triggerBuild("approve", id, version, params);
+            if (request != null && request.getStatus() != null) {
+                String newStatus = request.getStatus();
+                
+                // Handle status updates
+                if ("approved".equals(newStatus)) {
+                    String approvedBy = request.getApprovedBy() != null ? request.getApprovedBy() : "system";
+                    filter = filterStorageService.approve(version, id, approvedBy);
+                    
+                    // Trigger CI/CD for change management (approval may trigger validation pipeline)
+                    java.util.Map<String, String> params = new java.util.HashMap<>();
+                    params.put("APPROVED_BY", approvedBy);
+                    jenkinsTriggerService.triggerBuild("approve", id, version, params);
+                } else {
+                    // For other status updates, we'd need a more generic updateStatus method
+                    // For now, only support "approved" status via PATCH
+                    return ResponseEntity.status(HttpStatus.BAD_REQUEST).build();
+                }
+            } else {
+                // If no status provided, return current filter
+                filter = filterStorageService.get(version, id);
+            }
             
             return ResponseEntity.ok(filter);
         } catch (FilterNotFoundException e) {
@@ -207,8 +246,8 @@ public class FilterController {
         }
     }
 
-    @PostMapping("/{id}/deploy")
-    public ResponseEntity<DeployFilterResponse> deployFilter(
+    @PostMapping("/{id}/deployments")
+    public ResponseEntity<DeployFilterResponse> createDeployment(
             @PathVariable String id,
             @RequestBody(required = false) DeployFilterRequest request,
             @RequestParam(required = false, defaultValue = "v1") String version
@@ -271,7 +310,7 @@ public class FilterController {
                 params.put("FLINK_STATEMENT_IDS", String.join(",", statementIds));
                 jenkinsTriggerService.triggerBuild("deploy", id, version, params);
 
-                return ResponseEntity.ok(DeployFilterResponse.builder()
+                return ResponseEntity.status(HttpStatus.CREATED).body(DeployFilterResponse.builder()
                     .filterId(id)
                     .status("deployed")
                     .flinkStatementIds(statementIds)
@@ -293,53 +332,6 @@ public class FilterController {
         }
     }
 
-    @GetMapping("/{id}/status")
-    public ResponseEntity<FilterStatusResponse> getFilterStatus(
-            @PathVariable String id,
-            @RequestParam(required = false, defaultValue = "v1") String version
-    ) {
-        try {
-            Filter filter = filterStorageService.get(version, id);
-            
-            FilterStatusResponse response = FilterStatusResponse.builder()
-                .filterId(id)
-                .status(filter.getStatus())
-                .flinkStatementIds(filter.getFlinkStatementIds())
-                .deployedAt(filter.getDeployedAt())
-                .deploymentError(filter.getDeploymentError())
-                .lastChecked(Instant.now())
-                .build();
-
-            return ResponseEntity.ok(response);
-        } catch (FilterNotFoundException e) {
-            return ResponseEntity.notFound().build();
-        } catch (IOException e) {
-            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).build();
-        }
-    }
-
-    /**
-     * Get active filters (enabled and not deleted) for a specific schema version.
-     * This endpoint is optimized for CDC Streaming Service consumption.
-     * Returns only filters that should be actively used for event routing.
-     * 
-     * @param schemaVersion Schema version (e.g., "v1", "v2")
-     * @return List of active filters
-     */
-    @GetMapping("/active")
-    public ResponseEntity<List<Filter>> getActiveFilters(
-            @RequestParam(value = "version", required = false, defaultValue = "v1") String schemaVersion
-    ) {
-        try {
-            List<Filter> activeFilters = filterStorageService.getActiveFilters(schemaVersion);
-            return ResponseEntity.ok(activeFilters);
-        } catch (Exception e) {
-            org.slf4j.LoggerFactory.getLogger(FilterController.class)
-                .error("Error retrieving active filters for schema version {}: {}", 
-                    schemaVersion, e.getMessage(), e);
-            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).build();
-        }
-    }
 
     /**
      * Update Spring Boot filters.yml file with current filters.

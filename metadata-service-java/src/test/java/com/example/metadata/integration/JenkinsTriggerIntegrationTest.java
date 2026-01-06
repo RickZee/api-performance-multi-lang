@@ -223,12 +223,13 @@ class JenkinsTriggerIntegrationTest {
     @Order(4)
     @DisplayName("Approving a filter should trigger Jenkins build with approver info")
     void testApproveFilterTriggersJenkins() throws InterruptedException {
-        ApproveFilterRequest request = ApproveFilterRequest.builder()
+        UpdateFilterStatusRequest request = UpdateFilterStatusRequest.builder()
+            .status("approved")
             .approvedBy("test-reviewer@example.com")
             .build();
 
-        webTestClient.post()
-            .uri("/api/v1/filters/{id}/approve?version=v1", filterId)
+        webTestClient.patch()
+            .uri("/api/v1/filters/{id}?version=v1", filterId)
             .bodyValue(request)
             .exchange()
             .expectStatus().isOk()

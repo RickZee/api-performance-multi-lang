@@ -1,6 +1,58 @@
 # Metadata Service - Enterprise Documentation Report
 
-## Executive Summary
+## Table of Contents
+
+### Part 1: Introduction & Overview
+- [Executive Summary](#executive-summary)
+- [1. Service Purpose and Core Capabilities](#1-service-purpose-and-core-capabilities)
+
+### Part 2: Architecture & Design
+- [3. Architecture Overview](#3-architecture-overview)
+  - [3.1 High-Level Architecture](#31-high-level-architecture)
+  - [3.2 Component Architecture](#32-component-architecture)
+  - [3.3 Connectivity Diagram](#33-connectivity-diagram)
+- [4. Data Flow Diagrams](#4-data-flow-diagrams)
+  - [4.1 Event Validation Flow](#41-event-validation-flow)
+  - [4.2 Git Sync Flow](#42-git-sync-flow)
+  - [4.3 Filter Deployment Flow](#43-filter-deployment-flow)
+  - [4.4 Filter Lifecycle Workflow](#44-filter-lifecycle-workflow)
+  - [4.5 Integration Pattern Flow](#45-integration-pattern-flow)
+
+### Part 3: Core Concepts
+- [5. Schema Management](#5-schema-management)
+  - [5.1 Schema Repository Structure](#51-schema-repository-structure)
+  - [5.2 How Schemas Define Filters](#52-how-schemas-define-filters)
+  - [5.3 Schema Versioning and Filters](#53-schema-versioning-and-filters)
+  - [5.4 Filter Field Path Resolution](#54-filter-field-path-resolution)
+- [6. Database Schema and Storage](#6-database-schema-and-storage)
+- [7. Compatibility Rules](#7-compatibility-rules)
+- [8. Filter Management](#8-filter-management)
+
+### Part 4: API & Integration
+- [9. API Reference](#9-api-reference)
+- [10. Integration Guide](#10-integration-guide)
+
+### Part 5: Configuration & Deployment
+- [11. Configuration Reference](#11-configuration-reference)
+- [12. Deployment Architecture](#12-deployment-architecture)
+
+### Part 6: Development & Operations
+- [13. Testing and Validation](#13-testing-and-validation)
+- [14. Key Files Reference](#14-key-files-reference)
+- [15. Operational Considerations](#15-operational-considerations)
+
+### Part 7: Advanced Features
+- [16. Spring Boot YAML Generation](#16-spring-boot-yaml-generation)
+- [17. Jenkins CI/CD Integration](#17-jenkins-cicd-integration)
+
+### Part 8: Appendices
+- [18. Future Enhancements](#18-future-enhancements)
+- [Appendix A: Glossary](#appendix-a-glossary)
+- [Appendix B: Related Documentation](#appendix-b-related-documentation)
+
+---
+
+## Executive Summary {#executive-summary}
 
 The Metadata Service is a centralized microservice providing schema validation, filter management, and Flink SQL deployment capabilities for the event-based processing platform. It is implemented using Spring Boot (Java).
 
@@ -21,7 +73,9 @@ The Metadata Service provides six primary capabilities:
 
 ---
 
-## 2. High-Level Architecture
+## 3. Architecture Overview
+
+### 3.1 High-Level Architecture
 
 ```mermaid
 graph TB
@@ -72,11 +126,9 @@ graph TB
     JenkinsTrigger -->|Trigger Build| Jenkins[Jenkins CI/CD]
 ```
 
----
+### 3.2 Component Architecture
 
-## 3. Component Architecture
-
-### 3.1 Java Implementation (`metadata-service-java/`)
+#### 3.2.1 Java Implementation (`metadata-service-java/`)
 
 ```mermaid
 graph LR
@@ -120,6 +172,57 @@ graph LR
     FilterCtrl --> SpringYamlWriterSvc
     FilterCtrl --> JenkinsTriggerSvc
     ValidationSvc --> CompatSvc
+```
+
+### 3.3 Connectivity Diagram
+
+```mermaid
+graph TB
+    subgraph VPC [VPC / Docker Network]
+        subgraph producers [Producer APIs - Port 9081-9092]
+            GoREST[Go REST :9083]
+            GoGRPC[Go gRPC :9092]
+            JavaREST[Java REST :9081]
+            JavaGRPC[Java gRPC :9090]
+            RustREST[Rust REST :9082]
+            RustGRPC[Rust gRPC :9091]
+            PythonLambda[Python Lambda]
+        end
+
+        subgraph metadata [Metadata Services]
+            MetaJava[Metadata Java :8081]
+        end
+
+        subgraph databases [Databases]
+            Postgres[(PostgreSQL :5432)]
+            AuroraDSQL[(Aurora DSQL)]
+        end
+
+        subgraph volumes [Volumes]
+            DataVol[./data volume]
+        end
+    end
+
+    subgraph external [External Services]
+        GitHub[(GitHub/GitLab)]
+        ConfluentAPI[Confluent Cloud API]
+        Jenkins[Jenkins CI/CD]
+    end
+
+    GoREST -->|HTTP :8081| MetaJava
+    PythonLambda -->|HTTP :8081| MetaJava
+    JavaREST -->|HTTP :8081| MetaJava
+    
+    MetaJava -->|git clone/pull| GitHub
+    MetaJava -->|read schemas| DataVol
+    MetaJava -->|write filters.yml| DataVol
+    
+    MetaJava -->|Deploy Flink SQL| ConfluentAPI
+    MetaJava -->|Trigger builds| Jenkins
+
+    GoREST --> Postgres
+    JavaREST --> Postgres
+    PythonLambda --> AuroraDSQL
 ```
 
 ---
@@ -193,11 +296,11 @@ sequenceDiagram
     API->>Storage: Create filter (status: pending_approval)
     Storage-->>API: Filter created
 
-    User->>API: POST /filters/:id/approve
+    User->>API: PATCH /filters/:id (status: approved)
     API->>Storage: Approve (status: approved)
     Storage-->>API: Filter approved
 
-    User->>API: POST /filters/:id/deploy
+    User->>API: POST /filters/:id/deployments
     API->>Storage: Get filter
     API->>Gen: GenerateSQL(filter)
     Gen-->>API: SQL statements
@@ -217,64 +320,160 @@ sequenceDiagram
     API-->>User: DeployFilterResponse
 ```
 
----
-
-## 5. Connectivity Diagram
+### 4.4 Filter Lifecycle Workflow
 
 ```mermaid
-graph TB
-    subgraph VPC [VPC / Docker Network]
-        subgraph producers [Producer APIs - Port 9081-9092]
-            GoREST[Go REST :9083]
-            GoGRPC[Go gRPC :9092]
-            JavaREST[Java REST :9081]
-            JavaGRPC[Java gRPC :9090]
-            RustREST[Rust REST :9082]
-            RustGRPC[Rust gRPC :9091]
-            PythonLambda[Python Lambda]
-        end
+sequenceDiagram
+    participant User as API User
+    participant API as Filter Controller
+    participant Storage as Filter Storage
+    participant SpringYaml as Spring YAML Service
+    participant Jenkins as Jenkins CI/CD
 
-        subgraph metadata [Metadata Services]
-            MetaJava[Metadata Java :8081]
-        end
+    User->>API: POST /filters (create filter)
+    API->>Storage: Create filter
+    Storage-->>API: Filter created
+    API->>SpringYaml: Update filters.yml
+    SpringYaml-->>API: YAML updated
+    API->>Jenkins: Trigger build (FILTER_EVENT_TYPE=create, FILTER_ID=...)
+    Jenkins-->>API: Build triggered
+    API-->>User: Filter created (201)
+```
 
-        subgraph databases [Databases]
-            Postgres[(PostgreSQL :5432)]
-            AuroraDSQL[(Aurora DSQL)]
-        end
+### 4.5 Integration Pattern Flow
 
-        subgraph volumes [Volumes]
-            DataVol[./data volume]
-        end
-    end
+Producer APIs integrate using a "fail-open" pattern to ensure availability even if the metadata service is unavailable:
 
-    subgraph external [External Services]
-        GitHub[(GitHub/GitLab)]
-        ConfluentAPI[Confluent Cloud API]
-        Jenkins[Jenkins CI/CD]
-    end
-
-    GoREST -->|HTTP :8081| MetaJava
-    PythonLambda -->|HTTP :8081| MetaJava
-    JavaREST -->|HTTP :8081| MetaJava
-    
-    MetaJava -->|git clone/pull| GitHub
-    MetaJava -->|read schemas| DataVol
-    MetaJava -->|write filters.yml| DataVol
-    
-    MetaJava -->|Deploy Flink SQL| ConfluentAPI
-    MetaJava -->|Trigger builds| Jenkins
-
-    GoREST --> Postgres
-    JavaREST --> Postgres
-    PythonLambda --> AuroraDSQL
+```mermaid
+flowchart TD
+    A[Producer API receives event] --> B{Metadata Service enabled?}
+    B -->|No| C[Process event directly]
+    B -->|Yes| D[Call POST /validate]
+    D --> E{Service available?}
+    E -->|No| F[Log warning, allow event]
+    E -->|Yes| G{Validation passed?}
+    G -->|Yes| H[Process event]
+    G -->|No| I{Strict mode?}
+    I -->|Yes| J[Reject with 422]
+    I -->|No| K[Log warning, process anyway]
+    F --> H
 ```
 
 ---
 
-## 6. API Reference
+## 8. Filter Management
 
-### 6.1 Validation Endpoints
+### 8.1 Filter Structure
+
+A filter configuration defines conditions for filtering events in Flink SQL:
+
+```json
+{
+  "id": "service-events-for-dealer-001",
+  "name": "Service Events for Dealer 001",
+  "description": "Filters service events for dealer ID 001",
+  "consumerId": "dealer-001-consumer",
+  "outputTopic": "service-events-dealer-001",
+  "conditions": [
+    {
+      "field": "event_type",
+      "operator": "equals",
+      "value": "CarServiceDone",
+      "valueType": "string"
+    },
+    {
+      "field": "header_data.dealerId",
+      "operator": "equals",
+      "value": "001",
+      "valueType": "string"
+    }
+  ],
+  "conditionLogic": "AND",
+  "enabled": true,
+  "status": "approved",
+  "version": 1
+}
+```
+
+### 8.2 Supported Operators
+
+| Operator | Description | Example |
+|----------|-------------|---------|
+| `equals` | Exact match | `event_type = 'CarCreated'` |
+| `in` | Value in list | `event_type IN ('CarCreated', 'LoanCreated')` |
+| `notIn` | Value not in list | `event_type NOT IN ('Deleted')` |
+| `greaterThan` | Numeric comparison | `amount > 1000` |
+| `lessThan` | Numeric comparison | `amount < 5000` |
+| `greaterThanOrEqual` | Numeric comparison | `amount >= 1000` |
+| `lessThanOrEqual` | Numeric comparison | `amount <= 5000` |
+| `between` | Range check | `amount BETWEEN 1000 AND 5000` |
+| `matches` | Regex pattern | `event_name REGEXP '.*Service.*'` |
+| `isNull` | Null check | `dealerId IS NULL` |
+| `isNotNull` | Not null check | `dealerId IS NOT NULL` |
+
+### 8.3 Generated Flink SQL
+
+The filter generator creates two SQL statements:
+
+1. **Sink Table Definition:**
+```sql
+CREATE TABLE `service-events-dealer-001` (
+    `key` BYTES,
+    `id` STRING,
+    `event_name` STRING,
+    `event_type` STRING,
+    `created_date` STRING,
+    `saved_date` STRING,
+    `header_data` STRING,
+    `__op` STRING,
+    `__table` STRING
+) WITH (
+    'connector' = 'confluent',
+    'value.format' = 'json-registry'
+);
+```
+
+2. **INSERT Statement:**
+```sql
+INSERT INTO `service-events-dealer-001`
+SELECT 
+    CAST(`id` AS BYTES) AS `key`,
+    `id`,
+    `event_name`,
+    `event_type`,
+    `created_date`,
+    `saved_date`,
+    `header_data`,
+    `__op`,
+    `__table`
+FROM `raw-event-headers`
+WHERE `__op` = 'c' 
+  AND `event_type` = 'CarServiceDone'
+  AND JSON_VALUE(`header_data`, '$.dealerId') = '001';
+```
+
+### 8.4 Filter Lifecycle
+
+```mermaid
+stateDiagram-v2
+    [*] --> pending_approval: Create
+    pending_approval --> approved: Approve
+    pending_approval --> [*]: Delete
+    approved --> deploying: Deploy
+    deploying --> deployed: Success
+    deploying --> failed: Error
+    deployed --> deploying: Redeploy
+    failed --> deploying: Retry
+    approved --> [*]: Delete
+    deployed --> [*]: Delete
+    failed --> [*]: Delete
+```
+
+---
+
+## 9. API Reference
+
+### 9.1 Validation Endpoints
 
 | Method | Endpoint | Description |
 |--------|----------|-------------|
@@ -307,12 +506,13 @@ graph TB
 }
 ```
 
-### 6.2 Schema Endpoints
+### 9.2 Schema Endpoints
 
 | Method | Endpoint | Description |
 |--------|----------|-------------|
 | GET | `/api/v1/schemas/versions` | List available schema versions |
 | GET | `/api/v1/schemas/:version` | Get schema by version |
+| POST | `/api/v1/schemas/compatibility-checks` | Create compatibility check between schema versions |
 
 **Query Parameters for `/api/v1/schemas/:version`:**
 - `type` - Schema type: `event` (default) or entity name (e.g., `car`, `loan`)
@@ -323,30 +523,130 @@ GET /api/v1/schemas/v1?type=event
 GET /api/v1/schemas/v1?type=car
 ```
 
-### 6.3 Filter Endpoints
+**Compatibility Check Request Example:**
+```json
+{
+  "oldVersion": "v1",
+  "newVersion": "v2",
+  "type": "event"
+}
+```
+
+**Compatibility Check Response Example:**
+```json
+{
+  "compatible": true,
+  "reason": "No breaking changes detected",
+  "breakingChanges": [],
+  "nonBreakingChanges": ["Added optional field 'newField'"],
+  "oldVersion": "v1",
+  "newVersion": "v2"
+}
+```
+
+### 9.3 Filter Endpoints
 
 | Method | Endpoint | Description |
 |--------|----------|-------------|
 | POST | `/api/v1/filters` | Create filter |
-| GET | `/api/v1/filters` | List all filters |
-| GET | `/api/v1/filters/:id` | Get filter by ID |
+| GET | `/api/v1/filters` | List all filters (supports query parameters) |
+| GET | `/api/v1/filters/:id` | Get filter by ID (includes status) |
 | PUT | `/api/v1/filters/:id` | Update filter |
+| PATCH | `/api/v1/filters/:id` | Update filter status (e.g., approve) |
 | DELETE | `/api/v1/filters/:id` | Delete filter |
-| GET | `/api/v1/filters/active` | Get active filters (for CDC Streaming Service) |
-| POST | `/api/v1/filters/:id/generate` | Generate Flink SQL |
-| POST | `/api/v1/filters/:id/validate` | Validate SQL syntax |
-| POST | `/api/v1/filters/:id/approve` | Approve filter for deployment |
-| POST | `/api/v1/filters/:id/deploy` | Deploy to Confluent Cloud |
-| GET | `/api/v1/filters/:id/status` | Get deployment status |
+| GET | `/api/v1/filters/:id/sql` | Get generated Flink SQL for filter |
+| POST | `/api/v1/filters/:id/validations` | Create SQL validation |
+| POST | `/api/v1/filters/:id/deployments` | Create deployment to Confluent Cloud |
 
-#### 6.3.1 Active Filters Endpoint
+**Query Parameters for `GET /api/v1/filters`:**
+- `version` (optional, default: `v1`) - Schema version to retrieve filters for
+- `enabled` (optional) - Filter by enabled status (true/false)
+- `status` (optional) - Filter by status (e.g., "deployed", "approved", "pending_approval")
 
-**GET `/api/v1/filters/active?schemaVersion={version}`**
+**Example:**
+```
+GET /api/v1/filters?version=v1&enabled=true&status=deployed
+```
 
-Returns only enabled, non-deleted filters for a specific schema version. This endpoint is optimized for CDC Streaming Service consumption and supports dynamic filter reloading.
+#### 9.3.1 Filter Status Updates
 
-**Query Parameters:**
-- `schemaVersion` (optional, default: `v1`) - Schema version to retrieve filters for
+**PATCH `/api/v1/filters/:id`**
+
+Updates filter status. Currently supports approving filters.
+
+**Request Example:**
+```json
+{
+  "status": "approved",
+  "approvedBy": "reviewer@example.com",
+  "notes": "Approved for production deployment"
+}
+```
+
+**Response:** Returns the updated filter with status included.
+
+#### 9.3.2 Get Filter SQL
+
+**GET `/api/v1/filters/:id/sql`**
+
+Retrieves the generated Flink SQL for a filter. This is a read-only operation.
+
+**Response Example:**
+```json
+{
+  "valid": true,
+  "sql": "CREATE TABLE `filtered-service-events-dealer-001` (...); INSERT INTO ...",
+  "statements": [
+    "CREATE TABLE ...",
+    "INSERT INTO ..."
+  ],
+  "validationErrors": []
+}
+```
+
+#### 9.3.3 SQL Validation
+
+**POST `/api/v1/filters/:id/validations`**
+
+Creates a validation check for SQL syntax. Returns 201 Created on success.
+
+**Request Example:**
+```json
+{
+  "sql": "CREATE TABLE test (id STRING); INSERT INTO test SELECT * FROM source;"
+}
+```
+
+**Response Example:**
+```json
+{
+  "valid": true,
+  "errors": []
+}
+```
+
+#### 9.3.4 Filter Deployment
+
+**POST `/api/v1/filters/:id/deployments`**
+
+Creates a deployment to Confluent Cloud. Returns 201 Created on success.
+
+**Request Example:**
+```json
+{
+  "force": false
+}
+```
+
+**Response Example:**
+```json
+{
+  "filterId": "service-events-for-dealer-001",
+  "status": "deployed",
+  "flinkStatementIds": ["stmt-123", "stmt-456"],
+  "message": "Filter deployed successfully"
+}
+```
 
 **Response Example:**
 ```json
@@ -383,7 +683,7 @@ Returns only enabled, non-deleted filters for a specific schema version. This en
 4. `deployed` - Successfully deployed to Confluent Cloud
 5. `failed` - Deployment failed
 
-### 6.4 Health Endpoint
+### 9.4 Health Endpoint
 
 | Method | Endpoint | Description |
 |--------|----------|-------------|
@@ -399,7 +699,9 @@ Returns only enabled, non-deleted filters for a specific schema version. This en
 
 ---
 
-## 7. Schema Repository Structure
+## 5. Schema Management
+
+### 5.1 Schema Repository Structure
 
 The metadata service expects schemas organized in a versioned directory structure. Filters are embedded directly within the Event Schema (`event.json`) as a `filters` property:
 
@@ -464,13 +766,11 @@ Event schema (`event.json`) references entity schemas using `$ref` and includes 
 }
 ```
 
----
-
-## 7.1 How Schemas Define Filters
+### 5.2 How Schemas Define Filters
 
 The event schemas define the structure and available fields that filters can reference in their conditions. The relationship between schemas and filters is fundamental to how the metadata service generates Flink SQL queries.
 
-### Schema-to-Database Mapping
+#### 5.2.1 Schema-to-Database Mapping
 
 The event schema defines the logical structure of events, which maps to the database table structure used in Flink SQL:
 
@@ -500,7 +800,7 @@ CREATE TABLE event_headers (
 );
 ```
 
-### Available Filter Fields
+#### 5.2.2 Available Filter Fields
 
 Filters can reference fields in three ways:
 
@@ -524,7 +824,7 @@ Filters can reference fields in three ways:
 3. **Nested JSON Paths** - Deep references into JSON structures:
    - `header_data.customField.nestedValue` - Multi-level JSON paths
 
-### Filter Field Path Examples
+#### 5.2.3 Filter Field Path Examples
 
 **Example 1: Direct Column Reference**
 ```json
@@ -588,7 +888,7 @@ WHERE `__op` = 'c'
   AND `created_date` > '2025-01-01T00:00:00Z'
 ```
 
-### Schema-Driven Filter Validation
+#### 5.2.4 Schema-Driven Filter Validation
 
 The metadata service uses schema information to:
 
@@ -597,7 +897,7 @@ The metadata service uses schema information to:
 3. **Enum Validation** - For enum fields, ensures values are from the allowed set
 4. **SQL Generation** - Converts schema field paths to appropriate SQL expressions
 
-### Schema Versioning and Filters
+### 5.3 Schema Versioning and Filters
 
 Filters are embedded directly in the Event Schema and versioned alongside schemas:
 
@@ -622,7 +922,7 @@ schemas/
 - Filter deployment validates that filters are compatible with the current schema version
 - Schema and filters are updated atomically (single file write)
 
-### Filter Field Path Resolution
+### 5.4 Filter Field Path Resolution
 
 The filter generator resolves field paths as follows:
 
@@ -643,7 +943,7 @@ flowchart TD
     G --> H
 ```
 
-### Example: Complete Filter Using Schema Fields
+#### 5.4.1 Example: Complete Filter Using Schema Fields
 
 **Filter Definition:**
 ```json
@@ -709,13 +1009,13 @@ This demonstrates how the schema-defined fields (`event_type` from the event hea
 
 ---
 
-## 8. Database Schema and Storage
+## 6. Database Schema and Storage
 
-### 8.1 PostgreSQL Filter Storage
+### 6.1 PostgreSQL Filter Storage
 
 The Metadata Service stores filter configurations in PostgreSQL for improved concurrency, querying capabilities, and production readiness. Filters are associated with schema versions (matching Git folder structure: v1, v2, etc.).
 
-#### 8.1.1 Filters Table Schema
+#### 6.1.1 Filters Table Schema
 
 ```sql
 CREATE TABLE filters (
@@ -740,7 +1040,7 @@ CREATE TABLE filters (
 );
 ```
 
-#### 8.1.2 Indexes
+#### 6.1.2 Indexes
 
 The following indexes are created for optimal query performance:
 
@@ -750,12 +1050,12 @@ The following indexes are created for optimal query performance:
 - `idx_filters_schema_version_enabled` - Composite index on `(schema_version, enabled)`
 - `idx_filters_schema_version_status` - Composite index on `(schema_version, status)`
 
-#### 8.1.3 JSONB Columns
+#### 6.1.3 JSONB Columns
 
 - **`conditions`**: Stores filter conditions array as JSONB for efficient querying and indexing
 - **`flink_statement_ids`**: Stores array of Flink statement IDs deployed for this filter
 
-#### 8.1.4 Database Migration
+#### 6.1.4 Database Migration
 
 Database schema is managed using Flyway. Migration scripts are located in `src/main/resources/db/migration/`:
 
@@ -763,47 +1063,7 @@ Database schema is managed using Flyway. Migration scripts are located in `src/m
 
 Migrations run automatically on application startup when `spring.flyway.enabled=true`.
 
-### 8.2 Database Configuration
-
-#### 8.2.1 Connection Properties
-
-Configure PostgreSQL connection in `application.yml`:
-
-```yaml
-spring:
-  datasource:
-    url: ${DATABASE_URL:jdbc:postgresql://localhost:5432/metadata_service}
-    username: ${DATABASE_USERNAME:postgres}
-    password: ${DATABASE_PASSWORD:postgres}
-    driver-class-name: org.postgresql.Driver
-  jpa:
-    hibernate:
-      ddl-auto: validate
-    show-sql: ${JPA_SHOW_SQL:false}
-    properties:
-      hibernate:
-        dialect: org.hibernate.dialect.PostgreSQLDialect
-        format_sql: true
-        jdbc:
-          time_zone: UTC
-  flyway:
-    enabled: ${FLYWAY_ENABLED:true}
-    locations: classpath:db/migration
-    baseline-on-migrate: true
-    validate-on-migrate: true
-```
-
-#### 8.2.2 Environment Variables
-
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `DATABASE_URL` | `jdbc:postgresql://localhost:5432/metadata_service` | PostgreSQL connection URL |
-| `DATABASE_USERNAME` | `postgres` | Database username |
-| `DATABASE_PASSWORD` | `postgres` | Database password |
-| `FLYWAY_ENABLED` | `true` | Enable Flyway migrations |
-| `JPA_SHOW_SQL` | `false` | Log SQL queries (useful for debugging) |
-
-### 8.3 Filter Storage Architecture
+### 6.2 Filter Storage Architecture
 
 Filters are stored in PostgreSQL with the following characteristics:
 
@@ -813,7 +1073,7 @@ Filters are stored in PostgreSQL with the following characteristics:
 - **Audit Trail**: Timestamps (`created_at`, `updated_at`, `approved_at`, `deployed_at`) track filter lifecycle
 - **Status Management**: Filter status (`pending_approval`, `approved`, `deployed`, `failed`, etc.) tracks deployment state
 
-### 8.4 Backward Compatibility
+### 6.3 Backward Compatibility
 
 During migration from file-based to database storage, the service supports:
 
@@ -824,9 +1084,9 @@ These features ensure zero-downtime migration and rollback capability.
 
 ---
 
-## 9. Configuration Reference
+## 11. Configuration Reference
 
-### 9.1 Environment Variables
+### 11.1 Environment Variables
 
 | Variable | Default | Description |
 |----------|---------|-------------|
@@ -863,7 +1123,7 @@ These features ensure zero-downtime migration and rollback capability.
 | `JENKINS_TRIGGER_ON_APPROVE` | `true` | Trigger build on filter approve |
 | `JENKINS_TIMEOUT_SECONDS` | `30` | Timeout for Jenkins build trigger requests |
 
-### 8.2 Configuration File (Java Implementation)
+### 11.2 Configuration File (application.yml)
 
 `application.yml`:
 
@@ -909,13 +1169,87 @@ jenkins:
   timeout-seconds: ${JENKINS_TIMEOUT_SECONDS:30}
 ```
 
+### 11.3 Database Configuration
+
+#### 11.3.1 Connection Properties
+
+Configure PostgreSQL connection in `application.yml`:
+
+```yaml
+spring:
+  datasource:
+    url: ${DATABASE_URL:jdbc:postgresql://localhost:5432/metadata_service}
+    username: ${DATABASE_USERNAME:postgres}
+    password: ${DATABASE_PASSWORD:postgres}
+    driver-class-name: org.postgresql.Driver
+  jpa:
+    hibernate:
+      ddl-auto: validate
+    show-sql: ${JPA_SHOW_SQL:false}
+    properties:
+      hibernate:
+        dialect: org.hibernate.dialect.PostgreSQLDialect
+        format_sql: true
+        jdbc:
+          time_zone: UTC
+  flyway:
+    enabled: ${FLYWAY_ENABLED:true}
+    locations: classpath:db/migration
+    baseline-on-migrate: true
+    validate-on-migrate: true
+```
+
+### 11.4 Confluent Cloud Configuration
+
+Confluent Cloud settings are configured via environment variables (see section 11.1) and mapped in `application.yml`:
+
+```yaml
+confluent:
+  cloud:
+    api-key: ${CONFLUENT_CLOUD_API_KEY:}
+    api-secret: ${CONFLUENT_CLOUD_API_SECRET:}
+    flink-compute-pool-id: ${CONFLUENT_FLINK_COMPUTE_POOL_ID:}
+    flink-api-endpoint: ${CONFLUENT_FLINK_API_ENDPOINT:}
+```
+
+### 11.5 Spring Boot YAML Configuration
+
+Spring Boot YAML generation settings:
+
+```yaml
+spring-boot:
+  filters-yaml-path: ${SPRING_BOOT_FILTERS_YAML_PATH:../cdc-streaming/stream-processor-spring/src/main/resources/filters.yml}
+  backup-enabled: ${SPRING_BOOT_YAML_BACKUP_ENABLED:true}
+  backup-dir: ${SPRING_BOOT_YAML_BACKUP_DIR:/tmp/filters-yaml-backups}
+```
+
+### 11.6 Jenkins CI/CD Configuration
+
+Jenkins integration settings:
+
+```yaml
+jenkins:
+  enabled: ${JENKINS_ENABLED:false}
+  base-url: ${JENKINS_BASE_URL:http://localhost:8080}
+  job-name: ${JENKINS_JOB_NAME:filter-integration-tests}
+  username: ${JENKINS_USERNAME:}
+  api-token: ${JENKINS_API_TOKEN:}
+  build-token: ${JENKINS_BUILD_TOKEN:}
+  trigger-on-create: ${JENKINS_TRIGGER_ON_CREATE:true}
+  trigger-on-update: ${JENKINS_TRIGGER_ON_UPDATE:true}
+  trigger-on-delete: ${JENKINS_TRIGGER_ON_DELETE:true}
+  trigger-on-deploy: ${JENKINS_TRIGGER_ON_DEPLOY:true}
+  trigger-on-approve: ${JENKINS_TRIGGER_ON_APPROVE:true}
+  timeout-seconds: ${JENKINS_TIMEOUT_SECONDS:30}
+```
+
 ---
 
-## 9. Compatibility Rules
+## 7. Compatibility Rules
 
 The metadata service implements automatic compatibility checking between schema versions to support gradual migrations.
 
-### 9.1 Non-Breaking Changes (Allowed)
+### 7.1 Non-Breaking Changes (Allowed)
 
 These changes are automatically accepted and allow events to validate against multiple schema versions:
 
@@ -925,7 +1259,7 @@ These changes are automatically accepted and allow events to validate against mu
 - **Making required fields optional** - Moving fields from `required` to optional
 - **Changing `additionalProperties: false` to `true`** - Allowing additional properties
 
-### 9.2 Breaking Changes (Rejected)
+### 7.2 Breaking Changes (Rejected)
 
 These changes cause validation failures and require explicit version migration:
 
@@ -935,7 +1269,7 @@ These changes cause validation failures and require explicit version migration:
 - **Tightening constraints** - Decreasing max or increasing min values
 - **Changing property types** - Type changes (e.g., `string` to `number`)
 
-### 9.3 Compatibility Check Flow
+### 7.3 Compatibility Check Flow
 
 ```mermaid
 flowchart TD
@@ -956,7 +1290,37 @@ flowchart TD
 
 ---
 
-## 10. Deployment Architecture
+## 10. Integration Guide
+
+### 10.1 Integration Pattern
+
+Producer APIs integrate using a "fail-open" pattern to ensure availability even if the metadata service is unavailable. See section 4.5 for the integration pattern flow diagram.
+
+### 10.2 Integration Code Examples
+
+**Python Producer API:**
+```python
+metadata_client = MetadataClient(
+    base_url=os.getenv("METADATA_SERVICE_URL"),
+    timeout=5.0
+)
+
+if metadata_client.is_enabled():
+    result = await metadata_client.validate_event(event)
+    if not result.get("valid") and strict_mode:
+        raise ValidationError("Event validation failed")
+```
+
+### 10.3 Fail-Open Benefits
+
+- **High Availability**: Producer APIs continue operating if metadata service is down
+- **Graceful Degradation**: Validation is optional, not blocking
+- **Operational Resilience**: No single point of failure
+- **Monitoring**: All failures are logged for alerting
+
+---
+
+## 12. Deployment Architecture
 
 ```mermaid
 graph TB
@@ -984,7 +1348,7 @@ graph TB
     Flink -->|Stream| Kafka
 ```
 
-### 10.1 Local Development
+### 12.1 Local Development
 
 **Docker Compose:**
 ```bash
@@ -1000,7 +1364,7 @@ export LOCAL_CACHE_DIR=/tmp/schema-cache
 export SERVER_PORT=8080
 ```
 
-### 10.2 Production Deployment
+### 12.2 Production Deployment
 
 **Container Orchestration:**
 - Stateless service - can scale horizontally
@@ -1015,9 +1379,157 @@ export SERVER_PORT=8080
 
 ---
 
-## 11. Key Files Reference
+## 13. Testing and Validation
 
-### 11.1 Java Implementation
+For comprehensive testing documentation including detailed test catalog, coverage reports, and implementation details, see the [Testing Guide](docs/TESTING.md).
+
+### 13.1 Running Tests
+
+#### All Tests (Unit + Integration)
+```bash
+./gradlew test
+```
+
+#### Unit Tests Only
+```bash
+./gradlew test --tests "*ServiceTest"
+```
+
+#### Integration Tests Only
+```bash
+./gradlew test --tests "*IntegrationTest"
+# or
+./run-tests.sh --integration
+```
+
+#### Workflow Tests Only
+```bash
+./run-tests.sh --workflow
+# or
+./scripts/run-integration-tests-local.sh --workflow-only
+```
+
+#### Generate Coverage Report
+```bash
+./gradlew test jacocoTestReport
+open build/reports/jacoco/test/html/index.html
+```
+
+### 13.2 Unit Testing
+
+The Java implementation includes comprehensive unit tests:
+- `FilterControllerTest.java` - Controller unit tests
+- `SchemaValidationServiceTest.java` - Validation service tests
+- `FilterGeneratorServiceTest.java` - SQL generation tests
+- `SpringYamlGeneratorServiceTest.java` - Spring YAML generation tests
+- `SpringYamlWriterServiceTest.java` - Spring YAML file writing tests
+- `JenkinsTriggerServiceTest.java` - Jenkins CI/CD triggering tests
+
+### 13.3 Integration Testing
+
+Integration tests verify end-to-end functionality across 9 test classes:
+
+- `FilterE2EIntegrationTest.java` - End-to-end filter lifecycle tests (8 tests)
+- `SpringYamlUpdateIntegrationTest.java` - Spring YAML update integration tests (5 tests)
+- `JenkinsTriggerIntegrationTest.java` - Jenkins triggering integration tests (9 tests)
+- `ValidationIntegrationTest.java` - Schema validation integration tests (7 tests)
+- `ApiErrorHandlingIntegrationTest.java` - API error handling tests (18 tests)
+- `MultiVersionValidationIntegrationTest.java` - Multi-version schema tests (4 tests)
+- `GitSyncIntegrationTest.java` - Git synchronization tests (4 tests)
+- `GitSyncEdgeCasesIntegrationTest.java` - Git sync edge cases (4 tests)
+- `WorkflowIntegrationTest.java` - Comprehensive workflow tests (15 tests)
+
+**Total Integration Tests**: 75 tests
+
+For detailed test catalog and descriptions, see the [Testing Guide - Test Catalog](docs/TESTING.md#test-catalog).
+
+### 13.4 Test Coverage
+
+#### Coverage Metrics
+
+- **Target Coverage**: 70% minimum
+- **Class Coverage**: 60% minimum (excluding config, models, exceptions)
+- **Service Layer**: 80% minimum
+
+#### Component Coverage
+
+| Component | Coverage | Unit Tests | Integration Tests |
+|-----------|----------|------------|-------------------|
+| Schema validation | ✅ 95%+ | 15+ | 7 |
+| Filter generation | ✅ 90%+ | 15+ | 7 |
+| Git sync | ✅ 85%+ | 10+ | 8 |
+| Compatibility checking | ✅ 90%+ | 10+ | 4 |
+| Spring YAML generation | ✅ 95%+ | 27 | 6 |
+| Jenkins triggering | ✅ 95%+ | 10 | 8 |
+| Filter management | ✅ 85%+ | 20+ | 7 |
+
+#### Coverage Tool
+
+The project uses **JaCoCo** for code coverage analysis. Generate reports with:
+```bash
+./gradlew test jacocoTestReport
+./gradlew jacocoTestCoverageVerification
+```
+
+For detailed coverage information, see the [Testing Guide - Test Coverage](docs/TESTING.md#test-coverage).
+
+### 13.5 Test Infrastructure
+
+#### Mock Jenkins Server
+
+The test suite includes a `MockJenkinsServer` for CI/CD emulation:
+- Embedded HTTP server using Java's HttpServer
+- Captures build trigger requests with parameters
+- Supports Basic Auth and build token authentication
+- Can simulate failures and timeouts
+- Thread-safe request capture
+
+#### Test Utilities
+
+- `TestRepoSetup` - Creates test Git repository structure
+- `TestEventGenerator` - Generates test events for validation
+- `MockJenkinsServer` - Embedded Jenkins server for CI/CD testing
+
+#### Test Configuration
+
+- Uses H2 in-memory database for all tests
+- Temporary directories for test isolation
+- Git sync disabled in test mode (`test.mode=true`)
+- All tests use `@SpringBootTest` with random port for web tests
+
+For implementation details, see the [Testing Guide - Implementation Details](docs/TESTING.md#implementation-details).
+
+### 13.6 Manual Testing
+
+**Validation Test:**
+```bash
+curl -X POST http://localhost:8080/api/v1/validate \
+  -H "Content-Type: application/json" \
+  -d '{
+    "event": {
+      "eventHeader": {...},
+      "entities": [...]
+    },
+    "version": "v1"
+  }'
+```
+
+**Filter Creation Test:**
+```bash
+curl -X POST http://localhost:8080/api/v1/filters \
+  -H "Content-Type: application/json" \
+  -d '{
+    "name": "Test Filter",
+    "outputTopic": "test-topic",
+    "conditions": [...]
+  }'
+```
+
+---
+
+## 14. Key Files Reference
+
+### 14.1 Java Implementation
 
 | File | Purpose |
 |------|---------|
@@ -1040,52 +1552,9 @@ export SERVER_PORT=8080
 
 ---
 
-## 12. Integration Pattern
+## 15. Operational Considerations
 
-Producer APIs integrate using a "fail-open" pattern to ensure availability even if the metadata service is unavailable:
-
-```mermaid
-flowchart TD
-    A[Producer API receives event] --> B{Metadata Service enabled?}
-    B -->|No| C[Process event directly]
-    B -->|Yes| D[Call POST /validate]
-    D --> E{Service available?}
-    E -->|No| F[Log warning, allow event]
-    E -->|Yes| G{Validation passed?}
-    G -->|Yes| H[Process event]
-    G -->|No| I{Strict mode?}
-    I -->|Yes| J[Reject with 422]
-    I -->|No| K[Log warning, process anyway]
-    F --> H
-```
-
-### 12.1 Integration Code Examples
-
-**Python Producer API:**
-```python
-metadata_client = MetadataClient(
-    base_url=os.getenv("METADATA_SERVICE_URL"),
-    timeout=5.0
-)
-
-if metadata_client.is_enabled():
-    result = await metadata_client.validate_event(event)
-    if not result.get("valid") and strict_mode:
-        raise ValidationError("Event validation failed")
-```
-
-### 12.2 Fail-Open Benefits
-
-- **High Availability**: Producer APIs continue operating if metadata service is down
-- **Graceful Degradation**: Validation is optional, not blocking
-- **Operational Resilience**: No single point of failure
-- **Monitoring**: All failures are logged for alerting
-
----
-
-## 13. Operational Considerations
-
-### 13.1 Health Monitoring
+### 15.1 Health Monitoring
 
 **Health Endpoint:**
 - `GET /api/v1/health`
@@ -1105,7 +1574,7 @@ curl http://localhost:8080/api/v1/health
 - Git sync success/failure rates
 - Validation throughput
 
-### 13.2 Performance Characteristics
+### 15.2 Performance Characteristics
 
 | Operation | Typical Latency | Notes |
 |-----------|----------------|-------|
@@ -1122,7 +1591,7 @@ curl http://localhost:8080/api/v1/health
 - Cache invalidation: On git sync
 - Memory footprint: ~10-50MB per schema version
 
-### 13.3 Scaling Considerations
+### 15.3 Scaling Considerations
 
 **Horizontal Scaling:**
 - Stateless service - can scale horizontally
@@ -1140,7 +1609,7 @@ curl http://localhost:8080/api/v1/health
 - **Production (Low)**: 1GB RAM, 1 CPU (handles ~100 req/s)
 - **Production (High)**: 2GB RAM, 2 CPU (handles ~500 req/s)
 
-### 13.4 Error Handling
+### 15.4 Error Handling
 
 **Validation Errors:**
 - Invalid events return `422 Unprocessable Entity` (strict mode)
@@ -1157,7 +1626,7 @@ curl http://localhost:8080/api/v1/health
 - Filter deployment: Retry on transient failures
 - Git sync: Automatic retry on next interval
 
-### 13.5 Security Considerations
+### 15.5 Security Considerations
 
 **Authentication:**
 - No built-in authentication (assumes network-level security)
@@ -1173,7 +1642,7 @@ curl http://localhost:8080/api/v1/health
 - SQL injection prevention in filter generation
 - JSON Schema validation prevents malformed events
 
-### 13.6 Troubleshooting
+### 15.6 Troubleshooting
 
 **Common Issues:**
 
@@ -1203,129 +1672,19 @@ curl http://localhost:8080/api/v1/health
 
 ---
 
-## 14. Filter Management Deep Dive
-
-### 14.1 Filter Structure
-
-A filter configuration defines conditions for filtering events in Flink SQL:
-
-```json
-{
-  "id": "service-events-for-dealer-001",
-  "name": "Service Events for Dealer 001",
-  "description": "Filters service events for dealer ID 001",
-  "consumerId": "dealer-001-consumer",
-  "outputTopic": "service-events-dealer-001",
-  "conditions": [
-    {
-      "field": "event_type",
-      "operator": "equals",
-      "value": "CarServiceDone",
-      "valueType": "string"
-    },
-    {
-      "field": "header_data.dealerId",
-      "operator": "equals",
-      "value": "001",
-      "valueType": "string"
-    }
-  ],
-  "conditionLogic": "AND",
-  "enabled": true,
-  "status": "approved",
-  "version": 1
-}
-```
-
-### 14.2 Supported Operators
-
-| Operator | Description | Example |
-|----------|-------------|---------|
-| `equals` | Exact match | `event_type = 'CarCreated'` |
-| `in` | Value in list | `event_type IN ('CarCreated', 'LoanCreated')` |
-| `notIn` | Value not in list | `event_type NOT IN ('Deleted')` |
-| `greaterThan` | Numeric comparison | `amount > 1000` |
-| `lessThan` | Numeric comparison | `amount < 5000` |
-| `greaterThanOrEqual` | Numeric comparison | `amount >= 1000` |
-| `lessThanOrEqual` | Numeric comparison | `amount <= 5000` |
-| `between` | Range check | `amount BETWEEN 1000 AND 5000` |
-| `matches` | Regex pattern | `event_name REGEXP '.*Service.*'` |
-| `isNull` | Null check | `dealerId IS NULL` |
-| `isNotNull` | Not null check | `dealerId IS NOT NULL` |
-
-### 14.3 Generated Flink SQL
-
-The filter generator creates two SQL statements:
-
-1. **Sink Table Definition:**
-```sql
-CREATE TABLE `service-events-dealer-001` (
-    `key` BYTES,
-    `id` STRING,
-    `event_name` STRING,
-    `event_type` STRING,
-    `created_date` STRING,
-    `saved_date` STRING,
-    `header_data` STRING,
-    `__op` STRING,
-    `__table` STRING
-) WITH (
-    'connector' = 'confluent',
-    'value.format' = 'json-registry'
-);
-```
-
-2. **INSERT Statement:**
-```sql
-INSERT INTO `service-events-dealer-001`
-SELECT 
-    CAST(`id` AS BYTES) AS `key`,
-    `id`,
-    `event_name`,
-    `event_type`,
-    `created_date`,
-    `saved_date`,
-    `header_data`,
-    `__op`,
-    `__table`
-FROM `raw-event-headers`
-WHERE `__op` = 'c' 
-  AND `event_type` = 'CarServiceDone'
-  AND JSON_VALUE(`header_data`, '$.dealerId') = '001';
-```
-
-### 14.4 Filter Lifecycle
-
-```mermaid
-stateDiagram-v2
-    [*] --> pending_approval: Create
-    pending_approval --> approved: Approve
-    pending_approval --> [*]: Delete
-    approved --> deploying: Deploy
-    deploying --> deployed: Success
-    deploying --> failed: Error
-    deployed --> deploying: Redeploy
-    failed --> deploying: Retry
-    approved --> [*]: Delete
-    deployed --> [*]: Delete
-    failed --> [*]: Delete
-```
-
----
-
-## 15. Spring Boot YAML Generation
+## 16. Spring Boot YAML Generation
 
 The Metadata Service automatically generates and updates a `filters.yml` file for the Spring Boot stream processor whenever filters are created, updated, deleted, or deployed via the API. This ensures synchronization between Flink SQL filters and the Spring Boot Kafka Streams implementation.
 
-### 15.1 Automatic YAML Updates
+### 16.1 Automatic YAML Updates
 
 The `filters.yml` file is automatically updated when:
 - A filter is **created** via `POST /api/v1/filters`
 - A filter is **updated** via `PUT /api/v1/filters/:id`
 - A filter is **deleted** via `DELETE /api/v1/filters/:id`
-- A filter is **deployed** via `POST /api/v1/filters/:id/deploy`
+- A filter is **deployed** via `POST /api/v1/filters/:id/deployments`
 
-### 15.2 YAML File Format
+### 16.2 YAML File Format
 
 The generated YAML follows this structure:
 
@@ -1363,7 +1722,7 @@ filters:
 - Deprecated filters include comments indicating their status
 - Atomic file writes ensure data consistency (writes to temp file, then renames)
 
-### 15.3 Backup Management
+### 16.3 Backup Management
 
 Before updating `filters.yml`, the service creates a timestamped backup if `backup-enabled` is `true`:
 
@@ -1376,7 +1735,7 @@ Before updating `filters.yml`, the service creates a timestamped backup if `back
 
 Old backups are automatically cleaned up (default: keeps last 10 backups).
 
-### 15.4 Configuration
+### 16.4 Configuration
 
 Configure the YAML generation in `application.yml`:
 
@@ -1392,7 +1751,7 @@ spring-boot:
 - `SPRING_BOOT_YAML_BACKUP_ENABLED` - Enable/disable backups (default: `true`)
 - `SPRING_BOOT_YAML_BACKUP_DIR` - Directory for backups (default: `/tmp/filters-yaml-backups`)
 
-### 15.5 Error Handling
+### 16.5 Error Handling
 
 If YAML generation or writing fails:
 - The error is logged but does **not** fail the API operation
@@ -1402,11 +1761,11 @@ If YAML generation or writing fails:
 
 ---
 
-## 16. Jenkins CI/CD Integration
+## 17. Jenkins CI/CD Integration
 
 The Metadata Service can automatically trigger Jenkins CI/CD builds when filters are created, updated, deleted, approved, or deployed. This enables automated change management and integration testing.
 
-### 16.1 Automatic Build Triggering
+### 17.1 Automatic Build Triggering
 
 Jenkins builds are triggered on the following filter lifecycle events:
 
@@ -1420,7 +1779,7 @@ Jenkins builds are triggered on the following filter lifecycle events:
 
 Each event type can be individually enabled/disabled via configuration.
 
-### 16.2 Build Parameters
+### 17.2 Build Parameters
 
 When triggering a Jenkins build, the following parameters are passed:
 
@@ -1432,7 +1791,7 @@ When triggering a Jenkins build, the following parameters are passed:
 
 Additional parameters can be passed via the API for custom workflows.
 
-### 16.3 Authentication
+### 17.3 Authentication
 
 Jenkins authentication supports two methods:
 
@@ -1479,7 +1838,7 @@ jenkins:
 - `JENKINS_TRIGGER_ON_*` - Enable/disable triggering for specific events
 - `JENKINS_TIMEOUT_SECONDS` - Request timeout (default: `30` seconds)
 
-### 16.5 Jenkins Job Setup
+### 17.5 Jenkins Job Setup
 
 Your Jenkins job should be configured as a **parameterized build** that accepts:
 
@@ -1507,181 +1866,13 @@ pipeline {
 }
 ```
 
-### 16.6 Error Handling
+### 17.6 Error Handling
 
 If Jenkins build triggering fails:
 - The error is logged but does **not** fail the filter operation
 - The filter operation (create/update/delete/approve/deploy) still succeeds
 - Retry logic is applied for transient failures (5xx errors)
 - Timeout is configurable (default: 30 seconds)
-
-### 16.7 Workflow Example
-
-```mermaid
-sequenceDiagram
-    participant User as API User
-    participant API as Filter Controller
-    participant Storage as Filter Storage
-    participant SpringYaml as Spring YAML Service
-    participant Jenkins as Jenkins CI/CD
-
-    User->>API: POST /filters (create filter)
-    API->>Storage: Create filter
-    Storage-->>API: Filter created
-    API->>SpringYaml: Update filters.yml
-    SpringYaml-->>API: YAML updated
-    API->>Jenkins: Trigger build (FILTER_EVENT_TYPE=create, FILTER_ID=...)
-    Jenkins-->>API: Build triggered
-    API-->>User: Filter created (201)
-```
-
----
-
-## 17. Testing and Validation
-
-For comprehensive testing documentation including detailed test catalog, coverage reports, and implementation details, see the [Testing Guide](docs/TESTING.md).
-
-### 17.1 Running Tests
-
-#### All Tests (Unit + Integration)
-```bash
-./gradlew test
-```
-
-#### Unit Tests Only
-```bash
-./gradlew test --tests "*ServiceTest"
-```
-
-#### Integration Tests Only
-```bash
-./gradlew test --tests "*IntegrationTest"
-# or
-./run-tests.sh --integration
-```
-
-#### Workflow Tests Only
-```bash
-./run-tests.sh --workflow
-# or
-./scripts/run-integration-tests-local.sh --workflow-only
-```
-
-#### Generate Coverage Report
-```bash
-./gradlew test jacocoTestReport
-open build/reports/jacoco/test/html/index.html
-```
-
-### 17.2 Unit Testing
-
-The Java implementation includes comprehensive unit tests:
-- `FilterControllerTest.java` - Controller unit tests
-- `SchemaValidationServiceTest.java` - Validation service tests
-- `FilterGeneratorServiceTest.java` - SQL generation tests
-- `SpringYamlGeneratorServiceTest.java` - Spring YAML generation tests
-- `SpringYamlWriterServiceTest.java` - Spring YAML file writing tests
-- `JenkinsTriggerServiceTest.java` - Jenkins CI/CD triggering tests
-
-### 17.3 Integration Testing
-
-Integration tests verify end-to-end functionality across 9 test classes:
-
-- `FilterE2EIntegrationTest.java` - End-to-end filter lifecycle tests (8 tests)
-- `SpringYamlUpdateIntegrationTest.java` - Spring YAML update integration tests (5 tests)
-- `JenkinsTriggerIntegrationTest.java` - Jenkins triggering integration tests (9 tests)
-- `ValidationIntegrationTest.java` - Schema validation integration tests (7 tests)
-- `ApiErrorHandlingIntegrationTest.java` - API error handling tests (18 tests)
-- `MultiVersionValidationIntegrationTest.java` - Multi-version schema tests (4 tests)
-- `GitSyncIntegrationTest.java` - Git synchronization tests (4 tests)
-- `GitSyncEdgeCasesIntegrationTest.java` - Git sync edge cases (4 tests)
-- `WorkflowIntegrationTest.java` - Comprehensive workflow tests (15 tests)
-
-**Total Integration Tests**: 75 tests
-
-For detailed test catalog and descriptions, see the [Testing Guide - Test Catalog](docs/TESTING.md#test-catalog).
-
-### 17.4 Test Coverage
-
-#### Coverage Metrics
-
-- **Target Coverage**: 70% minimum
-- **Class Coverage**: 60% minimum (excluding config, models, exceptions)
-- **Service Layer**: 80% minimum
-
-#### Component Coverage
-
-| Component | Coverage | Unit Tests | Integration Tests |
-|-----------|----------|------------|-------------------|
-| Schema validation | ✅ 95%+ | 15+ | 7 |
-| Filter generation | ✅ 90%+ | 15+ | 7 |
-| Git sync | ✅ 85%+ | 10+ | 8 |
-| Compatibility checking | ✅ 90%+ | 10+ | 4 |
-| Spring YAML generation | ✅ 95%+ | 27 | 6 |
-| Jenkins triggering | ✅ 95%+ | 10 | 8 |
-| Filter management | ✅ 85%+ | 20+ | 7 |
-
-#### Coverage Tool
-
-The project uses **JaCoCo** for code coverage analysis. Generate reports with:
-```bash
-./gradlew test jacocoTestReport
-./gradlew jacocoTestCoverageVerification
-```
-
-For detailed coverage information, see the [Testing Guide - Test Coverage](docs/TESTING.md#test-coverage).
-
-### 17.5 Test Infrastructure
-
-#### Mock Jenkins Server
-
-The test suite includes a `MockJenkinsServer` for CI/CD emulation:
-- Embedded HTTP server using Java's HttpServer
-- Captures build trigger requests with parameters
-- Supports Basic Auth and build token authentication
-- Can simulate failures and timeouts
-- Thread-safe request capture
-
-#### Test Utilities
-
-- `TestRepoSetup` - Creates test Git repository structure
-- `TestEventGenerator` - Generates test events for validation
-- `MockJenkinsServer` - Embedded Jenkins server for CI/CD testing
-
-#### Test Configuration
-
-- Uses H2 in-memory database for all tests
-- Temporary directories for test isolation
-- Git sync disabled in test mode (`test.mode=true`)
-- All tests use `@SpringBootTest` with random port for web tests
-
-For implementation details, see the [Testing Guide - Implementation Details](docs/TESTING.md#implementation-details).
-
-### 17.6 Manual Testing
-
-**Validation Test:**
-```bash
-curl -X POST http://localhost:8080/api/v1/validate \
-  -H "Content-Type: application/json" \
-  -d '{
-    "event": {
-      "eventHeader": {...},
-      "entities": [...]
-    },
-    "version": "v1"
-  }'
-```
-
-**Filter Creation Test:**
-```bash
-curl -X POST http://localhost:8080/api/v1/filters \
-  -H "Content-Type: application/json" \
-  -d '{
-    "name": "Test Filter",
-    "outputTopic": "test-topic",
-    "conditions": [...]
-  }'
-```
 
 ---
 

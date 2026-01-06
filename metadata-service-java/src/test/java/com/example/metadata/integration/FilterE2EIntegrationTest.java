@@ -181,8 +181,8 @@ public class FilterE2EIntegrationTest {
         Assertions.assertNotNull(filterId, "Filter ID should be set from previous test");
         Assertions.assertFalse(filterId.isEmpty(), "Filter ID should not be empty");
         
-        webTestClient.post()
-            .uri("/api/v1/filters/{id}/generate?version=v1", filterId)
+        webTestClient.get()
+            .uri("/api/v1/filters/{id}/sql?version=v1", filterId)
             .exchange()
             .expectStatus().isOk()
             .expectBody(GenerateSQLResponse.class)
@@ -207,10 +207,10 @@ public class FilterE2EIntegrationTest {
             .build();
         
         webTestClient.post()
-            .uri("/api/v1/filters/{id}/validate?version=v1", filterId)
+            .uri("/api/v1/filters/{id}/validations?version=v1", filterId)
             .bodyValue(request)
             .exchange()
-            .expectStatus().isOk()
+            .expectStatus().isCreated()
             .expectBody(ValidateSQLResponse.class)
             .value(response -> {
                 Assertions.assertTrue(response.isValid());
@@ -220,12 +220,13 @@ public class FilterE2EIntegrationTest {
     @Test
     @Order(4)
     void testApproveFilter() {
-        ApproveFilterRequest request = ApproveFilterRequest.builder()
+        UpdateFilterStatusRequest request = UpdateFilterStatusRequest.builder()
+            .status("approved")
             .approvedBy("test-user")
             .build();
         
-        webTestClient.post()
-            .uri("/api/v1/filters/{id}/approve?version=v1", filterId)
+        webTestClient.patch()
+            .uri("/api/v1/filters/{id}?version=v1", filterId)
             .bodyValue(request)
             .exchange()
             .expectStatus().isOk()
@@ -241,13 +242,13 @@ public class FilterE2EIntegrationTest {
     @Order(5)
     void testGetFilterStatus() {
         webTestClient.get()
-            .uri("/api/v1/filters/{id}/status?version=v1", filterId)
+            .uri("/api/v1/filters/{id}?version=v1", filterId)
             .exchange()
             .expectStatus().isOk()
-            .expectBody(FilterStatusResponse.class)
-            .value(response -> {
-                Assertions.assertEquals(filterId, response.getFilterId());
-                Assertions.assertEquals("approved", response.getStatus());
+            .expectBody(Filter.class)
+            .value(filter -> {
+                Assertions.assertEquals(filterId, filter.getId());
+                Assertions.assertEquals("approved", filter.getStatus());
             });
     }
     

@@ -176,10 +176,10 @@ public class FilterControllerTest {
         
         // Then validate SQL
         webTestClient.post()
-            .uri("/api/v1/filters/{id}/validate?version=v1", created.getId())
+            .uri("/api/v1/filters/{id}/validations?version=v1", created.getId())
             .bodyValue(request)
             .exchange()
-            .expectStatus().isOk()
+            .expectStatus().isCreated()
             .expectBody(ValidateSQLResponse.class)
             .value(response -> {
                 Assertions.assertTrue(response.isValid());
