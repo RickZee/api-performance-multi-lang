@@ -1,0 +1,36 @@
+{
+  "baseline": {
+    "threads": 100,
+    "iterations": 100,
+    "count": 10,
+    "payload_size": "100k",
+    "event_type": "CarCreated"
+  },
+  "thresholds": {
+    "min_throughput": 500,
+    "max_p99_latency_ms": 5000,
+    "max_error_rate": 0.05
+  },
+  "test_groups": {
+    "scenario1_100k_thread_scaling": {
+      "scenario": 1,
+      "threads": [2, 5, 10, 100, 500],
+      "iterations": 100,
+      "count": 10,
+      "payload_size": "100k",
+      "tags": ["100k-payload", "scenario1", "thread-scaling"],
+      "description": "Scenario 1 (individual inserts) with 100KB payload across thread scaling: 2, 5, 10, 100, 500 threads. 100 iterations each. Expected throughput: ~1,000-1,200 ops/sec based on previous results."
+    },
+    "scenario2_100k_thread_scaling": {
+      "scenario": 2,
+      "threads": [2, 5, 10, 100, 500],
+      "iterations": 100,
+      "count": 10,
+      "batch_size": 10,
+      "payload_size": "100k",
+      "tags": ["100k-payload", "scenario2", "thread-scaling", "experimental"],
+      "description": "Scenario 2 (batch inserts) with 100KB payload - EXPERIMENTAL: Previous tests showed Scenario 2 doesn't work with 100KB payloads. This may fail or timeout, especially at higher thread counts. 100 iterations each. If failures occur, consider reducing batch size (count) to 5 or even 1."
+    }
+  }
+}
+

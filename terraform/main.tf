@@ -327,7 +327,6 @@ locals {
   # Aurora instance class: db.t4g.medium for dev (ARM-based for cost savings), db.r5.large for test
   # Note: Can be overridden in terraform.tfvars
   # db.t4g.medium is the smallest ARM instance supported for PostgreSQL 15.14 (~20% cheaper than x86 db.t3.medium)
-  # db.t4g.small is NOT supported for Aurora PostgreSQL 15.14
   aurora_instance_class = var.aurora_instance_class != null ? var.aurora_instance_class : (
     local.is_dev ? "db.t4g.medium" : "db.r5.large"
   )
