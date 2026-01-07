@@ -63,6 +63,7 @@ services:
   redpanda:
     image: docker.redpanda.com/redpandadata/redpanda:latest
     container_name: cdc-local-redpanda
+    hostname: redpanda
     command:
       - redpanda
       - start
@@ -238,19 +239,37 @@ services:
     hostname: flink-jobmanager
     ports:
       - "8082:8081"  # Flink Web UI
-    command: jobmanager
+    command:
+      - bash
+      - -c
+      - |
+        # Copy Kafka connector JARs to lib directory
+        if [ -d /opt/flink/lib/flink-connectors ]; then
+          for jar in /opt/flink/lib/flink-connectors/*.jar; do
+            if [ -f "$jar" ]; then
+              SIZE=$(stat -c%s "$jar" 2>/dev/null || stat -f%z "$jar" 2>/dev/null || echo 0)
+              if [ "$SIZE" -gt 100000 ]; then
+                cp "$jar" /opt/flink/lib/ 2>&1
+                echo "Copied $(basename "$jar") ($SIZE bytes)"
+              fi
+            fi
+          done
+        fi
+        # Start JobManager
+        /opt/flink/bin/jobmanager.sh start-foreground
     environment:
       - |
         FLINK_PROPERTIES=
         jobmanager.rpc.address: flink-jobmanager
         jobmanager.memory.process.size: 1600m
-        taskmanager.numberOfTaskSlots: 2
-        parallelism.default: 2
+        taskmanager.numberOfTaskSlots: 4
+        parallelism.default: 1
         state.backend: filesystem
         state.checkpoints.dir: file:///opt/flink/checkpoints
         state.savepoints.dir: file:///opt/flink/savepoints
     volumes:
       - ./flink-jobs:/opt/flink/jobs
+      - ./flink-connectors:/opt/flink/lib/flink-connectors:ro
       - flink-checkpoints:/opt/flink/checkpoints
       - flink-savepoints:/opt/flink/savepoints
     networks:
@@ -269,6 +288,62 @@ services:
           memory: 1G
           cpus: '1.0'
 
+  # Flink SQL Gateway
+  flink-sql-gateway:
+    image: flink:1.18.0-scala_2.12
+    container_name: cdc-local-flink-sql-gateway
+    hostname: flink-sql-gateway
+    command:
+      - bash
+      - -c
+      - |
+        # Copy Kafka connector JARs to lib directory (exclude invalid small JARs)
+        if [ -d /opt/flink/lib/flink-connectors ]; then
+          for jar in /opt/flink/lib/flink-connectors/*.jar; do
+            if [ -f "$jar" ]; then
+              SIZE=$(stat -c%s "$jar" 2>/dev/null || stat -f%z "$jar" 2>/dev/null || echo 0)
+              if [ "$SIZE" -gt 100000 ]; then
+                cp "$jar" /opt/flink/lib/ 2>&1
+                echo "Copied $(basename "$jar") ($SIZE bytes)"
+              fi
+            fi
+          done
+        fi
+        # Start SQL Gateway
+        /opt/flink/bin/sql-gateway.sh start \
+          -Dsql-gateway.endpoint.rest.address=0.0.0.0 \
+          -Dsql-gateway.endpoint.rest.port=8083 \
+          -Djobmanager.rpc.address=flink-jobmanager \
+          -Djobmanager.rpc.port=6123 &
+        tail -f /dev/null
+    ports:
+      - "28083:8083"  # SQL Gateway REST API (mapped to 28083 to avoid conflicts)
+    depends_on:
+      flink-jobmanager:
+        condition: service_healthy
+    environment:
+      - |
+        FLINK_PROPERTIES=
+        jobmanager.rpc.address: flink-jobmanager
+    volumes:
+      - ./flink-jobs:/opt/flink/jobs
+      - ./flink-connectors:/opt/flink/lib/flink-connectors:ro
+    networks:
+      - cdc_local_network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8083/v1/info"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    deploy:
+      resources:
+        limits:
+          memory: 1G
+          cpus: '1.0'
+        reservations:
+          memory: 512M
+          cpus: '0.5'
+
   # Flink TaskManager
   flink-taskmanager:
     image: flink:1.18.0-scala_2.12
@@ -277,18 +352,36 @@ services:
     depends_on:
       flink-jobmanager:
         condition: service_healthy
-    command: taskmanager
+    command:
+      - bash
+      - -c
+      - |
+        # Copy Kafka connector JARs to lib directory
+        if [ -d /opt/flink/lib/flink-connectors ]; then
+          for jarfile in /opt/flink/lib/flink-connectors/*.jar; do
+            if [ -f "$$jarfile" ]; then
+              FILESIZE=$$(stat -c%s "$$jarfile" 2>/dev/null || stat -f%z "$$jarfile" 2>/dev/null || echo 0)
+              if [ "$$FILESIZE" -gt 100000 ]; then
+                cp "$$jarfile" /opt/flink/lib/ 2>&1
+                echo "Copied $$(basename "$$jarfile") ($$FILESIZE bytes)"
+              fi
+            fi
+          done
+        fi
+        # Start TaskManager
+        /opt/flink/bin/taskmanager.sh start-foreground
     environment:
       - |
         FLINK_PROPERTIES=
         jobmanager.rpc.address: flink-jobmanager
-        taskmanager.numberOfTaskSlots: 2
-        parallelism.default: 2
+        taskmanager.numberOfTaskSlots: 4
+        parallelism.default: 1
         state.backend: filesystem
         state.checkpoints.dir: file:///opt/flink/checkpoints
         state.savepoints.dir: file:///opt/flink/savepoints
     volumes:
       - ./flink-jobs:/opt/flink/jobs
+      - ./flink-connectors:/opt/flink/lib/flink-connectors:ro
       - flink-checkpoints:/opt/flink/checkpoints
       - flink-savepoints:/opt/flink/savepoints
     networks:
