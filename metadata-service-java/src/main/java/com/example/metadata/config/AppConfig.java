@@ -11,6 +11,7 @@ public class AppConfig {
     private GitConfig git = new GitConfig();
     private ValidationConfig validation = new ValidationConfig();
     private ConfluentConfig confluent = new ConfluentConfig();
+    private FlinkConfig flink = new FlinkConfig();
     private SpringBootConfig springBoot = new SpringBootConfig();
     private JenkinsConfig jenkins = new JenkinsConfig();
 
@@ -47,6 +48,17 @@ public class AppConfig {
         private String filtersYamlPath;
         private boolean backupEnabled = true;
         private String backupDir = "/tmp/filters-yaml-backups";
+    }
+
+    @Data
+    public static class FlinkConfig {
+        private LocalConfig local = new LocalConfig();
+
+        @Data
+        public static class LocalConfig {
+            private boolean enabled = false;
+            private String restApiUrl = "http://localhost:8082";
+        }
     }
 
     @Data

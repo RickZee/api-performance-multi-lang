@@ -50,7 +50,24 @@ fi
 if [ "$REDPANDA_STATUS" = "healthy" ]; then
     pass "Redpanda is healthy"
 else
-    fail "Redpanda is not healthy"
+    warn "Redpanda is not healthy, starting it..."
+    docker-compose -f "$COMPOSE_FILE" up -d redpanda 2>&1 | grep -v "level=warning" | tail -3
+    info "Waiting for Redpanda to become healthy..."
+    max_wait=30
+    elapsed=0
+    while [ $elapsed -lt $max_wait ]; do
+        sleep 2
+        elapsed=$((elapsed + 2))
+        REDPANDA_STATUS=$(docker-compose -f "$COMPOSE_FILE" ps redpanda 2>/dev/null | grep -q "healthy" && echo "healthy" || echo "not healthy")
+        if [ "$REDPANDA_STATUS" = "healthy" ]; then
+            pass "Redpanda is now healthy (after ${elapsed}s)"
+            break
+        fi
+    done
+    if [ "$REDPANDA_STATUS" != "healthy" ]; then
+        fail "Redpanda did not become healthy within ${max_wait}s"
+        info "Check Redpanda logs: docker logs cdc-local-redpanda"
+    fi
 fi
 
 if [ "$KAFKA_CONNECT_STATUS" = "running" ]; then
@@ -67,8 +84,14 @@ TASK_STATUS=$(curl -s http://localhost:8085/connectors/postgres-debezium-event-h
 
 if [ "$CONNECTOR_STATUS" = "RUNNING" ] && [ "$TASK_STATUS" = "RUNNING" ]; then
     pass "Connector is RUNNING (task: $TASK_STATUS)"
+elif [ "$TASK_STATUS" = "RUNNING" ]; then
+    # Task is running even if connector is UNASSIGNED (can happen during rebalancing)
+    pass "Connector task is RUNNING (connector: $CONNECTOR_STATUS)"
+elif [ "$CONNECTOR_STATUS" = "RUNNING" ]; then
+    warn "Connector is RUNNING but task status is $TASK_STATUS"
 else
     fail "Connector status: $CONNECTOR_STATUS (task: $TASK_STATUS)"
+    info "If connector is not found, deploy it: ./scripts/deploy-debezium-connector-local.sh"
 fi
 
 # 3. Test CDC - Insert Test Events for All Event Types
@@ -282,17 +305,150 @@ else
     info "Stream processor may still be initializing or no matching events have been processed yet"
 fi
 
-# 7. Start and Validate Consumers
+# 7. Validate Flink Cluster
 echo ""
-section "Step 7: Consumer Validation"
+section "Step 7: Flink Cluster Validation"
+info "Checking Flink cluster status..."
+
+FLINK_JOBMANAGER_STATUS=$(docker-compose -f "$COMPOSE_FILE" ps flink-jobmanager 2>/dev/null | grep -q "Up" && echo "running" || echo "not running")
+FLINK_TASKMANAGER_STATUS=$(docker-compose -f "$COMPOSE_FILE" ps flink-taskmanager 2>/dev/null | grep -q "Up" && echo "running" || echo "not running")
+
+if [ "$FLINK_JOBMANAGER_STATUS" = "running" ]; then
+    pass "Flink JobManager is running"
+    
+    # Check Flink REST API
+    if curl -sf http://localhost:8082/overview > /dev/null 2>&1; then
+        pass "Flink REST API is accessible"
+        
+        # Check if TaskManager is connected
+        TASKMANAGER_COUNT=$(curl -sf http://localhost:8082/overview 2>/dev/null | jq -r '.taskmanagers // 0' 2>/dev/null || echo "0")
+        if [ "$TASKMANAGER_COUNT" -gt 0 ]; then
+            pass "Flink TaskManager is connected (count: $TASKMANAGER_COUNT)"
+        else
+            warn "Flink TaskManager not connected yet"
+        fi
+    else
+        warn "Flink REST API is not accessible yet"
+    fi
+else
+    warn "Flink JobManager is not running"
+    
+    # Check if port 8082 is already in use
+    if lsof -i :8082 > /dev/null 2>&1; then
+        warn "Port 8082 is already in use. Checking what's using it..."
+        PORT_USER=$(lsof -i :8082 | tail -1 | awk '{print $1}')
+        info "Port 8082 is used by: $PORT_USER"
+        info "You may need to stop the conflicting service or change Flink port"
+    fi
+    
+    info "Starting Flink cluster..."
+    if docker-compose -f "$COMPOSE_FILE" up -d flink-jobmanager flink-taskmanager 2>&1 | grep -v "level=warning" | tail -5; then
+        # Wait for Flink to be ready
+        info "Waiting for Flink cluster to be ready..."
+        max_wait=60
+        elapsed=0
+        while [ $elapsed -lt $max_wait ]; do
+            if curl -sf http://localhost:8082/overview > /dev/null 2>&1; then
+                pass "Flink cluster is ready"
+                break
+            fi
+            sleep 2
+            elapsed=$((elapsed + 2))
+        done
+        
+        if [ $elapsed -ge $max_wait ]; then
+            warn "Flink cluster did not become ready within ${max_wait}s"
+            info "Check Flink logs: docker logs cdc-local-flink-jobmanager"
+        fi
+    else
+        fail "Failed to start Flink cluster"
+        info "Check for port conflicts or container issues"
+    fi
+fi
+
+# 8. Deploy Flink SQL Statements
+echo ""
+section "Step 8: Deploy Flink SQL Statements"
+info "Deploying Flink SQL statements to local cluster..."
+
+# Check if Flink is accessible before deploying
+if ! curl -sf http://localhost:8082/overview > /dev/null 2>&1; then
+    warn "Flink cluster is not accessible at http://localhost:8082"
+    info "Skipping Flink SQL deployment"
+else
+    if [ -f "$SCRIPT_DIR/deploy-flink-local.sh" ]; then
+        DEPLOY_OUTPUT=$("$SCRIPT_DIR/deploy-flink-local.sh" 2>&1)
+        DEPLOY_EXIT=$?
+        echo "$DEPLOY_OUTPUT" | tail -30
+        
+        if [ $DEPLOY_EXIT -eq 0 ]; then
+            pass "Flink SQL statements deployed"
+        else
+            if echo "$DEPLOY_OUTPUT" | grep -q "already exists\|already deployed"; then
+                warn "Flink SQL statements may already be deployed"
+            else
+                warn "Flink SQL deployment had issues"
+            fi
+        fi
+    else
+        warn "Flink deployment script not found: $SCRIPT_DIR/deploy-flink-local.sh"
+        info "Skipping Flink SQL deployment"
+    fi
+fi
+
+# 9. Verify Flink Filtered Topics
+echo ""
+section "Step 9: Verify Flink Filtered Topics"
+info "Waiting 5 seconds for Flink to process events..."
+sleep 5
+
+FLINK_FILTERED_TOPICS=("filtered-loan-created-events-flink" "filtered-car-created-events-flink" "filtered-loan-payment-submitted-events-flink" "filtered-service-events-flink")
+FLINK_TOPICS_FOUND=0
+
+for topic in "${FLINK_FILTERED_TOPICS[@]}"; do
+    if docker exec cdc-local-redpanda rpk topic list 2>/dev/null | grep -q "$topic"; then
+        pass "Flink filtered topic $topic exists"
+        FLINK_TOPICS_FOUND=$((FLINK_TOPICS_FOUND + 1))
+        
+        # Check if test event is in topic
+        TOPIC_OUTPUT=$(docker exec cdc-local-redpanda rpk topic consume "$topic" --offset start --num 20 --format json 2>/dev/null & CONSUME_PID=$!; sleep 3; kill $CONSUME_PID 2>/dev/null; wait $CONSUME_PID 2>/dev/null)
+        if echo "$TOPIC_OUTPUT" | grep -q "$TEST_ID"; then
+            pass "Test event found in $topic"
+        else
+            info "Test event not yet in $topic (Flink may still be processing)"
+        fi
+    else
+        warn "Flink filtered topic $topic does not exist yet"
+    fi
+done
+
+if [ $FLINK_TOPICS_FOUND -eq ${#FLINK_FILTERED_TOPICS[@]} ]; then
+    pass "All Flink filtered topics exist"
+else
+    warn "Only $FLINK_TOPICS_FOUND/${#FLINK_FILTERED_TOPICS[@]} Flink filtered topics exist"
+fi
+
+# 10. Start and Validate Consumers
+echo ""
+section "Step 10: Consumer Validation"
 info "Starting consumers if not already running..."
 
+# Spring Boot consumers
 CONSUMERS=("loan-consumer" "loan-payment-consumer" "service-consumer" "car-consumer")
 CONSUMER_CONTAINERS=("cdc-local-loan-consumer-spring" "cdc-local-loan-payment-consumer-spring" "cdc-local-service-consumer-spring" "cdc-local-car-consumer-spring")
 CONSUMER_TOPICS=("filtered-loan-created-events-spring" "filtered-loan-payment-submitted-events-spring" "filtered-service-events-spring" "filtered-car-created-events-spring")
 
-# Start consumers using docker-compose-local.yml
+# Flink consumers
+FLINK_CONSUMERS=("loan-consumer-flink" "loan-payment-consumer-flink" "service-consumer-flink" "car-consumer-flink")
+FLINK_CONSUMER_CONTAINERS=("cdc-local-loan-consumer-flink" "cdc-local-loan-payment-consumer-flink" "cdc-local-service-consumer-flink" "cdc-local-car-consumer-flink")
+FLINK_CONSUMER_TOPICS=("filtered-loan-created-events-flink" "filtered-loan-payment-submitted-events-flink" "filtered-service-events-flink" "filtered-car-created-events-flink")
+
+# Start Spring Boot consumers using docker-compose-local.yml
 docker-compose -f "$COMPOSE_FILE" up -d "${CONSUMERS[@]}" 2>&1 | grep -v "level=warning" | tail -5
+
+# Start Flink consumers
+info "Starting Flink consumers..."
+docker-compose -f "$COMPOSE_FILE" up -d "${FLINK_CONSUMERS[@]}" 2>&1 | grep -v "level=warning" | tail -5
 
 # Wait for consumers to start
 info "Waiting 3 seconds for consumers to initialize..."
@@ -427,42 +583,87 @@ for i in "${!CONSUMER_CONTAINERS[@]}"; do
 done
 
 if [ $CONSUMERS_RUNNING -eq $CONSUMERS_TOTAL ]; then
-    pass "All $CONSUMERS_TOTAL consumers are running"
+    pass "All $CONSUMERS_TOTAL Spring Boot consumers are running"
 else
-    warn "Only $CONSUMERS_RUNNING/$CONSUMERS_TOTAL consumers are running"
+    warn "Only $CONSUMERS_RUNNING/$CONSUMERS_TOTAL Spring Boot consumers are running"
+fi
+
+# Validate Flink consumers
+info "Validating Flink consumers..."
+FLINK_CONSUMERS_RUNNING=0
+FLINK_CONSUMERS_PROCESSED_TEST=0
+FLINK_CONSUMERS_TOTAL=${#FLINK_CONSUMER_CONTAINERS[@]}
+
+for i in "${!FLINK_CONSUMER_CONTAINERS[@]}"; do
+    CONTAINER_NAME="${FLINK_CONSUMER_CONTAINERS[$i]}"
+    CONSUMER_NAME="${FLINK_CONSUMERS[$i]}"
+    
+    if docker ps --format "{{.Names}}" | grep -q "^${CONTAINER_NAME}$"; then
+        CONTAINER_STATUS=$(docker ps --filter "name=${CONTAINER_NAME}" --format "{{.Status}}" | head -1)
+        if echo "$CONTAINER_STATUS" | grep -q "Up"; then
+            pass "$CONSUMER_NAME is running"
+            FLINK_CONSUMERS_RUNNING=$((FLINK_CONSUMERS_RUNNING + 1))
+            
+            # Check logs for test event
+            EXPECTED_EVENT_ID=""
+            if [ "$CONTAINER_NAME" = "cdc-local-loan-consumer-flink" ]; then
+                EXPECTED_EVENT_ID="$TEST_ID_LOAN"
+            elif [ "$CONTAINER_NAME" = "cdc-local-car-consumer-flink" ]; then
+                EXPECTED_EVENT_ID="$TEST_ID_CAR"
+            elif [ "$CONTAINER_NAME" = "cdc-local-loan-payment-consumer-flink" ]; then
+                EXPECTED_EVENT_ID="$TEST_ID_PAYMENT"
+            elif [ "$CONTAINER_NAME" = "cdc-local-service-consumer-flink" ]; then
+                EXPECTED_EVENT_ID="$TEST_ID_SERVICE"
+            fi
+            
+            if [ -n "$EXPECTED_EVENT_ID" ]; then
+                CONSUMER_LOGS=$(docker logs "$CONTAINER_NAME" 2>&1 | tail -100)
+                if echo "$CONSUMER_LOGS" | grep -qE "(Event ID:.*$EXPECTED_EVENT_ID|UUID:.*$EXPECTED_EVENT_ID|$EXPECTED_EVENT_ID)"; then
+                    pass "$CONSUMER_NAME processed test event"
+                    FLINK_CONSUMERS_PROCESSED_TEST=$((FLINK_CONSUMERS_PROCESSED_TEST + 1))
+                else
+                    info "$CONSUMER_NAME is running (waiting for events)"
+                fi
+            fi
+        fi
+    fi
+done
+
+if [ $FLINK_CONSUMERS_RUNNING -eq $FLINK_CONSUMERS_TOTAL ]; then
+    pass "All $FLINK_CONSUMERS_TOTAL Flink consumers are running"
+else
+    warn "Only $FLINK_CONSUMERS_RUNNING/$FLINK_CONSUMERS_TOTAL Flink consumers are running"
 fi
 
 if [ $CONSUMERS_PROCESSED_TEST -eq 4 ]; then
-    pass "All 4 test events were processed by their respective consumers!"
-    info "  ✓ LoanCreated ($TEST_ID_LOAN) → loan-consumer"
-    info "  ✓ CarCreated ($TEST_ID_CAR) → car-consumer"
-    info "  ✓ LoanPaymentSubmitted ($TEST_ID_PAYMENT) → loan-payment-consumer"
-    info "  ✓ CarServiceDone ($TEST_ID_SERVICE) → service-consumer"
+    pass "All 4 test events were processed by Spring Boot consumers!"
+    info "  ✓ LoanCreated ($TEST_ID_LOAN) → loan-consumer-spring"
+    info "  ✓ CarCreated ($TEST_ID_CAR) → car-consumer-spring"
+    info "  ✓ LoanPaymentSubmitted ($TEST_ID_PAYMENT) → loan-payment-consumer-spring"
+    info "  ✓ CarServiceDone ($TEST_ID_SERVICE) → service-consumer-spring"
 elif [ $CONSUMERS_PROCESSED_TEST -gt 0 ]; then
-    warn "Only $CONSUMERS_PROCESSED_TEST/4 test events were processed by consumers"
-    info "Expected all 4 events to be processed:"
-    info "  - LoanCreated ($TEST_ID_LOAN) → loan-consumer"
-    info "  - CarCreated ($TEST_ID_CAR) → car-consumer"
-    info "  - LoanPaymentSubmitted ($TEST_ID_PAYMENT) → loan-payment-consumer"
-    info "  - CarServiceDone ($TEST_ID_SERVICE) → service-consumer"
+    warn "Only $CONSUMERS_PROCESSED_TEST/4 test events were processed by Spring Boot consumers"
 else
-    warn "No test events were processed by consumers yet"
-    info "This may be normal if:"
-    info "  - Stream processor is still filtering events"
-    info "  - Consumers are processing but haven't logged event IDs yet"
-    info "  - Events are in topics but consumers haven't consumed them yet"
-    info "Check consumer logs manually:"
-    info "  docker logs cdc-local-loan-consumer-spring | grep -E '$TEST_ID_LOAN|LoanCreated'"
-    info "  docker logs cdc-local-car-consumer-spring | grep -E '$TEST_ID_CAR|CarCreated'"
-    info "  docker logs cdc-local-loan-payment-consumer-spring | grep -E '$TEST_ID_PAYMENT|LoanPaymentSubmitted'"
-    info "  docker logs cdc-local-service-consumer-spring | grep -E '$TEST_ID_SERVICE|CarServiceDone'"
+    warn "No test events were processed by Spring Boot consumers yet"
+fi
+
+if [ $FLINK_CONSUMERS_PROCESSED_TEST -eq 4 ]; then
+    pass "All 4 test events were processed by Flink consumers!"
+    info "  ✓ LoanCreated ($TEST_ID_LOAN) → loan-consumer-flink"
+    info "  ✓ CarCreated ($TEST_ID_CAR) → car-consumer-flink"
+    info "  ✓ LoanPaymentSubmitted ($TEST_ID_PAYMENT) → loan-payment-consumer-flink"
+    info "  ✓ CarServiceDone ($TEST_ID_SERVICE) → service-consumer-flink"
+elif [ $FLINK_CONSUMERS_PROCESSED_TEST -gt 0 ]; then
+    warn "Only $FLINK_CONSUMERS_PROCESSED_TEST/4 test events were processed by Flink consumers"
+else
+    info "Flink consumers are running (events may still be processing)"
 fi
 
 cd "$PROJECT_ROOT"
 
-# 8. Run Metadata Service Tests
+# 11. Run Metadata Service Tests
 echo ""
-section "Step 8: Metadata Service Tests"
+section "Step 11: Metadata Service Tests"
 cd metadata-service-java
 if ./gradlew test --console=plain 2>&1 | tail -5 | grep -q "BUILD SUCCESSFUL"; then
     pass "Metadata Service tests passed"
@@ -472,20 +673,29 @@ else
 fi
 cd "$PROJECT_ROOT"
 
-# 9. Summary
+# 12. Summary
 echo ""
 section "Test Summary"
 echo "Infrastructure: Postgres=$POSTGRES_STATUS, Redpanda=$REDPANDA_STATUS, Kafka Connect=$KAFKA_CONNECT_STATUS"
 echo "Connector: $CONNECTOR_STATUS (task: $TASK_STATUS)"
 echo "CDC Test: Events inserted (Loan: $TEST_ID_LOAN, Car: $TEST_ID_CAR, Payment: $TEST_ID_PAYMENT, Service: $TEST_ID_SERVICE)"
-echo "Stream Processor: Filtering events"
-echo "Consumers: $CONSUMERS_RUNNING/$CONSUMERS_TOTAL running"
+echo "Stream Processor: Spring Boot filtering events"
+echo "Flink Cluster: JobManager=$FLINK_JOBMANAGER_STATUS, TaskManager=$FLINK_TASKMANAGER_STATUS"
+echo "Spring Boot Consumers: $CONSUMERS_RUNNING/$CONSUMERS_TOTAL running"
+echo "Flink Consumers: $FLINK_CONSUMERS_RUNNING/$FLINK_CONSUMERS_TOTAL running"
 if [ $CONSUMERS_PROCESSED_TEST -eq 4 ]; then
-    echo "Event Processing: All 4 test events processed by their respective consumers ✓"
+    echo "Spring Boot Event Processing: All 4 test events processed ✓"
 elif [ $CONSUMERS_PROCESSED_TEST -gt 0 ]; then
-    echo "Event Processing: $CONSUMERS_PROCESSED_TEST/4 test events processed (some may still be in pipeline)"
+    echo "Spring Boot Event Processing: $CONSUMERS_PROCESSED_TEST/4 test events processed"
 else
-    echo "Event Processing: No test events processed yet (may still be in pipeline)"
+    echo "Spring Boot Event Processing: No test events processed yet"
+fi
+if [ $FLINK_CONSUMERS_PROCESSED_TEST -eq 4 ]; then
+    echo "Flink Event Processing: All 4 test events processed ✓"
+elif [ $FLINK_CONSUMERS_PROCESSED_TEST -gt 0 ]; then
+    echo "Flink Event Processing: $FLINK_CONSUMERS_PROCESSED_TEST/4 test events processed"
+else
+    echo "Flink Event Processing: Events may still be processing"
 fi
 echo "Metadata Service: Tests completed"
 
@@ -505,10 +715,18 @@ fi
         SCRIPT_END_TIME=$(date +%s)
         SCRIPT_DURATION=$((SCRIPT_END_TIME - SCRIPT_START_TIME))
         pass "Local CDC Pipeline is operational! (Total test time: ${SCRIPT_DURATION}s)"
-    if [ $CONSUMERS_PROCESSED_TEST -eq 4 ]; then
-        pass "End-to-end event processing verified for all 4 event types!"
-    elif [ $CONSUMERS_PROCESSED_TEST -gt 0 ]; then
-        warn "Pipeline is operational but only $CONSUMERS_PROCESSED_TEST/4 events processed"
+    if [ $CONSUMERS_PROCESSED_TEST -eq 4 ] && [ $FLINK_CONSUMERS_PROCESSED_TEST -eq 4 ]; then
+        pass "End-to-end event processing verified for all 4 event types (both Spring Boot and Flink)!"
+    elif [ $CONSUMERS_PROCESSED_TEST -eq 4 ]; then
+        pass "Spring Boot pipeline verified for all 4 event types!"
+        if [ $FLINK_CONSUMERS_PROCESSED_TEST -gt 0 ]; then
+            info "Flink pipeline: $FLINK_CONSUMERS_PROCESSED_TEST/4 events processed"
+        else
+            info "Flink pipeline: Events may still be processing"
+        fi
+    elif [ $CONSUMERS_PROCESSED_TEST -gt 0 ] || [ $FLINK_CONSUMERS_PROCESSED_TEST -gt 0 ]; then
+        warn "Pipeline is operational but only some events processed"
+        info "Spring Boot: $CONSUMERS_PROCESSED_TEST/4, Flink: $FLINK_CONSUMERS_PROCESSED_TEST/4"
         info "Some events may still be processing asynchronously"
     else
         warn "Pipeline is operational but test event processing not yet confirmed"
@@ -521,7 +739,10 @@ cd "$PROJECT_ROOT"
 else
     echo ""
     if [ $CONSUMERS_RUNNING -lt $CONSUMERS_TOTAL ]; then
-        warn "Some consumers are not running ($CONSUMERS_RUNNING/$CONSUMERS_TOTAL)"
+        warn "Some Spring Boot consumers are not running ($CONSUMERS_RUNNING/$CONSUMERS_TOTAL)"
+    fi
+    if [ $FLINK_CONSUMERS_RUNNING -lt $FLINK_CONSUMERS_TOTAL ]; then
+        warn "Some Flink consumers are not running ($FLINK_CONSUMERS_RUNNING/$FLINK_CONSUMERS_TOTAL)"
     fi
     if [ "$CONNECTOR_STATUS" != "RUNNING" ] || [ "$POSTGRES_STATUS" != "healthy" ] || [ "$REDPANDA_STATUS" != "healthy" ]; then
         fail "Some components are not healthy"

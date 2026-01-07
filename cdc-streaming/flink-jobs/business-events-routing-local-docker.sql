@@ -1,0 +1,206 @@
+-- Flink SQL Statements for Event Headers Filtering and Routing (Local Docker)
+-- Processes 4 types of filtered event headers:
+-- 1. Car Created (CarCreated)
+-- 2. Loan Created (LoanCreated)
+-- 3. Loan Payment Submitted (LoanPaymentSubmitted)
+-- 4. Service Events (CarServiceDone)
+--
+-- Source: event_headers table from PostgreSQL via Debezium CDC
+-- Target: Filtered Kafka topics for each event type (with -flink suffix)
+--
+-- NOTE: Flink writes to -flink suffixed topics to distinguish from Spring Boot processor.
+-- Consumers should subscribe to the appropriate topic based on which processor is active.
+--
+-- DEPLOYMENT NOTE: Deploy statements in order:
+-- 1. Source table (raw-event-headers)
+-- 2. Sink tables (filtered-*-events-flink)
+-- 3. INSERT statements (one per filter)
+
+-- ============================================================================
+-- Step 1: Create Source Table
+-- ============================================================================
+-- Source Table: Raw Event Headers from Kafka (Debezium CDC format)
+-- Note: Uses standard Kafka connector (not Confluent connector) for local Redpanda
+-- This table reads from the Debezium CDC output for event_headers table
+-- The header_data column contains the event header JSON structure
+CREATE TABLE `raw-event-headers` (
+    `id` STRING,
+    `event_name` STRING,
+    `event_type` STRING,
+    `created_date` STRING,
+    `saved_date` STRING,
+    `header_data` STRING,
+    `__op` STRING,
+    `__table` STRING,
+    `__ts_ms` BIGINT
+) WITH (
+    'connector' = 'kafka',
+    'topic' = 'raw-event-headers',
+    'properties.bootstrap.servers' = 'redpanda:9092',
+    'properties.security.protocol' = 'PLAINTEXT',
+    'format' = 'json',
+    'scan.startup.mode' = 'earliest-offset',
+    'json.ignore-parse-errors' = 'true'
+);
+
+-- ============================================================================
+-- Step 2: Create Sink Tables
+-- ============================================================================
+
+-- Sink Table: Car Created Events Filter (Flink)
+-- Note: Flink writes to -flink suffixed topics to distinguish from Spring Boot processor
+CREATE TABLE `filtered-car-created-events-flink` (
+    `key` BYTES,
+    `id` STRING,
+    `event_name` STRING,
+    `event_type` STRING,
+    `created_date` STRING,
+    `saved_date` STRING,
+    `header_data` STRING,
+    `__op` STRING,
+    `__table` STRING
+) WITH (
+    'connector' = 'kafka',
+    'topic' = 'filtered-car-created-events-flink',
+    'properties.bootstrap.servers' = 'redpanda:9092',
+    'properties.security.protocol' = 'PLAINTEXT',
+    'format' = 'json',
+    'json.ignore-parse-errors' = 'true',
+    'sink.partitioner' = 'fixed'
+);
+
+-- Sink Table: Loan Created Events Filter (Flink)
+CREATE TABLE `filtered-loan-created-events-flink` (
+    `key` BYTES,
+    `id` STRING,
+    `event_name` STRING,
+    `event_type` STRING,
+    `created_date` STRING,
+    `saved_date` STRING,
+    `header_data` STRING,
+    `__op` STRING,
+    `__table` STRING
+) WITH (
+    'connector' = 'kafka',
+    'topic' = 'filtered-loan-created-events-flink',
+    'properties.bootstrap.servers' = 'redpanda:9092',
+    'properties.security.protocol' = 'PLAINTEXT',
+    'format' = 'json',
+    'json.ignore-parse-errors' = 'true',
+    'sink.partitioner' = 'fixed'
+);
+
+-- Sink Table: Loan Payment Submitted Events Filter (Flink)
+CREATE TABLE `filtered-loan-payment-submitted-events-flink` (
+    `key` BYTES,
+    `id` STRING,
+    `event_name` STRING,
+    `event_type` STRING,
+    `created_date` STRING,
+    `saved_date` STRING,
+    `header_data` STRING,
+    `__op` STRING,
+    `__table` STRING
+) WITH (
+    'connector' = 'kafka',
+    'topic' = 'filtered-loan-payment-submitted-events-flink',
+    'properties.bootstrap.servers' = 'redpanda:9092',
+    'properties.security.protocol' = 'PLAINTEXT',
+    'format' = 'json',
+    'json.ignore-parse-errors' = 'true',
+    'sink.partitioner' = 'fixed'
+);
+
+-- Sink Table: Service Events Filter (Flink)
+CREATE TABLE `filtered-service-events-flink` (
+    `key` BYTES,
+    `id` STRING,
+    `event_name` STRING,
+    `event_type` STRING,
+    `created_date` STRING,
+    `saved_date` STRING,
+    `header_data` STRING,
+    `__op` STRING,
+    `__table` STRING
+) WITH (
+    'connector' = 'kafka',
+    'topic' = 'filtered-service-events-flink',
+    'properties.bootstrap.servers' = 'redpanda:9092',
+    'properties.security.protocol' = 'PLAINTEXT',
+    'format' = 'json',
+    'json.ignore-parse-errors' = 'true',
+    'sink.partitioner' = 'fixed'
+);
+
+-- ============================================================================
+-- Step 3: Deploy INSERT Statements (one per filter)
+-- ============================================================================
+
+-- INSERT Statement: Car Created Events Filter (Flink)
+-- Filters CarCreated events by eventType
+-- Writes to filtered-car-created-events-flink topic
+INSERT INTO `filtered-car-created-events-flink`
+SELECT 
+    CAST(`id` AS BYTES) AS `key`,
+    `id`,
+    `event_name`,
+    `event_type`,
+    `created_date`,
+    `saved_date`,
+    `header_data`,
+    `__op`,
+    `__table`
+FROM `raw-event-headers`
+WHERE `event_type` = 'CarCreated' AND `__op` = 'c';
+
+-- INSERT Statement: Loan Created Events Filter (Flink)
+-- Filters LoanCreated events by eventType
+-- Writes to filtered-loan-created-events-flink topic
+INSERT INTO `filtered-loan-created-events-flink`
+SELECT 
+    CAST(`id` AS BYTES) AS `key`,
+    `id`,
+    `event_name`,
+    `event_type`,
+    `created_date`,
+    `saved_date`,
+    `header_data`,
+    `__op`,
+    `__table`
+FROM `raw-event-headers`
+WHERE `event_type` = 'LoanCreated' AND `__op` = 'c';
+
+-- INSERT Statement: Loan Payment Submitted Events Filter (Flink)
+-- Filters LoanPaymentSubmitted events by eventType
+-- Writes to filtered-loan-payment-submitted-events-flink topic
+INSERT INTO `filtered-loan-payment-submitted-events-flink`
+SELECT 
+    CAST(`id` AS BYTES) AS `key`,
+    `id`,
+    `event_name`,
+    `event_type`,
+    `created_date`,
+    `saved_date`,
+    `header_data`,
+    `__op`,
+    `__table`
+FROM `raw-event-headers`
+WHERE `event_type` = 'LoanPaymentSubmitted' AND `__op` = 'c';
+
+-- INSERT Statement: Service Events Filter (Flink)
+-- Filters CarServiceDone events by eventType
+-- Writes to filtered-service-events-flink topic
+INSERT INTO `filtered-service-events-flink`
+SELECT 
+    CAST(`id` AS BYTES) AS `key`,
+    `id`,
+    `event_name`,
+    `event_type`,
+    `created_date`,
+    `saved_date`,
+    `header_data`,
+    `__op`,
+    `__table`
+FROM `raw-event-headers`
+WHERE `event_type` = 'CarServiceDone' AND `__op` = 'c';
+

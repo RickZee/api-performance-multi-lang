@@ -201,6 +201,9 @@ services:
       CONFLUENT_CLOUD_API_SECRET: ${CONFLUENT_CLOUD_API_SECRET:-}
       CONFLUENT_FLINK_COMPUTE_POOL_ID: ${CONFLUENT_FLINK_COMPUTE_POOL_ID:-}
       CONFLUENT_FLINK_API_ENDPOINT: ${CONFLUENT_FLINK_API_ENDPOINT:-}
+      # Local Flink configuration
+      FLINK_LOCAL_ENABLED: ${FLINK_LOCAL_ENABLED:-true}
+      FLINK_LOCAL_REST_API_URL: ${FLINK_LOCAL_REST_API_URL:-http://flink-jobmanager:8081}
       # Database configuration for local postgres
       DATABASE_URL: ${DATABASE_URL:-jdbc:postgresql://postgres-large:5432/car_entities}
       DATABASE_USERNAME: ${DATABASE_USERNAME:-postgres}
@@ -226,6 +229,78 @@ services:
       interval: 30s
       timeout: 10s
       retries: 3
+
+  # Flink JobManager
+  # Note: For production, use Confluent Cloud Flink. This local Flink is for development/testing only.
+  flink-jobmanager:
+    image: flink:1.18.0-scala_2.12
+    container_name: cdc-local-flink-jobmanager
+    hostname: flink-jobmanager
+    ports:
+      - "8082:8081"  # Flink Web UI
+    command: jobmanager
+    environment:
+      - |
+        FLINK_PROPERTIES=
+        jobmanager.rpc.address: flink-jobmanager
+        jobmanager.memory.process.size: 1600m
+        taskmanager.numberOfTaskSlots: 2
+        parallelism.default: 2
+        state.backend: filesystem
+        state.checkpoints.dir: file:///opt/flink/checkpoints
+        state.savepoints.dir: file:///opt/flink/savepoints
+    volumes:
+      - ./flink-jobs:/opt/flink/jobs
+      - flink-checkpoints:/opt/flink/checkpoints
+      - flink-savepoints:/opt/flink/savepoints
+    networks:
+      - cdc_local_network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8081/overview"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    deploy:
+      resources:
+        limits:
+          memory: 2G
+          cpus: '2.0'
+        reservations:
+          memory: 1G
+          cpus: '1.0'
+
+  # Flink TaskManager
+  flink-taskmanager:
+    image: flink:1.18.0-scala_2.12
+    container_name: cdc-local-flink-taskmanager
+    hostname: flink-taskmanager
+    depends_on:
+      flink-jobmanager:
+        condition: service_healthy
+    command: taskmanager
+    environment:
+      - |
+        FLINK_PROPERTIES=
+        jobmanager.rpc.address: flink-jobmanager
+        taskmanager.numberOfTaskSlots: 2
+        parallelism.default: 2
+        state.backend: filesystem
+        state.checkpoints.dir: file:///opt/flink/checkpoints
+        state.savepoints.dir: file:///opt/flink/savepoints
+    volumes:
+      - ./flink-jobs:/opt/flink/jobs
+      - flink-checkpoints:/opt/flink/checkpoints
+      - flink-savepoints:/opt/flink/savepoints
+    networks:
+      - cdc_local_network
+    deploy:
+      resources:
+        limits:
+          memory: 2G
+          cpus: '2.0'
+        reservations:
+          memory: 1G
+          cpus: '1.0'
 
   # Spring Boot Stream Processor
   stream-processor:
@@ -347,9 +422,95 @@ services:
       - cdc_local_network
     restart: unless-stopped
 
+  # ============================================================================
+  # Flink Stream Processor Consumers
+  # ============================================================================
+
+  # Loan Consumer (Flink)
+  loan-consumer-flink:
+    build:
+      context: ./consumers-confluent/loan-consumer
+      dockerfile: Dockerfile
+    container_name: cdc-local-loan-consumer-flink
+    hostname: loan-consumer-flink
+    environment:
+      # For local development: use redpanda:9092 (no auth) - explicitly set to override env vars
+      KAFKA_BOOTSTRAP_SERVERS: redpanda:9092
+      # Consumes from Flink stream processor topics
+      KAFKA_TOPIC: ${KAFKA_TOPIC_LOAN_FLINK:-filtered-loan-created-events-flink}
+      # Explicitly unset for local Redpanda (no authentication)
+      KAFKA_API_KEY: ""
+      KAFKA_API_SECRET: ""
+      CONSUMER_GROUP_ID: loan-consumer-flink-group
+    networks:
+      - cdc_local_network
+    restart: unless-stopped
+
+  # Loan Payment Consumer (Flink)
+  loan-payment-consumer-flink:
+    build:
+      context: ./consumers-confluent/loan-payment-consumer
+      dockerfile: Dockerfile
+    container_name: cdc-local-loan-payment-consumer-flink
+    hostname: loan-payment-consumer-flink
+    environment:
+      # For local development: use redpanda:9092 (no auth) - explicitly set to override env vars
+      KAFKA_BOOTSTRAP_SERVERS: redpanda:9092
+      # Consumes from Flink stream processor topics
+      KAFKA_TOPIC: ${KAFKA_TOPIC_LOAN_PAYMENT_FLINK:-filtered-loan-payment-submitted-events-flink}
+      # Explicitly unset for local Redpanda (no authentication)
+      KAFKA_API_KEY: ""
+      KAFKA_API_SECRET: ""
+      CONSUMER_GROUP_ID: loan-payment-consumer-flink-group
+    networks:
+      - cdc_local_network
+    restart: unless-stopped
+
+  # Service Consumer (Flink)
+  service-consumer-flink:
+    build:
+      context: ./consumers-confluent/service-consumer
+      dockerfile: Dockerfile
+    container_name: cdc-local-service-consumer-flink
+    hostname: service-consumer-flink
+    environment:
+      # For local development: use redpanda:9092 (no auth) - explicitly set to override env vars
+      KAFKA_BOOTSTRAP_SERVERS: redpanda:9092
+      # Consumes from Flink stream processor topics
+      KAFKA_TOPIC: ${KAFKA_TOPIC_SERVICE_FLINK:-filtered-service-events-flink}
+      # Explicitly unset for local Redpanda (no authentication)
+      KAFKA_API_KEY: ""
+      KAFKA_API_SECRET: ""
+      CONSUMER_GROUP_ID: service-consumer-flink-group
+    networks:
+      - cdc_local_network
+    restart: unless-stopped
+
+  # Car Consumer (Flink)
+  car-consumer-flink:
+    build:
+      context: ./consumers-confluent/car-consumer
+      dockerfile: Dockerfile
+    container_name: cdc-local-car-consumer-flink
+    hostname: car-consumer-flink
+    environment:
+      # For local development: use redpanda:9092 (no auth) - explicitly set to override env vars
+      KAFKA_BOOTSTRAP_SERVERS: redpanda:9092
+      # Consumes from Flink stream processor topics
+      KAFKA_TOPIC: ${KAFKA_TOPIC_CAR_FLINK:-filtered-car-created-events-flink}
+      # Explicitly unset for local Redpanda (no authentication)
+      KAFKA_API_KEY: ""
+      KAFKA_API_SECRET: ""
+      CONSUMER_GROUP_ID: car-consumer-flink-group
+    networks:
+      - cdc_local_network
+    restart: unless-stopped
+
 volumes:
   postgres_data_large:
   redpanda-data:
+  flink-checkpoints:
+  flink-savepoints:
 
 networks:
   cdc_local_network:

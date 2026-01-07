@@ -20,6 +20,7 @@ The system automatically:
 
 **Stream Processors:**
 - **Flink SQL** (Confluent Cloud): Writes to `filtered-*-events-flink` topics
+- **Flink SQL** (Local Docker): Writes to `filtered-*-events-flink` topics (for local development)
 - **Managed Flink** (AWS MSK): Writes to `filtered-*-events-msk` topics
 - **Spring Boot Kafka Streams**: Writes to `filtered-*-events-spring` topics
 
@@ -53,7 +54,7 @@ Consumers subscribe to the appropriate topic based on which processor is active.
 
 This system supports **3 deployment options**:
 
-1. **Docker-based Local Development** - Local Kafka, Flink, and consumers
+1. **Docker-based Local Development** - Local Kafka, Flink cluster, Spring Boot processor, and consumers
 2. **Confluent Cloud** - Fully managed Confluent Cloud with Flink SQL
 3. **AWS MSK + Managed Flink** - AWS managed services (MSK Serverless + Managed Service for Apache Flink)
 

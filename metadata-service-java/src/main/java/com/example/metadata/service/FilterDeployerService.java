@@ -24,6 +24,7 @@ import java.util.regex.Pattern;
 @Slf4j
 public class FilterDeployerService {
     private final AppConfig.ConfluentConfig.CloudConfig config;
+    private final AppConfig.FlinkConfig.LocalConfig localFlinkConfig;
     private final ObjectMapper objectMapper = new ObjectMapper();
     private final CloseableHttpClient httpClient = HttpClients.createDefault();
 
@@ -35,6 +36,14 @@ public class FilterDeployerService {
             appConfig.getConfluent().setCloud(new AppConfig.ConfluentConfig.CloudConfig());
         }
         this.config = appConfig.getConfluent().getCloud();
+        
+        if (appConfig.getFlink() == null) {
+            appConfig.setFlink(new AppConfig.FlinkConfig());
+        }
+        if (appConfig.getFlink().getLocal() == null) {
+            appConfig.getFlink().setLocal(new AppConfig.FlinkConfig.LocalConfig());
+        }
+        this.localFlinkConfig = appConfig.getFlink().getLocal();
     }
 
     @Data
@@ -189,5 +198,144 @@ public class FilterDeployerService {
         String credentials = config.getApiKey() + ":" + config.getApiSecret();
         String encoded = Base64.getEncoder().encodeToString(credentials.getBytes(StandardCharsets.UTF_8));
         return "Basic " + encoded;
+    }
+
+    // ============================================================================
+    // Local Flink Deployment Methods
+    // ============================================================================
+
+    public List<String> deployToLocalFlink(List<String> statements, List<String> statementNames) throws IOException {
+        if (!localFlinkConfig.isEnabled()) {
+            throw new IOException("Local Flink deployment is not enabled");
+        }
+
+        if (statements.size() != statementNames.size()) {
+            throw new IllegalArgumentException("statements and statementNames must have the same length");
+        }
+
+        List<String> statementIds = new ArrayList<>();
+
+        for (int i = 0; i < statements.size(); i++) {
+            String sql = statements.get(i);
+            String statementName = statementNames.get(i);
+            if (statementName == null || statementName.isEmpty()) {
+                statementName = "statement-" + (i + 1);
+            }
+
+            // Convert SQL to use Kafka connector format (not Confluent connector)
+            String localSql = convertToLocalFlinkSql(sql);
+
+            String statementId = deployToLocalFlinkStatement(localSql, statementName);
+            statementIds.add(statementId);
+            log.info("Flink statement deployed to local cluster: statementName={}, statementId={}", statementName, statementId);
+        }
+
+        return statementIds;
+    }
+
+    private String deployToLocalFlinkStatement(String sql, String statementName) throws IOException {
+        String url = localFlinkConfig.getRestApiUrl();
+        if (!url.endsWith("/")) {
+            url += "/";
+        }
+        url += "v1/statements";
+
+        FlinkStatement request = new FlinkStatement();
+        request.setName(statementName);
+        request.setStatement(sql);
+
+        String jsonBody = objectMapper.writeValueAsString(request);
+        StringEntity entity = new StringEntity(jsonBody, StandardCharsets.UTF_8);
+
+        HttpPost httpPost = new HttpPost(url);
+        httpPost.setEntity(entity);
+        httpPost.setHeader("Content-Type", "application/json");
+
+        try (CloseableHttpResponse response = httpClient.execute(httpPost)) {
+            int statusCode = response.getCode();
+            String responseBody = new String(response.getEntity().getContent().readAllBytes(), StandardCharsets.UTF_8);
+
+            if (statusCode >= 200 && statusCode < 300) {
+                FlinkStatementResponse statementResponse = objectMapper.readValue(responseBody, FlinkStatementResponse.class);
+                return statementResponse.getId();
+            } else {
+                throw new IOException("Failed to deploy statement to local Flink: HTTP " + statusCode + " - " + responseBody);
+            }
+        }
+    }
+
+    public boolean validateLocalFlinkConnection() {
+        try {
+            if (!localFlinkConfig.isEnabled()) {
+                return false;
+            }
+            String url = localFlinkConfig.getRestApiUrl();
+            if (url == null || url.isEmpty()) {
+                return false;
+            }
+            // Test connection by checking Flink overview endpoint
+            String testUrl = url.endsWith("/") ? url + "overview" : url + "/overview";
+            HttpGet httpGet = new HttpGet(testUrl);
+            try (CloseableHttpResponse response = httpClient.execute(httpGet)) {
+                return response.getCode() >= 200 && response.getCode() < 300;
+            }
+        } catch (Exception e) {
+            log.warn("Local Flink connection validation failed", e);
+            return false;
+        }
+    }
+
+    /**
+     * Convert Confluent Cloud SQL format to local Flink SQL format.
+     * Replaces 'confluent' connector with 'kafka' connector and updates format.
+     */
+    private String convertToLocalFlinkSql(String sql) {
+        // Replace Confluent connector with Kafka connector
+        String converted = sql.replaceAll("'connector'\\s*=\\s*'confluent'", "'connector' = 'kafka'");
+        
+        // Replace json-registry format with json format
+        converted = converted.replaceAll("'value\\.format'\\s*=\\s*'json-registry'", "'format' = 'json'");
+        
+        // Remove Confluent-specific SASL configurations
+        converted = converted.replaceAll("'properties\\.sasl\\.(mechanism|jaas\\.config|client\\.callback\\.handler\\.class)'\\s*=\\s*'[^']+',?\\s*", "");
+        
+        // Update or add bootstrap servers to use local Redpanda
+        if (converted.contains("'properties.bootstrap.servers'")) {
+            converted = converted.replaceAll(
+                "'properties\\.bootstrap\\.servers'\\s*=\\s*'[^']+'",
+                "'properties.bootstrap.servers' = 'redpanda:9092'"
+            );
+        } else {
+            // Add bootstrap servers before closing parenthesis
+            converted = converted.replaceAll(
+                "(\\);)",
+                "    'properties.bootstrap.servers' = 'redpanda:9092',\n$1"
+            );
+        }
+        
+        // Update or add security protocol to PLAINTEXT for local
+        if (converted.contains("'properties.security.protocol'")) {
+            converted = converted.replaceAll(
+                "'properties\\.security\\.protocol'\\s*=\\s*'[^']+'",
+                "'properties.security.protocol' = 'PLAINTEXT'"
+            );
+        } else {
+            // Add security protocol before closing parenthesis
+            converted = converted.replaceAll(
+                "(\\);)",
+                "    'properties.security.protocol' = 'PLAINTEXT',\n$1"
+            );
+        }
+        
+        // Add json.ignore-parse-errors if not present
+        if (!converted.contains("json.ignore-parse-errors")) {
+            // Add before the closing parenthesis of WITH clause
+            converted = converted.replaceAll(
+                "(\\);)",
+                "    'json.ignore-parse-errors' = 'true'\n$1"
+            );
+        }
+        
+        return converted;
     }
 }

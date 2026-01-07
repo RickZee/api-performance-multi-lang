@@ -41,6 +41,11 @@ confluent:
     flink-compute-pool-id: ${CONFLUENT_FLINK_COMPUTE_POOL_ID:}
     flink-api-endpoint: ${CONFLUENT_FLINK_API_ENDPOINT:}
 
+flink:
+  local:
+    enabled: ${FLINK_LOCAL_ENABLED:false}
+    rest-api-url: ${FLINK_LOCAL_REST_API_URL:http://localhost:8082}
+
 spring-boot:
   filters-yaml-path: ${SPRING_BOOT_FILTERS_YAML_PATH:../cdc-streaming/stream-processor-spring/src/main/resources/filters.yml}
   backup-enabled: ${SPRING_BOOT_YAML_BACKUP_ENABLED:true}

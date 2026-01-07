@@ -8,8 +8,10 @@ The local setup uses:
 - **PostgreSQL**: Local Postgres container with logical replication enabled
 - **Redpanda**: Kafka-compatible message broker (simpler than Kafka, no Zookeeper)
 - **Kafka Connect**: With Debezium PostgreSQL connector for CDC
-- **Stream Processors**: Spring Boot Kafka Streams for event filtering
-- **Consumers**: Python consumers for filtered events
+- **Stream Processors**: 
+  - Spring Boot Kafka Streams for event filtering
+  - Apache Flink for event filtering (runs alongside Spring Boot)
+- **Consumers**: Python consumers for filtered events (both Spring Boot and Flink topics)
 
 ## Prerequisites
 
@@ -108,27 +110,59 @@ docker exec -it redpanda rpk topic consume raw-event-headers --num 1
 kcat -C -b localhost:19092 -t raw-event-headers -c 1
 ```
 
-### 6. Start Stream Processor and Consumers
+### 6. Start Stream Processors
 
-Start the Spring Boot stream processor and consumers:
+Start the Spring Boot stream processor:
 
 ```bash
 # From project root
 cd cdc-streaming
-docker-compose up -d stream-processor loan-consumer car-consumer service-consumer loan-payment-consumer
+docker-compose -f docker-compose-local.yml up -d stream-processor
 ```
 
 Monitor the stream processor logs:
 
 ```bash
-docker logs -f cdc-stream-processor
+docker logs -f cdc-local-stream-processor
+```
+
+### 7. Start Flink Cluster (Optional)
+
+Start the Flink cluster for Flink SQL-based stream processing:
+
+```bash
+cd cdc-streaming
+docker-compose -f docker-compose-local.yml up -d flink-jobmanager flink-taskmanager
+```
+
+Wait for Flink to be ready (check Flink Web UI at http://localhost:8082), then deploy Flink SQL statements:
+
+```bash
+cd cdc-streaming
+./scripts/deploy-flink-local.sh
+```
+
+This will deploy the Flink SQL statements from `flink-jobs/business-events-routing-local-docker.sql`.
+
+### 8. Start Consumers
+
+Start consumers for both Spring Boot and Flink processed events:
+
+```bash
+# Spring Boot consumers
+docker-compose -f docker-compose-local.yml up -d loan-consumer car-consumer service-consumer loan-payment-consumer
+
+# Flink consumers
+docker-compose -f docker-compose-local.yml up -d loan-consumer-flink car-consumer-flink service-consumer-flink loan-payment-consumer-flink
 ```
 
 ## Service URLs
 
-- **Redpanda Console**: http://localhost:8084 (Web UI for topic management)
-- **Kafka Connect REST API**: http://localhost:8083
-- **Stream Processor Health**: http://localhost:8083/actuator/health
+- **Redpanda Console**: http://localhost:8086 (Web UI for topic management)
+- **Kafka Connect REST API**: http://localhost:8085
+- **Spring Boot Stream Processor Health**: http://localhost:8083/actuator/health
+- **Flink Web UI**: http://localhost:8082 (Flink cluster management)
+- **Flink REST API**: http://localhost:8082/v1/statements
 - **Metadata Service**: http://localhost:8081/api/v1/health
 
 ## Configuration
@@ -200,12 +234,73 @@ Then start services - they will use Confluent Cloud instead of local Redpanda.
 
 2. Check Redpanda health:
    ```bash
-   docker exec -it redpanda rpk cluster health
+   docker exec -it cdc-local-redpanda rpk cluster health
    ```
 
 3. Verify network connectivity:
    ```bash
-   docker network inspect api-performance-multi-lang_car_network | grep redpanda
+   docker network inspect cdc_local_network | grep redpanda
+   ```
+
+### Flink Cluster Not Starting
+
+1. Check Flink JobManager logs:
+   ```bash
+   docker logs cdc-local-flink-jobmanager
+   ```
+
+2. Check Flink TaskManager logs:
+   ```bash
+   docker logs cdc-local-flink-taskmanager
+   ```
+
+3. Verify Flink REST API is accessible:
+   ```bash
+   curl http://localhost:8082/overview
+   ```
+
+4. Check if Flink containers are on the correct network:
+   ```bash
+   docker network inspect cdc_local_network | grep flink
+   ```
+
+### Flink SQL Statements Not Deploying
+
+1. Verify Flink cluster is running and accessible:
+   ```bash
+   curl http://localhost:8082/overview | jq
+   ```
+
+2. Check if statements already exist:
+   ```bash
+   curl http://localhost:8082/v1/statements | jq
+   ```
+
+3. Check deployment script logs:
+   ```bash
+   ./scripts/deploy-flink-local.sh
+   ```
+
+4. Verify SQL file syntax:
+   ```bash
+   cat cdc-streaming/flink-jobs/business-events-routing-local-docker.sql
+   ```
+
+### Metadata Service Not Deploying to Local Flink
+
+1. Verify local Flink is enabled:
+   ```bash
+   docker exec cdc-local-metadata-service-java env | grep FLINK_LOCAL
+   ```
+
+2. Check metadata service can reach Flink:
+   ```bash
+   docker exec cdc-local-metadata-service-java curl -f http://flink-jobmanager:8081/overview
+   ```
+
+3. Verify metadata service configuration:
+   ```bash
+   docker exec cdc-local-metadata-service-java cat /app/application.yml | grep -A 3 flink
    ```
 
 ## Database Schema
@@ -239,14 +334,54 @@ Configuration file: `cdc-streaming/connectors/postgres-debezium-local.json`
 
 ## Stream Processing
 
+### Spring Boot Stream Processor
+
 The Spring Boot stream processor:
 - Consumes from `raw-event-headers` topic
 - Filters events based on `filters.yml` configuration
-- Routes filtered events to topic-specific topics:
+- Routes filtered events to topic-specific topics (with `-spring` suffix):
   - `filtered-loan-created-events-spring`
   - `filtered-car-created-events-spring`
   - `filtered-service-events-spring`
   - `filtered-loan-payment-submitted-events-spring`
+
+### Flink Stream Processor
+
+The Flink stream processor:
+- Consumes from `raw-event-headers` topic
+- Uses Flink SQL statements for filtering (defined in `flink-jobs/business-events-routing-local-docker.sql`)
+- Routes filtered events to topic-specific topics (with `-flink` suffix):
+  - `filtered-loan-created-events-flink`
+  - `filtered-car-created-events-flink`
+  - `filtered-service-events-flink`
+  - `filtered-loan-payment-submitted-events-flink`
+
+**Deploying Flink SQL Statements:**
+
+You can deploy Flink SQL statements either:
+1. **Manually**: Use the deployment script `./scripts/deploy-flink-local.sh`
+2. **Via Metadata Service**: Enable local Flink in metadata service and deploy filters via API
+
+To enable local Flink in metadata service, set:
+```bash
+export FLINK_LOCAL_ENABLED=true
+export FLINK_LOCAL_REST_API_URL=http://flink-jobmanager:8081
+```
+
+Then deploy filters via the metadata service API:
+```bash
+curl -X POST "http://localhost:8081/api/v1/filters/{filter-id}/deployments/flink" \
+  -H "Content-Type: application/json" \
+  -d '{"force": false}'
+```
+
+**Flink vs Spring Boot:**
+
+Both processors run simultaneously and process the same events from `raw-event-headers`. Consumers can choose which processor's output to consume:
+- Use `-spring` suffixed topics for Spring Boot processed events
+- Use `-flink` suffixed topics for Flink processed events
+
+This allows you to compare performance and behavior between the two processing engines.
 
 ## Cleanup
 
@@ -285,6 +420,8 @@ docker-compose rm -f redpanda redpanda-console kafka-connect
 | Authentication | None (PLAINTEXT) | SASL_SSL with API keys |
 | Schema Registry | Redpanda built-in | Confluent Cloud Schema Registry |
 | Kafka Connect | Local Docker | Confluent Cloud Managed |
+| Flink | Local Docker Cluster | Confluent Cloud Flink |
+| Flink Connector | Standard Kafka connector | Confluent connector |
 
 ## Additional Resources
 

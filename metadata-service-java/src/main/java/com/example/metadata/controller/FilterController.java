@@ -338,14 +338,31 @@ public class FilterController {
             }
             
             if ("flink".equals(target)) {
-                // Deploy to Flink
-                if (!filterDeployerService.validateConnection()) {
-                    return ResponseEntity.status(HttpStatus.SERVICE_UNAVAILABLE)
-                            .body(DeployFilterResponse.builder()
-                                    .filterId(id)
-                                    .status("failed")
-                                    .error("Confluent Cloud credentials not configured")
-                                    .build());
+                // Check if local Flink is enabled
+                boolean useLocalFlink = config.getFlink() != null && 
+                                       config.getFlink().getLocal() != null && 
+                                       config.getFlink().getLocal().isEnabled();
+                
+                if (useLocalFlink) {
+                    // Deploy to local Flink
+                    if (!filterDeployerService.validateLocalFlinkConnection()) {
+                        return ResponseEntity.status(HttpStatus.SERVICE_UNAVAILABLE)
+                                .body(DeployFilterResponse.builder()
+                                        .filterId(id)
+                                        .status("failed")
+                                        .error("Local Flink cluster is not available")
+                                        .build());
+                    }
+                } else {
+                    // Deploy to Confluent Cloud Flink
+                    if (!filterDeployerService.validateConnection()) {
+                        return ResponseEntity.status(HttpStatus.SERVICE_UNAVAILABLE)
+                                .body(DeployFilterResponse.builder()
+                                        .filterId(id)
+                                        .status("failed")
+                                        .error("Confluent Cloud credentials not configured")
+                                        .build());
+                    }
                 }
                 
                 // Generate SQL
@@ -364,10 +381,18 @@ public class FilterController {
                 
                 // Deploy statements
                 try {
-                    List<String> statementIds = filterDeployerService.deployStatements(
-                            sqlResponse.getStatements(),
-                            statementNames
-                    );
+                    List<String> statementIds;
+                    if (useLocalFlink) {
+                        statementIds = filterDeployerService.deployToLocalFlink(
+                                sqlResponse.getStatements(),
+                                statementNames
+                        );
+                    } else {
+                        statementIds = filterDeployerService.deployStatements(
+                                sqlResponse.getStatements(),
+                                statementNames
+                        );
+                    }
                     
                     // Update filter with deployment info
                     filterStorageService.updateDeploymentForTarget(schemaId, version, id, target, "deployed", statementIds, null);
@@ -377,13 +402,14 @@ public class FilterController {
                     params.put("DEPLOYMENT_STATUS", "success");
                     params.put("TARGET", target);
                     params.put("FLINK_STATEMENT_IDS", String.join(",", statementIds));
+                    params.put("FLINK_TYPE", useLocalFlink ? "local" : "confluent");
                     jenkinsTriggerService.triggerBuild("deploy", id, version, params);
                     
                     return ResponseEntity.status(HttpStatus.CREATED).body(DeployFilterResponse.builder()
                             .filterId(id)
                             .status("deployed")
                             .flinkStatementIds(statementIds)
-                            .message("Filter deployed successfully to " + target)
+                            .message("Filter deployed successfully to " + target + (useLocalFlink ? " (local)" : " (Confluent Cloud)"))
                             .build());
                 } catch (IOException e) {
                     filterStorageService.updateDeploymentForTarget(schemaId, version, id, target, "failed", null, e.getMessage());
