@@ -3,7 +3,12 @@
 # Tests the complete local dockerized CDC system
 #
 # Usage:
-#   ./cdc-streaming/scripts/test-local-pipeline.sh
+#   ./cdc-streaming/scripts/test-e2e-pipeline-local.sh [OPTIONS]
+#
+# Options:
+#   --clear-db       Clear test events from database before running test
+#   --clear-topics   Clear all Kafka topics in Redpanda before running test
+#   --clear-all      Clear both database and topics (equivalent to --clear-db --clear-topics)
 
 set -e
 
@@ -27,10 +32,188 @@ section() { echo -e "${CYAN}========================================${NC}"; echo
 
 section "Local CDC Pipeline Test"
 SCRIPT_START_TIME=$(date +%s)
+SCRIPT_MAX_DURATION=120  # 2 minutes maximum script duration
+SCRIPT_TIMEOUT_REACHED=false
+
+# Timeout check function
+check_script_timeout() {
+    CURRENT_TIME=$(date +%s)
+    ELAPSED=$((CURRENT_TIME - SCRIPT_START_TIME))
+    if [ $ELAPSED -ge $SCRIPT_MAX_DURATION ]; then
+        SCRIPT_TIMEOUT_REACHED=true
+        return 1
+    fi
+    return 0
+}
+
+# Check timeout and exit if reached
+check_timeout_and_exit() {
+    if ! check_script_timeout; then
+        echo ""
+        warn "Script timeout reached (${SCRIPT_MAX_DURATION}s). Exiting to prevent hanging."
+        SCRIPT_END_TIME=$(date +%s)
+        SCRIPT_DURATION=$((SCRIPT_END_TIME - SCRIPT_START_TIME))
+        echo "Script ran for ${SCRIPT_DURATION}s before timeout"
+        exit 1
+    fi
+}
+
+# Parse command line arguments
+CLEAR_DB=false
+CLEAR_TOPICS=false
+CLEAR_ALL=false
+
+while [[ $# -gt 0 ]]; do
+    case $1 in
+        --clear-db)
+            CLEAR_DB=true
+            shift
+            ;;
+        --clear-topics)
+            CLEAR_TOPICS=true
+            shift
+            ;;
+        --clear-all)
+            CLEAR_ALL=true
+            CLEAR_DB=true
+            CLEAR_TOPICS=true
+            shift
+            ;;
+        *)
+            echo "Unknown option: $1"
+            echo "Usage: $0 [--clear-db] [--clear-topics] [--clear-all]"
+            exit 1
+            ;;
+    esac
+done
 
 # Use docker-compose-local.yml
 COMPOSE_FILE="docker-compose-local.yml"
 cd cdc-streaming
+
+# Pre-test cleanup
+if [ "$CLEAR_DB" = true ] || [ "$CLEAR_ALL" = true ]; then
+    echo ""
+    section "Pre-Test: Clearing Database"
+    info "Clearing test events from database..."
+    
+    BEFORE_COUNT=$(docker exec cdc-local-postgres-large psql -U postgres -d car_entities -t -c "SELECT COUNT(*) FROM event_headers WHERE id LIKE 'test-%'" 2>/dev/null | tr -d ' \n' || echo "0")
+    BEFORE_COUNT=${BEFORE_COUNT:-0}
+    
+    if [ "$BEFORE_COUNT" -gt 0 ] 2>/dev/null; then
+        docker exec cdc-local-postgres-large psql -U postgres -d car_entities -c "DELETE FROM event_headers WHERE id LIKE 'test-%'" > /dev/null 2>&1
+        docker exec cdc-local-postgres-large psql -U postgres -d car_entities -c "DELETE FROM business_events WHERE id LIKE 'test-%'" > /dev/null 2>&1
+        
+        AFTER_COUNT=$(docker exec cdc-local-postgres-large psql -U postgres -d car_entities -t -c "SELECT COUNT(*) FROM event_headers WHERE id LIKE 'test-%'" 2>/dev/null | tr -d ' \n' || echo "0")
+        pass "Database cleared: $BEFORE_COUNT test events deleted, $AFTER_COUNT remaining"
+    else
+        info "No test events found in database"
+    fi
+    echo ""
+fi
+
+if [ "$CLEAR_TOPICS" = true ] || [ "$CLEAR_ALL" = true ]; then
+    echo ""
+    section "Pre-Test: Clearing Kafka Topics"
+    info "Deleting all topics in Redpanda..."
+    
+    # Get list of topics (exclude internal Kafka Connect topics)
+    TOPICS=$(docker exec cdc-local-redpanda rpk topic list 2>&1 | grep -v "^NAME" | awk '{print $1}' | grep -v "^connect-" || true)
+    
+    if [ -n "$TOPICS" ]; then
+        for topic in $TOPICS; do
+            if [ -n "$topic" ]; then
+                info "Deleting topic: $topic"
+                docker exec cdc-local-redpanda rpk topic delete "$topic" > /dev/null 2>&1 || warn "Failed to delete topic: $topic (may not exist)"
+            fi
+        done
+        pass "Topics cleared"
+    else
+        info "No topics found to clear"
+    fi
+    
+    # Wait a moment for topic deletion to propagate
+    sleep 2
+    
+    # Restart stream processor after topics are deleted so it can recreate them
+    info "Restarting stream processor to reconnect to topics..."
+    docker-compose -f "$COMPOSE_FILE" restart stream-processor 2>&1 | grep -v "level=warning" | tail -3
+    info "Waiting 5 seconds for stream processor to restart..."
+    sleep 5
+    echo ""
+fi
+
+# Always clear consumer logs at the start for clean test results
+echo ""
+section "Pre-Test: Clearing Consumer Logs"
+info "Clearing logs for all consumers by removing and recreating containers..."
+
+# Spring Boot consumer services (docker-compose service names)
+SPRING_CONSUMER_SERVICES=("loan-consumer" "car-consumer" "loan-payment-consumer" "service-consumer")
+# Flink consumer services
+FLINK_CONSUMER_SERVICES=("loan-consumer-flink" "car-consumer-flink" "loan-payment-consumer-flink" "service-consumer-flink")
+
+ALL_CONSUMER_SERVICES=("${SPRING_CONSUMER_SERVICES[@]}" "${FLINK_CONSUMER_SERVICES[@]}")
+
+# Container names (for verification)
+SPRING_CONSUMERS=("cdc-local-loan-consumer-spring" "cdc-local-car-consumer-spring" "cdc-local-loan-payment-consumer-spring" "cdc-local-service-consumer-spring")
+FLINK_CONSUMERS=("cdc-local-loan-consumer-flink" "cdc-local-car-consumer-flink" "cdc-local-loan-payment-consumer-flink" "cdc-local-service-consumer-flink")
+ALL_CONSUMERS=("${SPRING_CONSUMERS[@]}" "${FLINK_CONSUMERS[@]}")
+
+CLEARED_COUNT=0
+BEFORE_TOTALS=()
+
+# Check log sizes before clearing
+for container in "${ALL_CONSUMERS[@]}"; do
+    if docker ps -a --format "{{.Names}}" | grep -q "^${container}$"; then
+        BEFORE_LINES=$(docker logs "$container" 2>&1 | wc -l | tr -d ' \n' || echo "0")
+        BEFORE_TOTALS+=("$BEFORE_LINES")
+    else
+        BEFORE_TOTALS+=("0")
+    fi
+done
+
+# Remove and recreate containers to clear logs
+for service in "${ALL_CONSUMER_SERVICES[@]}"; do
+    # Stop and remove the container (this clears logs)
+    docker-compose -f "$COMPOSE_FILE" stop "$service" > /dev/null 2>&1 || true
+    docker-compose -f "$COMPOSE_FILE" rm -f "$service" > /dev/null 2>&1 || true
+    # Start it again (creates new container with fresh logs)
+    docker-compose -f "$COMPOSE_FILE" up -d "$service" > /dev/null 2>&1 || true
+    CLEARED_COUNT=$((CLEARED_COUNT + 1))
+done
+
+if [ $CLEARED_COUNT -gt 0 ]; then
+    info "Waiting 5 seconds for consumers to start with fresh logs..."
+    sleep 5
+    
+    # Verify logs are cleared (should have minimal lines - just startup)
+    VERIFIED_COUNT=0
+    for i in "${!ALL_CONSUMERS[@]}"; do
+        container="${ALL_CONSUMERS[$i]}"
+        if docker ps --format "{{.Names}}" | grep -q "^${container}$"; then
+            AFTER_LINES=$(docker logs "$container" 2>&1 | wc -l | tr -d ' \n' || echo "0")
+            BEFORE_LINES="${BEFORE_TOTALS[$i]}"
+            
+            # Logs should be minimal after recreation (just startup messages, typically < 50 lines)
+            if [ "$AFTER_LINES" -lt 50 ]; then
+                VERIFIED_COUNT=$((VERIFIED_COUNT + 1))
+                info "  ✓ ${container}: $BEFORE_LINES → $AFTER_LINES lines"
+            else
+                warn "  ⚠ ${container}: $BEFORE_LINES → $AFTER_LINES lines (still high)"
+            fi
+        fi
+    done
+    
+    if [ $VERIFIED_COUNT -eq $CLEARED_COUNT ]; then
+        pass "Cleared logs for $CLEARED_COUNT consumer(s) - all logs verified clean"
+    else
+        warn "Cleared logs for $CLEARED_COUNT consumer(s), but only $VERIFIED_COUNT/$CLEARED_COUNT verified clean"
+    fi
+else
+    info "No consumers found to clear logs"
+fi
+echo ""
 
 # 1. Check Infrastructure Services
 echo ""
@@ -94,137 +277,95 @@ else
     info "If connector is not found, deploy it: ./scripts/deploy-debezium-connector-local.sh"
 fi
 
-# 3. Test CDC - Insert Test Events for All Event Types
+# 3. Test CDC - Insert 10 Test Events for Each Event Type
 echo ""
-section "Step 3: Testing CDC - Insert Test Events for All Event Types"
+section "Step 3: Testing CDC - Insert 10 Events for Each Event Type"
 BASE_TIMESTAMP=$(date +%s)
 
-# Create test IDs for each event type
-TEST_ID_LOAN="test-loan-${BASE_TIMESTAMP}"
-TEST_ID_CAR="test-car-${BASE_TIMESTAMP}"
-TEST_ID_PAYMENT="test-payment-${BASE_TIMESTAMP}"
-TEST_ID_SERVICE="test-service-${BASE_TIMESTAMP}"
+# Create test ID prefix for each event type (will append -1, -2, ..., -10)
+TEST_PREFIX_LOAN="test-loan-${BASE_TIMESTAMP}"
+TEST_PREFIX_CAR="test-car-${BASE_TIMESTAMP}"
+TEST_PREFIX_PAYMENT="test-payment-${BASE_TIMESTAMP}"
+TEST_PREFIX_SERVICE="test-service-${BASE_TIMESTAMP}"
 
-info "Inserting test events for all 4 event types..."
+info "Inserting 10 test events for each of the 4 event types (40 total events)..."
 
-# Insert LoanCreated event
-docker exec -i cdc-local-postgres-large psql -U postgres -d car_entities <<SQL > /dev/null
-INSERT INTO business_events (id, event_name, event_type, created_date, saved_date, event_data)
-VALUES (
-  '$TEST_ID_LOAN',
-  'LoanCreated',
-  'LoanCreated',
-  NOW(),
-  NOW(),
-  '{"eventHeader": {"uuid": "$TEST_ID_LOAN", "eventName": "LoanCreated", "eventType": "LoanCreated"}}'::jsonb
-)
-ON CONFLICT (id) DO NOTHING;
+# Insert 10 LoanCreated events
+docker exec cdc-local-postgres-large psql -U postgres -d car_entities -c \
+    "INSERT INTO business_events (id, event_name, event_type, created_date, saved_date, event_data) \
+     SELECT '$TEST_PREFIX_LOAN-' || s, 'LoanCreated', 'LoanCreated', NOW(), NOW(), \
+            jsonb_build_object('eventHeader', jsonb_build_object('uuid', '$TEST_PREFIX_LOAN-' || s, 'eventName', 'LoanCreated', 'eventType', 'LoanCreated')) \
+     FROM generate_series(1, 10) s;" > /dev/null 2>&1
 
-INSERT INTO event_headers (id, event_name, event_type, created_date, saved_date, header_data)
-VALUES (
-  '$TEST_ID_LOAN',
-  'LoanCreated',
-  'LoanCreated',
-  NOW(),
-  NOW(),
-  '{"uuid": "$TEST_ID_LOAN", "eventName": "LoanCreated", "eventType": "LoanCreated"}'::jsonb
-)
-ON CONFLICT (id) DO NOTHING;
-SQL
+docker exec cdc-local-postgres-large psql -U postgres -d car_entities -c \
+    "INSERT INTO event_headers (id, event_name, event_type, created_date, saved_date, header_data) \
+     SELECT '$TEST_PREFIX_LOAN-' || s, 'LoanCreated', 'LoanCreated', NOW(), NOW(), \
+            jsonb_build_object('uuid', '$TEST_PREFIX_LOAN-' || s, 'eventName', 'LoanCreated', 'eventType', 'LoanCreated') \
+     FROM generate_series(1, 10) s;" > /dev/null 2>&1
 
-# Insert CarCreated event
-docker exec -i cdc-local-postgres-large psql -U postgres -d car_entities <<SQL > /dev/null
-INSERT INTO business_events (id, event_name, event_type, created_date, saved_date, event_data)
-VALUES (
-  '$TEST_ID_CAR',
-  'CarCreated',
-  'CarCreated',
-  NOW(),
-  NOW(),
-  '{"eventHeader": {"uuid": "$TEST_ID_CAR", "eventName": "CarCreated", "eventType": "CarCreated"}}'::jsonb
-)
-ON CONFLICT (id) DO NOTHING;
+# Insert 10 CarCreated events
+docker exec cdc-local-postgres-large psql -U postgres -d car_entities -c \
+    "INSERT INTO business_events (id, event_name, event_type, created_date, saved_date, event_data) \
+     SELECT '$TEST_PREFIX_CAR-' || s, 'CarCreated', 'CarCreated', NOW(), NOW(), \
+            jsonb_build_object('eventHeader', jsonb_build_object('uuid', '$TEST_PREFIX_CAR-' || s, 'eventName', 'CarCreated', 'eventType', 'CarCreated')) \
+     FROM generate_series(1, 10) s;" > /dev/null 2>&1
 
-INSERT INTO event_headers (id, event_name, event_type, created_date, saved_date, header_data)
-VALUES (
-  '$TEST_ID_CAR',
-  'CarCreated',
-  'CarCreated',
-  NOW(),
-  NOW(),
-  '{"uuid": "$TEST_ID_CAR", "eventName": "CarCreated", "eventType": "CarCreated"}'::jsonb
-)
-ON CONFLICT (id) DO NOTHING;
-SQL
+docker exec cdc-local-postgres-large psql -U postgres -d car_entities -c \
+    "INSERT INTO event_headers (id, event_name, event_type, created_date, saved_date, header_data) \
+     SELECT '$TEST_PREFIX_CAR-' || s, 'CarCreated', 'CarCreated', NOW(), NOW(), \
+            jsonb_build_object('uuid', '$TEST_PREFIX_CAR-' || s, 'eventName', 'CarCreated', 'eventType', 'CarCreated') \
+     FROM generate_series(1, 10) s;" > /dev/null 2>&1
 
-# Insert LoanPaymentSubmitted event
-docker exec -i cdc-local-postgres-large psql -U postgres -d car_entities <<SQL > /dev/null
-INSERT INTO business_events (id, event_name, event_type, created_date, saved_date, event_data)
-VALUES (
-  '$TEST_ID_PAYMENT',
-  'LoanPaymentSubmitted',
-  'LoanPaymentSubmitted',
-  NOW(),
-  NOW(),
-  '{"eventHeader": {"uuid": "$TEST_ID_PAYMENT", "eventName": "LoanPaymentSubmitted", "eventType": "LoanPaymentSubmitted"}}'::jsonb
-)
-ON CONFLICT (id) DO NOTHING;
+# Insert 10 LoanPaymentSubmitted events
+docker exec cdc-local-postgres-large psql -U postgres -d car_entities -c \
+    "INSERT INTO business_events (id, event_name, event_type, created_date, saved_date, event_data) \
+     SELECT '$TEST_PREFIX_PAYMENT-' || s, 'LoanPaymentSubmitted', 'LoanPaymentSubmitted', NOW(), NOW(), \
+            jsonb_build_object('eventHeader', jsonb_build_object('uuid', '$TEST_PREFIX_PAYMENT-' || s, 'eventName', 'LoanPaymentSubmitted', 'eventType', 'LoanPaymentSubmitted')) \
+     FROM generate_series(1, 10) s;" > /dev/null 2>&1
 
-INSERT INTO event_headers (id, event_name, event_type, created_date, saved_date, header_data)
-VALUES (
-  '$TEST_ID_PAYMENT',
-  'LoanPaymentSubmitted',
-  'LoanPaymentSubmitted',
-  NOW(),
-  NOW(),
-  '{"uuid": "$TEST_ID_PAYMENT", "eventName": "LoanPaymentSubmitted", "eventType": "LoanPaymentSubmitted"}'::jsonb
-)
-ON CONFLICT (id) DO NOTHING;
-SQL
+docker exec cdc-local-postgres-large psql -U postgres -d car_entities -c \
+    "INSERT INTO event_headers (id, event_name, event_type, created_date, saved_date, header_data) \
+     SELECT '$TEST_PREFIX_PAYMENT-' || s, 'LoanPaymentSubmitted', 'LoanPaymentSubmitted', NOW(), NOW(), \
+            jsonb_build_object('uuid', '$TEST_PREFIX_PAYMENT-' || s, 'eventName', 'LoanPaymentSubmitted', 'eventType', 'LoanPaymentSubmitted') \
+     FROM generate_series(1, 10) s;" > /dev/null 2>&1
 
-# Insert CarServiceDone event
-docker exec -i cdc-local-postgres-large psql -U postgres -d car_entities <<SQL > /dev/null
-INSERT INTO business_events (id, event_name, event_type, created_date, saved_date, event_data)
-VALUES (
-  '$TEST_ID_SERVICE',
-  'CarServiceDone',
-  'CarServiceDone',
-  NOW(),
-  NOW(),
-  '{"eventHeader": {"uuid": "$TEST_ID_SERVICE", "eventName": "CarServiceDone", "eventType": "CarServiceDone"}}'::jsonb
-)
-ON CONFLICT (id) DO NOTHING;
+# Insert 10 CarServiceDone events
+docker exec cdc-local-postgres-large psql -U postgres -d car_entities -c \
+    "INSERT INTO business_events (id, event_name, event_type, created_date, saved_date, event_data) \
+     SELECT '$TEST_PREFIX_SERVICE-' || s, 'CarServiceDone', 'CarServiceDone', NOW(), NOW(), \
+            jsonb_build_object('eventHeader', jsonb_build_object('uuid', '$TEST_PREFIX_SERVICE-' || s, 'eventName', 'CarServiceDone', 'eventType', 'CarServiceDone')) \
+     FROM generate_series(1, 10) s;" > /dev/null 2>&1
 
-INSERT INTO event_headers (id, event_name, event_type, created_date, saved_date, header_data)
-VALUES (
-  '$TEST_ID_SERVICE',
-  'CarServiceDone',
-  'CarServiceDone',
-  NOW(),
-  NOW(),
-  '{"uuid": "$TEST_ID_SERVICE", "eventName": "CarServiceDone", "eventType": "CarServiceDone"}'::jsonb
-)
-ON CONFLICT (id) DO NOTHING;
-SQL
+docker exec cdc-local-postgres-large psql -U postgres -d car_entities -c \
+    "INSERT INTO event_headers (id, event_name, event_type, created_date, saved_date, header_data) \
+     SELECT '$TEST_PREFIX_SERVICE-' || s, 'CarServiceDone', 'CarServiceDone', NOW(), NOW(), \
+            jsonb_build_object('uuid', '$TEST_PREFIX_SERVICE-' || s, 'eventName', 'CarServiceDone', 'eventType', 'CarServiceDone') \
+     FROM generate_series(1, 10) s;" > /dev/null 2>&1
 
 if [ $? -eq 0 ]; then
-    pass "Test events inserted for all 4 event types"
-    info "  LoanCreated: $TEST_ID_LOAN"
-    info "  CarCreated: $TEST_ID_CAR"
-    info "  LoanPaymentSubmitted: $TEST_ID_PAYMENT"
-    info "  CarServiceDone: $TEST_ID_SERVICE"
+    pass "40 test events inserted (10 of each type)"
+    info "  LoanCreated: $TEST_PREFIX_LOAN-1 to $TEST_PREFIX_LOAN-10"
+    info "  CarCreated: $TEST_PREFIX_CAR-1 to $TEST_PREFIX_CAR-10"
+    info "  LoanPaymentSubmitted: $TEST_PREFIX_PAYMENT-1 to $TEST_PREFIX_PAYMENT-10"
+    info "  CarServiceDone: $TEST_PREFIX_SERVICE-1 to $TEST_PREFIX_SERVICE-10"
 else
     fail "Failed to insert test events"
 fi
 
-# Keep TEST_ID for backward compatibility (use LoanCreated as primary)
+# Keep TEST_ID variables for backward compatibility (use first event of each type)
+TEST_ID_LOAN="$TEST_PREFIX_LOAN-1"
+TEST_ID_CAR="$TEST_PREFIX_CAR-1"
+TEST_ID_PAYMENT="$TEST_PREFIX_PAYMENT-1"
+TEST_ID_SERVICE="$TEST_PREFIX_SERVICE-1"
 TEST_ID="$TEST_ID_LOAN"
 
 # 4. Wait for CDC and Verify Event in Raw Topic
 echo ""
 section "Step 4: Verify Event in Raw Kafka Topic"
+check_timeout_and_exit
 info "Waiting 3 seconds for CDC propagation..."
 sleep 3
+check_timeout_and_exit
 
 # Use timeout to prevent hanging - rpk consume waits for messages by default
 # Use background process with kill to implement timeout (macOS doesn't have timeout command)
@@ -248,10 +389,18 @@ fi
 # 5. Start Stream Processor (required for filtered topics)
 echo ""
 section "Step 5: Stream Processor"
+check_timeout_and_exit
 info "Starting stream processor (required for filtered topics)..."
 
 if docker-compose -f "$COMPOSE_FILE" ps stream-processor 2>/dev/null | grep -q "Up"; then
-    pass "Stream processor is already running"
+    pass "Stream processor is running"
+    # Restart to ensure it's connected to topics (especially after --clear-all)
+    info "Restarting stream processor to ensure it's connected to topics..."
+    docker-compose -f "$COMPOSE_FILE" restart stream-processor 2>&1 | grep -v "level=warning" | tail -3
+    check_timeout_and_exit
+    info "Waiting 5 seconds for stream processor to reconnect..."
+    sleep 5
+    check_timeout_and_exit
 else
     info "Starting stream processor..."
     docker-compose -f "$COMPOSE_FILE" up -d stream-processor 2>&1 | grep -v "level=warning" | tail -3
@@ -279,8 +428,10 @@ fi
 # 6. Wait for Stream Processor to Filter Event
 echo ""
 section "Step 6: Wait for Stream Processor to Filter Event"
+check_timeout_and_exit
 info "Waiting 5 seconds for stream processor to filter the test event..."
 sleep 5
+check_timeout_and_exit
 
 # Check if filtered topic exists and has the test event
 FILTERED_TOPIC="filtered-loan-created-events-spring"
@@ -399,8 +550,10 @@ fi
 # 9. Verify Flink Filtered Topics
 echo ""
 section "Step 9: Verify Flink Filtered Topics"
+check_timeout_and_exit
 info "Waiting 5 seconds for Flink to process events..."
 sleep 5
+check_timeout_and_exit
 
 FLINK_FILTERED_TOPICS=("filtered-loan-created-events-flink" "filtered-car-created-events-flink" "filtered-loan-payment-submitted-events-flink" "filtered-service-events-flink")
 FLINK_TOPICS_FOUND=0
@@ -428,10 +581,30 @@ else
     warn "Only $FLINK_TOPICS_FOUND/${#FLINK_FILTERED_TOPICS[@]} Flink filtered topics exist"
 fi
 
+# Restart consumers now that topics are created and populated
+# This ensures consumers connect to newly created topics after --clear-all
+check_timeout_and_exit
+info "Restarting consumers to ensure they connect to newly created topics..."
+
+# Restart Spring Boot consumers
+for consumer in "${CONSUMERS[@]}"; do
+    docker-compose -f "$COMPOSE_FILE" restart "$consumer" 2>&1 | grep -v "level=warning" | tail -1 || true
+done
+
+# Restart Flink consumers
+for consumer in "${FLINK_CONSUMERS[@]}"; do
+    docker-compose -f "$COMPOSE_FILE" restart "$consumer" 2>&1 | grep -v "level=warning" | tail -1 || true
+done
+
+check_timeout_and_exit
+info "Waiting 5 seconds for consumers to reconnect to topics..."
+sleep 5
+check_timeout_and_exit
+
 # 10. Start and Validate Consumers
 echo ""
 section "Step 10: Consumer Validation"
-info "Starting consumers if not already running..."
+info "Validating consumers (already started and restarted)..."
 
 # Spring Boot consumers
 CONSUMERS=("loan-consumer" "loan-payment-consumer" "service-consumer" "car-consumer")
@@ -450,9 +623,16 @@ docker-compose -f "$COMPOSE_FILE" up -d "${CONSUMERS[@]}" 2>&1 | grep -v "level=
 info "Starting Flink consumers..."
 docker-compose -f "$COMPOSE_FILE" up -d "${FLINK_CONSUMERS[@]}" 2>&1 | grep -v "level=warning" | tail -5
 
+# Restart consumers after topics are cleared/recreated to ensure they pick up new events
+# This is important when --clear-all is used, as topics are deleted and recreated
+info "Restarting consumers to ensure they connect to newly created topics..."
+docker-compose -f "$COMPOSE_FILE" restart "${CONSUMERS[@]}" "${FLINK_CONSUMERS[@]}" 2>&1 | grep -v "level=warning" | tail -5
+
 # Wait for consumers to start
+check_timeout_and_exit
 info "Waiting 3 seconds for consumers to initialize..."
 sleep 3
+check_timeout_and_exit
 
 # Check consumer status and verify they processed the test events
 CONSUMERS_RUNNING=0
@@ -482,7 +662,9 @@ get_topic_for_event_id() {
 
 # Wait for events to propagate through the entire pipeline (optimized timing)
 info "Waiting 5 seconds for events to propagate through CDC → Stream Processor → Consumers..."
+check_timeout_and_exit
 sleep 5
+check_timeout_and_exit
 
 for i in "${!CONSUMER_CONTAINERS[@]}"; do
     CONTAINER_NAME="${CONSUMER_CONTAINERS[$i]}"
@@ -513,55 +695,55 @@ for i in "${!CONSUMER_CONTAINERS[@]}"; do
             fi
             
             if [ -n "$EXPECTED_EVENT_ID" ]; then
-                info "Checking if $CONSUMER_NAME processed test event ($EXPECTED_EVENT_ID)..."
-                CONSUMER_LOGS=$(docker logs "$CONTAINER_NAME" 2>&1 | tail -200)
+                # Check for all 10 events of this type (using prefix)
+                EVENT_PREFIX=$(echo "$EXPECTED_EVENT_ID" | sed 's/-[0-9]*$//')
+                info "Checking if $CONSUMER_NAME processed all 10 test events (prefix: $EVENT_PREFIX)..."
+                CONSUMER_LOGS=$(docker logs "$CONTAINER_NAME" 2>&1 | tail -1000)
                 
-                # Search for test event ID in logs (with timeout - max 2 minutes total per consumer)
-                # Consumers log "Event ID: <id>" so search for both patterns
-                MAX_RETRIES=8  # 8 retries * 10 seconds = 80 seconds max (reduced from 120s)
-                RETRY_INTERVAL=10  # Check every 10 seconds (reduced from 15s)
+                # Extract unique event IDs matching the specific test pattern (e.g., test-loan-1767893293-1 through test-loan-1767893293-10)
+                FOUND_EVENT_IDS=$(echo "$CONSUMER_LOGS" | grep -oE "$EVENT_PREFIX-[0-9]+" | sort -u)
+                EVENT_COUNT=$(echo "$FOUND_EVENT_IDS" | grep -cE "$EVENT_PREFIX-[0-9]+" 2>/dev/null | head -1 | tr -d ' \n' || echo "0")
+                EVENT_COUNT=${EVENT_COUNT:-0}
+                
+                MAX_RETRIES=4  # 4 retries * 5 seconds = 20 seconds max per consumer
+                RETRY_INTERVAL=5
                 RETRY_COUNT=0
-                EVENT_FOUND=false
                 START_TIME=$(date +%s)
-                MAX_TIME=$((START_TIME + 120))  # 2 minutes max (120 seconds)
+                MAX_TIME=$((START_TIME + 30))  # 30 seconds max per consumer
                 
-                while [ $RETRY_COUNT -lt $MAX_RETRIES ] && [ "$EVENT_FOUND" = false ] && [ $(date +%s) -lt $MAX_TIME ]; do
-                    # Check for event ID in various log formats
-                    if echo "$CONSUMER_LOGS" | grep -qE "(Event ID:.*$EXPECTED_EVENT_ID|UUID:.*$EXPECTED_EVENT_ID|$EXPECTED_EVENT_ID)"; then
-                        ELAPSED=$(($(date +%s) - START_TIME))
-                        pass "$CONSUMER_NAME processed test event (found $EXPECTED_EVENT_ID in logs after ${ELAPSED}s)"
-                        CONSUMERS_PROCESSED_TEST=$((CONSUMERS_PROCESSED_TEST + 1))
-                        EVENT_FOUND=true
-                        echo ""
-                        info "Sample log entry:"
-                        echo "$CONSUMER_LOGS" | grep -E "(Event ID:.*$EXPECTED_EVENT_ID|UUID:.*$EXPECTED_EVENT_ID|$EXPECTED_EVENT_ID)" | head -3 | sed 's/^/    /'
-                    else
-                        RETRY_COUNT=$((RETRY_COUNT + 1))
-                        CURRENT_TIME=$(date +%s)
-                        TIME_REMAINING=$((MAX_TIME - CURRENT_TIME))
-                        if [ $RETRY_COUNT -lt $MAX_RETRIES ] && [ $TIME_REMAINING -gt 0 ]; then
-                            info "Event not found yet, waiting ${RETRY_INTERVAL}s and retrying ($RETRY_COUNT/$MAX_RETRIES, ${TIME_REMAINING}s remaining)..."
-                            sleep $RETRY_INTERVAL
-                            CONSUMER_LOGS=$(docker logs "$CONTAINER_NAME" 2>&1 | tail -300)
-                        fi
+                while [ "$EVENT_COUNT" -lt 10 ] && [ "$RETRY_COUNT" -lt "$MAX_RETRIES" ] && [ $(date +%s) -lt "$MAX_TIME" ]; do
+                    check_timeout_and_exit
+                    RETRY_COUNT=$((RETRY_COUNT + 1))
+                    CURRENT_TIME=$(date +%s)
+                    TIME_REMAINING=$((MAX_TIME - CURRENT_TIME))
+                    if [ "$TIME_REMAINING" -gt 0 ]; then
+                        info "Found $EVENT_COUNT/10 events, waiting ${RETRY_INTERVAL}s and retrying ($RETRY_COUNT/$MAX_RETRIES, ${TIME_REMAINING}s remaining)..."
+                        sleep $RETRY_INTERVAL
+                        CONSUMER_LOGS=$(docker logs "$CONTAINER_NAME" 2>&1 | tail -1000)
+                        FOUND_EVENT_IDS=$(echo "$CONSUMER_LOGS" | grep -oE "$EVENT_PREFIX-[0-9]+" | sort -u)
+                        EVENT_COUNT=$(echo "$FOUND_EVENT_IDS" | grep -cE "$EVENT_PREFIX-[0-9]+" 2>/dev/null | head -1 | tr -d ' \n' || echo "0")
+                        EVENT_COUNT=${EVENT_COUNT:-0}
                     fi
                 done
                 
-                if [ "$EVENT_FOUND" = false ]; then
+                if [ "$EVENT_COUNT" -eq 10 ]; then
                     ELAPSED=$(($(date +%s) - START_TIME))
-                    if [ $ELAPSED -ge 120 ]; then
-                        warn "$CONSUMER_NAME did not process test event $EXPECTED_EVENT_ID within 2 minutes (timeout)"
-                    else
-                        warn "$CONSUMER_NAME did not process test event $EXPECTED_EVENT_ID after ${ELAPSED}s"
-                    fi
-                    info "Checking if event is in filtered topic..."
+                    pass "$CONSUMER_NAME processed all 10 test events (found after ${ELAPSED}s)"
+                    CONSUMERS_PROCESSED_TEST=$((CONSUMERS_PROCESSED_TEST + 1))
+                elif [ "$EVENT_COUNT" -gt 0 ]; then
+                    ELAPSED=$(($(date +%s) - START_TIME))
+                    warn "$CONSUMER_NAME processed $EVENT_COUNT/10 test events after ${ELAPSED}s"
+                else
+                    ELAPSED=$(($(date +%s) - START_TIME))
+                    warn "$CONSUMER_NAME did not process any test events after ${ELAPSED}s"
+                    info "Checking if events are in filtered topic..."
                     EXPECTED_TOPIC=$(get_topic_for_event_id "$EXPECTED_EVENT_ID")
-                    TOPIC_CHECK_OUTPUT=$(docker exec cdc-local-redpanda rpk topic consume "$EXPECTED_TOPIC" --offset start --num 20 --format json 2>/dev/null & CONSUME_PID=$!; sleep 2; kill $CONSUME_PID 2>/dev/null; wait $CONSUME_PID 2>/dev/null)
-                    if echo "$TOPIC_CHECK_OUTPUT" | grep -q "$EXPECTED_EVENT_ID"; then
-                        warn "Event is in topic $EXPECTED_TOPIC but not yet processed by consumer"
+                    TOPIC_CHECK_OUTPUT=$(docker exec cdc-local-redpanda rpk topic consume "$EXPECTED_TOPIC" --offset start --num 50 --format '%v\n' 2>&1 | grep -v "^$" | jq -r "select(.id != null and (.id | contains(\"$EVENT_PREFIX\"))) | .id" 2>&1 | wc -l | tr -d ' ' 2>/dev/null || echo "0")
+                    if [ "$TOPIC_CHECK_OUTPUT" -gt 0 ]; then
+                        warn "Found $TOPIC_CHECK_OUTPUT events in topic $EXPECTED_TOPIC but not yet processed by consumer"
                         info "Consumer may still be processing - check logs: docker logs $CONTAINER_NAME"
                     else
-                        warn "Event not found in topic $EXPECTED_TOPIC - stream processor may not have filtered it yet"
+                        warn "Events not found in topic $EXPECTED_TOPIC - stream processor may not have filtered them yet"
                     fi
                 fi
             else
@@ -595,8 +777,13 @@ FLINK_CONSUMERS_PROCESSED_TEST=0
 FLINK_CONSUMERS_TOTAL=${#FLINK_CONSUMER_CONTAINERS[@]}
 
 for i in "${!FLINK_CONSUMER_CONTAINERS[@]}"; do
+    check_timeout_and_exit
+    
     CONTAINER_NAME="${FLINK_CONSUMER_CONTAINERS[$i]}"
     CONSUMER_NAME="${FLINK_CONSUMERS[$i]}"
+    TOPIC_NAME="${FLINK_CONSUMER_TOPICS[$i]}"
+    
+    info "Checking $CONSUMER_NAME ($CONTAINER_NAME)..."
     
     if docker ps --format "{{.Names}}" | grep -q "^${CONTAINER_NAME}$"; then
         CONTAINER_STATUS=$(docker ps --filter "name=${CONTAINER_NAME}" --format "{{.Status}}" | head -1)
@@ -617,16 +804,72 @@ for i in "${!FLINK_CONSUMER_CONTAINERS[@]}"; do
             fi
             
             if [ -n "$EXPECTED_EVENT_ID" ]; then
-                CONSUMER_LOGS=$(docker logs "$CONTAINER_NAME" 2>&1 | tail -100)
-                if echo "$CONSUMER_LOGS" | grep -qE "(Event ID:.*$EXPECTED_EVENT_ID|UUID:.*$EXPECTED_EVENT_ID|$EXPECTED_EVENT_ID)"; then
-                    pass "$CONSUMER_NAME processed test event"
+                # Check for all 10 events of this type (using prefix)
+                EVENT_PREFIX=$(echo "$EXPECTED_EVENT_ID" | sed 's/-[0-9]*$//')
+                info "Checking if $CONSUMER_NAME processed all 10 test events (prefix: $EVENT_PREFIX)..."
+                CONSUMER_LOGS=$(docker logs "$CONTAINER_NAME" 2>&1 | tail -1000)
+                
+                # Extract unique event IDs matching the specific test pattern (e.g., test-loan-1767893293-1 through test-loan-1767893293-10)
+                FOUND_EVENT_IDS=$(echo "$CONSUMER_LOGS" | grep -oE "$EVENT_PREFIX-[0-9]+" | sort -u)
+                EVENT_COUNT=$(echo "$FOUND_EVENT_IDS" | grep -cE "$EVENT_PREFIX-[0-9]+" 2>/dev/null | head -1 | tr -d ' \n' || echo "0")
+                EVENT_COUNT=${EVENT_COUNT:-0}
+                
+                MAX_RETRIES=4  # 4 retries * 5 seconds = 20 seconds max per consumer
+                RETRY_INTERVAL=5
+                RETRY_COUNT=0
+                START_TIME=$(date +%s)
+                MAX_TIME=$((START_TIME + 30))  # 30 seconds max per consumer
+                
+                while [ "$EVENT_COUNT" -lt 10 ] && [ "$RETRY_COUNT" -lt "$MAX_RETRIES" ] && [ $(date +%s) -lt "$MAX_TIME" ]; do
+                    check_timeout_and_exit
+                    RETRY_COUNT=$((RETRY_COUNT + 1))
+                    CURRENT_TIME=$(date +%s)
+                    TIME_REMAINING=$((MAX_TIME - CURRENT_TIME))
+                    if [ "$TIME_REMAINING" -gt 0 ]; then
+                        info "Found $EVENT_COUNT/10 events, waiting ${RETRY_INTERVAL}s and retrying ($RETRY_COUNT/$MAX_RETRIES, ${TIME_REMAINING}s remaining)..."
+                        sleep $RETRY_INTERVAL
+                        CONSUMER_LOGS=$(docker logs "$CONTAINER_NAME" 2>&1 | tail -1000)
+                        FOUND_EVENT_IDS=$(echo "$CONSUMER_LOGS" | grep -oE "$EVENT_PREFIX-[0-9]+" | sort -u)
+                        EVENT_COUNT=$(echo "$FOUND_EVENT_IDS" | grep -cE "$EVENT_PREFIX-[0-9]+" 2>/dev/null | head -1 | tr -d ' \n' || echo "0")
+                        EVENT_COUNT=${EVENT_COUNT:-0}
+                    fi
+                done
+                
+                if [ "$EVENT_COUNT" -eq 10 ]; then
+                    ELAPSED=$(($(date +%s) - START_TIME))
+                    pass "$CONSUMER_NAME processed all 10 test events (found after ${ELAPSED}s)"
                     FLINK_CONSUMERS_PROCESSED_TEST=$((FLINK_CONSUMERS_PROCESSED_TEST + 1))
+                elif [ "$EVENT_COUNT" -gt 0 ]; then
+                    ELAPSED=$(($(date +%s) - START_TIME))
+                    warn "$CONSUMER_NAME processed $EVENT_COUNT/10 test events after ${ELAPSED}s"
+                else
+                    ELAPSED=$(($(date +%s) - START_TIME))
+                    warn "$CONSUMER_NAME did not process any test events after ${ELAPSED}s"
+                    info "Checking if events are in filtered topic..."
+                    TOPIC_CHECK_OUTPUT=$(docker exec cdc-local-redpanda rpk topic consume "$TOPIC_NAME" --offset start --num 50 --format '%v\n' 2>&1 | grep -v "^$" | jq -r "select(.id != null and (.id | contains(\"$EVENT_PREFIX\"))) | .id" 2>&1 | wc -l | tr -d ' ' 2>/dev/null || echo "0")
+                    if [ "$TOPIC_CHECK_OUTPUT" -gt 0 ]; then
+                        warn "Found $TOPIC_CHECK_OUTPUT events in topic $TOPIC_NAME but not yet processed by consumer"
+                        info "Consumer may still be processing - check logs: docker logs $CONTAINER_NAME"
+                    else
+                        warn "Events not found in topic $TOPIC_NAME - stream processor may not have filtered them yet"
+                    fi
+                fi
+            else
+                # For consumers without a test event, just check they're active
+                LOG_LINES=$(docker logs "$CONTAINER_NAME" 2>&1 | tail -20)
+                if echo "$LOG_LINES" | grep -qiE "(consumed|processing|event|message|received|started|listening|ready)"; then
+                    pass "$CONSUMER_NAME is active"
                 else
                     info "$CONSUMER_NAME is running (waiting for events)"
                 fi
             fi
+        else
+            fail "$CONSUMER_NAME is not running properly (status: $CONTAINER_STATUS)"
         fi
+    else
+        fail "$CONSUMER_NAME container not found"
     fi
+    echo ""
 done
 
 if [ $FLINK_CONSUMERS_RUNNING -eq $FLINK_CONSUMERS_TOTAL ]; then
@@ -635,28 +878,39 @@ else
     warn "Only $FLINK_CONSUMERS_RUNNING/$FLINK_CONSUMERS_TOTAL Flink consumers are running"
 fi
 
+TOTAL_CONSUMERS_PROCESSED=$((CONSUMERS_PROCESSED_TEST + FLINK_CONSUMERS_PROCESSED_TEST))
+
 if [ $CONSUMERS_PROCESSED_TEST -eq 4 ]; then
-    pass "All 4 test events were processed by Spring Boot consumers!"
-    info "  ✓ LoanCreated ($TEST_ID_LOAN) → loan-consumer-spring"
-    info "  ✓ CarCreated ($TEST_ID_CAR) → car-consumer-spring"
-    info "  ✓ LoanPaymentSubmitted ($TEST_ID_PAYMENT) → loan-payment-consumer-spring"
-    info "  ✓ CarServiceDone ($TEST_ID_SERVICE) → service-consumer-spring"
+    pass "All 4 Spring Boot consumers processed all 10 events each (40 total)!"
+    info "  ✓ LoanCreated (10 events) → loan-consumer-spring"
+    info "  ✓ CarCreated (10 events) → car-consumer-spring"
+    info "  ✓ LoanPaymentSubmitted (10 events) → loan-payment-consumer-spring"
+    info "  ✓ CarServiceDone (10 events) → service-consumer-spring"
 elif [ $CONSUMERS_PROCESSED_TEST -gt 0 ]; then
-    warn "Only $CONSUMERS_PROCESSED_TEST/4 test events were processed by Spring Boot consumers"
+    warn "Only $CONSUMERS_PROCESSED_TEST/4 Spring Boot consumers processed all 10 events"
 else
-    warn "No test events were processed by Spring Boot consumers yet"
+    warn "No Spring Boot consumers processed all 10 events yet"
 fi
 
 if [ $FLINK_CONSUMERS_PROCESSED_TEST -eq 4 ]; then
-    pass "All 4 test events were processed by Flink consumers!"
-    info "  ✓ LoanCreated ($TEST_ID_LOAN) → loan-consumer-flink"
-    info "  ✓ CarCreated ($TEST_ID_CAR) → car-consumer-flink"
-    info "  ✓ LoanPaymentSubmitted ($TEST_ID_PAYMENT) → loan-payment-consumer-flink"
-    info "  ✓ CarServiceDone ($TEST_ID_SERVICE) → service-consumer-flink"
+    pass "All 4 Flink consumers processed all 10 events each (40 total)!"
+    info "  ✓ LoanCreated (10 events) → loan-consumer-flink"
+    info "  ✓ CarCreated (10 events) → car-consumer-flink"
+    info "  ✓ LoanPaymentSubmitted (10 events) → loan-payment-consumer-flink"
+    info "  ✓ CarServiceDone (10 events) → service-consumer-flink"
 elif [ $FLINK_CONSUMERS_PROCESSED_TEST -gt 0 ]; then
-    warn "Only $FLINK_CONSUMERS_PROCESSED_TEST/4 test events were processed by Flink consumers"
+    warn "Only $FLINK_CONSUMERS_PROCESSED_TEST/4 Flink consumers processed all 10 events"
 else
     info "Flink consumers are running (events may still be processing)"
+fi
+
+echo ""
+if [ $TOTAL_CONSUMERS_PROCESSED -eq 8 ]; then
+    pass "All 8 consumers (4 Spring Boot + 4 Flink) processed all 10 events each (80 total events processed)!"
+elif [ $TOTAL_CONSUMERS_PROCESSED -gt 0 ]; then
+    warn "Only $TOTAL_CONSUMERS_PROCESSED/8 consumers processed all 10 events"
+else
+    warn "No consumers processed all 10 events yet"
 fi
 
 cd "$PROJECT_ROOT"
@@ -715,18 +969,21 @@ fi
         SCRIPT_END_TIME=$(date +%s)
         SCRIPT_DURATION=$((SCRIPT_END_TIME - SCRIPT_START_TIME))
         pass "Local CDC Pipeline is operational! (Total test time: ${SCRIPT_DURATION}s)"
-    if [ $CONSUMERS_PROCESSED_TEST -eq 4 ] && [ $FLINK_CONSUMERS_PROCESSED_TEST -eq 4 ]; then
-        pass "End-to-end event processing verified for all 4 event types (both Spring Boot and Flink)!"
+    if [ $TOTAL_CONSUMERS_PROCESSED -eq 8 ]; then
+        pass "End-to-end event processing verified: All 8 consumers (4 Spring Boot + 4 Flink) processed all 10 events each (80 total events)!"
+    elif [ $CONSUMERS_PROCESSED_TEST -eq 4 ] && [ $FLINK_CONSUMERS_PROCESSED_TEST -eq 4 ]; then
+        pass "End-to-end event processing verified: All 8 consumers processed all 10 events each!"
     elif [ $CONSUMERS_PROCESSED_TEST -eq 4 ]; then
-        pass "Spring Boot pipeline verified for all 4 event types!"
+        pass "Spring Boot pipeline verified: All 4 consumers processed all 10 events each!"
         if [ $FLINK_CONSUMERS_PROCESSED_TEST -gt 0 ]; then
-            info "Flink pipeline: $FLINK_CONSUMERS_PROCESSED_TEST/4 events processed"
+            info "Flink pipeline: $FLINK_CONSUMERS_PROCESSED_TEST/4 consumers processed all 10 events"
         else
             info "Flink pipeline: Events may still be processing"
         fi
     elif [ $CONSUMERS_PROCESSED_TEST -gt 0 ] || [ $FLINK_CONSUMERS_PROCESSED_TEST -gt 0 ]; then
-        warn "Pipeline is operational but only some events processed"
+        warn "Pipeline is operational but only some consumers processed all 10 events"
         info "Spring Boot: $CONSUMERS_PROCESSED_TEST/4, Flink: $FLINK_CONSUMERS_PROCESSED_TEST/4"
+        info "Total: $TOTAL_CONSUMERS_PROCESSED/8 consumers processed all 10 events"
         info "Some events may still be processing asynchronously"
     else
         warn "Pipeline is operational but test event processing not yet confirmed"

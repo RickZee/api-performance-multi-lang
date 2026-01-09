@@ -64,16 +64,11 @@ if [ "$EXISTING_JOBS_COUNT" -gt 0 ]; then
     echo -e "${YELLOW}Existing jobs:${NC}"
     docker exec cdc-local-flink-jobmanager /opt/flink/bin/flink list 2>&1 | grep "RUNNING" || true
     echo ""
-    read -p "Cancel existing jobs and deploy new one? (y/N): " -n 1 -r
-    echo ""
-    if [[ $REPLY =~ ^[Yy]$ ]]; then
-        echo -e "${BLUE}Cancelling existing jobs...${NC}"
-        docker exec cdc-local-flink-jobmanager /opt/flink/bin/flink list 2>&1 | grep "RUNNING" | awk '{print $4}' | xargs -I {} docker exec cdc-local-flink-jobmanager /opt/flink/bin/flink cancel {} 2>&1 || true
-        sleep 2
-    else
-        echo -e "${YELLOW}Skipping deployment${NC}"
-        exit 0
-    fi
+    # Auto-cancel existing jobs (non-interactive mode for scripts)
+    echo -e "${BLUE}Cancelling existing jobs...${NC}"
+    docker exec cdc-local-flink-jobmanager /opt/flink/bin/flink list 2>&1 | grep "RUNNING" | awk '{print $4}' | xargs -I {} docker exec cdc-local-flink-jobmanager /opt/flink/bin/flink cancel {} 2>&1 || true
+    sleep 2
+    echo -e "${GREEN}✓ Existing jobs cancelled${NC}"
 fi
 
 # Submit JAR as detached persistent streaming job via REST API
