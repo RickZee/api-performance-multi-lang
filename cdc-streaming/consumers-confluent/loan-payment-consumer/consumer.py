@@ -10,6 +10,7 @@ import json
 import logging
 import sys
 import struct
+import time
 from datetime import datetime
 from confluent_kafka import Consumer, KafkaError
 
@@ -193,12 +194,86 @@ def main():
         logger.info("Using local Kafka (no authentication)")
     
     logger.info(f"Client ID: {consumer_config.get('client.id', 'NOT SET')}")
-    consumer = Consumer(consumer_config)
-    consumer.subscribe([KAFKA_TOPIC])
     
-    logger.info("Consumer started. Waiting for messages...")
+    # Retry topic subscription with backoff for topic creation delays
+    # Note: subscribe() doesn't throw immediately, errors appear during poll()
+    max_subscribe_retries = 10
+    subscribe_retry_interval = 5
+    consumer = None
+    subscription_successful = False
+    
+    for retry_count in range(max_subscribe_retries):
+        try:
+            if consumer:
+                consumer.close()
+            consumer = Consumer(consumer_config)
+            consumer.subscribe([KAFKA_TOPIC])
+            
+            # Poll a few times to check if topic is available
+            # Errors appear during poll, not subscribe
+            topic_available = False
+            for poll_attempt in range(3):
+                msg = consumer.poll(timeout=1.0)
+                if msg is None:
+                    # No message but no error - topic might be available
+                    topic_available = True
+                    break
+                if msg.error():
+                    error_code = msg.error().code()
+                    if error_code == KafkaError.UNKNOWN_TOPIC_OR_PART:
+                        logger.warning(f"Topic {KAFKA_TOPIC} not available yet (poll attempt {poll_attempt + 1}/3)")
+                        topic_available = False
+                        break
+                    elif error_code == KafkaError._PARTITION_EOF:
+                        # Topic exists but no messages yet - this is OK
+                        topic_available = True
+                        break
+                    else:
+                        # Other error - assume topic might be available
+                        topic_available = True
+                        break
+                else:
+                    # Got a message - topic is definitely available
+                    topic_available = True
+                    break
+            
+            if topic_available:
+                logger.info("Consumer started. Waiting for messages...")
+                subscription_successful = True
+                break
+            else:
+                if retry_count < max_subscribe_retries - 1:
+                    logger.warning(f"Topic {KAFKA_TOPIC} not available yet (retry {retry_count + 1}/{max_subscribe_retries}), waiting {subscribe_retry_interval}s...")
+                    consumer.close()
+                    consumer = None
+                    time.sleep(subscribe_retry_interval)
+                    continue
+                else:
+                    logger.error(f"Topic {KAFKA_TOPIC} not available after {max_subscribe_retries} retries. Exiting.")
+                    if consumer:
+                        consumer.close()
+                    return
+        except Exception as e:
+            logger.error(f"Consumer error during subscription: {e}")
+            if consumer:
+                consumer.close()
+                consumer = None
+            if retry_count < max_subscribe_retries - 1:
+                logger.warning(f"Retrying subscription (retry {retry_count + 1}/{max_subscribe_retries})...")
+                time.sleep(subscribe_retry_interval)
+                continue
+            else:
+                logger.error("Failed to create consumer after retries")
+                return
+    
+    if consumer is None or not subscription_successful:
+        logger.error("Failed to create consumer after retries")
+        return
     
     try:
+        consecutive_unknown_topic_errors = 0
+        max_unknown_topic_errors = 20  # Allow up to 20 consecutive errors before retrying subscription
+        
         while True:
             msg = consumer.poll(timeout=1.0)
             
@@ -208,9 +283,29 @@ def main():
             if msg.error():
                 if msg.error().code() == KafkaError._PARTITION_EOF:
                     logger.debug(f"Reached end of partition {msg.partition()}")
+                    consecutive_unknown_topic_errors = 0  # Reset error counter on successful poll
+                elif msg.error().code() == KafkaError.UNKNOWN_TOPIC_OR_PART:
+                    consecutive_unknown_topic_errors = consecutive_unknown_topic_errors + 1
+                    if consecutive_unknown_topic_errors < max_unknown_topic_errors:
+                        logger.warning(f"Topic {KAFKA_TOPIC} not available (error {consecutive_unknown_topic_errors}/{max_unknown_topic_errors}), will retry...")
+                        time.sleep(subscribe_retry_interval)
+                        continue
+                    else:
+                        logger.warning(f"Topic {KAFKA_TOPIC} still not available after {max_unknown_topic_errors} errors, re-subscribing...")
+                        # Close and recreate consumer to retry subscription
+                        consumer.close()
+                        time.sleep(subscribe_retry_interval)
+                        consumer = Consumer(consumer_config)
+                        consumer.subscribe([KAFKA_TOPIC])
+                        consecutive_unknown_topic_errors = 0
+                        continue
                 else:
                     logger.error(f"Consumer error: {msg.error()}")
+                    consecutive_unknown_topic_errors = 0  # Reset on other errors
                 continue
+            
+            # Reset error counter on successful message
+            consecutive_unknown_topic_errors = 0
             
             try:
                 # Deserialize JSON Schema Registry format message

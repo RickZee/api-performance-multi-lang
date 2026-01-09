@@ -1,17 +1,67 @@
-# Generated Spring Boot Filter Configuration
-# Generated at: 2026-01-08T14:32:45.630885Z
-# Source: Metadata Service API
-# DO NOT EDIT MANUALLY - This file is auto-generated
+# Spring Boot Filter Configuration for Local Testing
+# This file defines filters for routing events to filtered topics
 
 filters:
-  - id: test-filter-for-jenkins-1767882759315
-    name: Updated Test Filter
-    description: Updated description
-    outputTopic: test-topic-spring
+  - id: car-created-filter
+    name: Car Created Events
+    description: Filters CarCreated events by event_type
+    outputTopic: filtered-car-created-events-spring
     conditionLogic: AND
     enabled: true
     conditions:
       - field: event_type
         operator: equals
         value: CarCreated
+        valueType: string
+      - field: __op
+        operator: equals
+        value: c
+        valueType: string
+
+  - id: loan-created-filter
+    name: Loan Created Events
+    description: Filters LoanCreated events by event_type
+    outputTopic: filtered-loan-created-events-spring
+    conditionLogic: AND
+    enabled: true
+    conditions:
+      - field: event_type
+        operator: equals
+        value: LoanCreated
+        valueType: string
+      - field: __op
+        operator: equals
+        value: c
+        valueType: string
+
+  - id: loan-payment-submitted-filter
+    name: Loan Payment Submitted Events
+    description: Filters LoanPaymentSubmitted events by event_type
+    outputTopic: filtered-loan-payment-submitted-events-spring
+    conditionLogic: AND
+    enabled: true
+    conditions:
+      - field: event_type
+        operator: equals
+        value: LoanPaymentSubmitted
+        valueType: string
+      - field: __op
+        operator: equals
+        value: c
+        valueType: string
+
+  - id: service-events-filter
+    name: Service Events
+    description: Filters CarServiceDone events by event_type
+    outputTopic: filtered-service-events-spring
+    conditionLogic: AND
+    enabled: true
+    conditions:
+      - field: event_type
+        operator: equals
+        value: CarServiceDone
+        valueType: string
+      - field: __op
+        operator: equals
+        value: c
         valueType: string

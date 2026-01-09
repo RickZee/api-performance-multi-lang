@@ -407,12 +407,22 @@ else
     
     # Wait for stream processor to be healthy
     info "Waiting for stream processor to be ready..."
-    max_wait=30
+    max_wait=60
     elapsed=0
     while [ $elapsed -lt $max_wait ]; do
+        check_timeout_and_exit
         if curl -sf http://localhost:8083/actuator/health &>/dev/null; then
-            pass "Stream processor is healthy"
-            break
+            # Also check Kafka Streams health
+            KAFKA_STREAMS_HEALTH=$(curl -sf http://localhost:8083/actuator/health 2>/dev/null | grep -o '"kafkaStreams"[^}]*}' || echo "")
+            if echo "$KAFKA_STREAMS_HEALTH" | grep -q "UP\|READY"; then
+                pass "Stream processor is healthy and Kafka Streams is ready"
+                break
+            elif [ -n "$KAFKA_STREAMS_HEALTH" ]; then
+                info "Stream processor is up but Kafka Streams may still be initializing..."
+            else
+                pass "Stream processor is healthy"
+                break
+            fi
         fi
         sleep 2
         elapsed=$((elapsed + 2))
@@ -422,6 +432,8 @@ else
         warn "Stream processor did not become healthy within ${max_wait}s (may still be starting)"
         info "Checking container status..."
         docker ps --filter "name=cdc-local-stream-processor" --format "{{.Status}}" | head -1
+        info "Checking stream processor logs for errors..."
+        docker logs cdc-local-stream-processor 2>&1 | tail -10 | grep -iE "(error|exception|failed)" | head -5 || echo "No recent errors in logs"
     fi
 fi
 
@@ -579,6 +591,36 @@ if [ $FLINK_TOPICS_FOUND -eq ${#FLINK_FILTERED_TOPICS[@]} ]; then
     pass "All Flink filtered topics exist"
 else
     warn "Only $FLINK_TOPICS_FOUND/${#FLINK_FILTERED_TOPICS[@]} Flink filtered topics exist"
+fi
+
+# Verify Spring Boot filtered topics exist
+check_timeout_and_exit
+info "Verifying Spring Boot filtered topics exist..."
+SPRING_FILTERED_TOPICS=("filtered-loan-created-events-spring" "filtered-car-created-events-spring" "filtered-loan-payment-submitted-events-spring" "filtered-service-events-spring")
+SPRING_TOPICS_FOUND=0
+
+for topic in "${SPRING_FILTERED_TOPICS[@]}"; do
+    if docker exec cdc-local-redpanda rpk topic list 2>/dev/null | grep -q "$topic"; then
+        # Check if topic has partitions (is actually created, not just listed)
+        PARTITION_COUNT=$(docker exec cdc-local-redpanda rpk topic describe "$topic" 2>/dev/null | grep -c "PARTITION" || echo "0")
+        if [ "$PARTITION_COUNT" -gt 0 ]; then
+            pass "Spring Boot filtered topic $topic exists with $PARTITION_COUNT partition(s)"
+            SPRING_TOPICS_FOUND=$((SPRING_TOPICS_FOUND + 1))
+        else
+            warn "Spring Boot filtered topic $topic exists but has no partitions yet"
+        fi
+    else
+        warn "Spring Boot filtered topic $topic does not exist yet"
+    fi
+done
+
+if [ $SPRING_TOPICS_FOUND -eq ${#SPRING_FILTERED_TOPICS[@]} ]; then
+    pass "All Spring Boot filtered topics exist"
+else
+    warn "Only $SPRING_TOPICS_FOUND/${#SPRING_FILTERED_TOPICS[@]} Spring Boot filtered topics exist"
+    info "Waiting 10 seconds for stream processor to create remaining topics..."
+    sleep 10
+    check_timeout_and_exit
 fi
 
 # Restart consumers now that topics are created and populated

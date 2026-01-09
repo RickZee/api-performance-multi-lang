@@ -21,22 +21,28 @@ FROM eclipse-temurin:17-jre
 
 WORKDIR /app
 
-# Install curl for health checks
+# Install curl and getent (for DNS resolution) for health checks and startup
 RUN apt-get update && apt-get install -y curl && rm -rf /var/lib/apt/lists/*
 
 # Create non-root user
 RUN groupadd -r spring && useradd -r -g spring spring
-USER spring:spring
 
 # Copy built JAR from build stage
 COPY --from=build /app/build/libs/*.jar app.jar
+
+# Copy entrypoint script
+COPY docker-entrypoint.sh /app/docker-entrypoint.sh
+RUN chmod +x /app/docker-entrypoint.sh
+
+# Switch to non-root user
+USER spring:spring
 
 # Expose actuator port
 EXPOSE 8080
 
 # Health check
-HEALTHCHECK --interval=30s --timeout=3s --start-period=40s --retries=3 \
+HEALTHCHECK --interval=30s --timeout=3s --start-period=60s --retries=5 \
   CMD curl -f http://localhost:8080/actuator/health || exit 1
 
-# Run application
-ENTRYPOINT ["java", "-jar", "app.jar"]
+# Run application with entrypoint script
+ENTRYPOINT ["/app/docker-entrypoint.sh"]

@@ -423,13 +423,16 @@ services:
       - "8083:8080"  # Actuator health endpoint
     networks:
       - cdc_local_network
+    depends_on:
+      redpanda:
+        condition: service_healthy
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8080/actuator/health"]
       interval: 30s
       timeout: 3s
-      start_period: 40s
-      retries: 3
+      start_period: 60s
+      retries: 5
 
   # ============================================================================
   # Spring Boot Stream Processor Consumers
@@ -453,6 +456,9 @@ services:
       CONSUMER_GROUP_ID: loan-consumer-spring-group
     networks:
       - cdc_local_network
+    depends_on:
+      stream-processor:
+        condition: service_healthy
     restart: unless-stopped
 
   # Loan Payment Consumer (Spring)
@@ -473,6 +479,9 @@ services:
       CONSUMER_GROUP_ID: loan-payment-consumer-spring-group
     networks:
       - cdc_local_network
+    depends_on:
+      stream-processor:
+        condition: service_healthy
     restart: unless-stopped
 
   # Service Consumer (Spring)
@@ -493,6 +502,9 @@ services:
       CONSUMER_GROUP_ID: service-consumer-spring-group
     networks:
       - cdc_local_network
+    depends_on:
+      stream-processor:
+        condition: service_healthy
     restart: unless-stopped
 
   # Car Consumer (Spring)
@@ -513,6 +525,9 @@ services:
       CONSUMER_GROUP_ID: car-consumer-spring-group
     networks:
       - cdc_local_network
+    depends_on:
+      stream-processor:
+        condition: service_healthy
     restart: unless-stopped
 
   # ============================================================================
