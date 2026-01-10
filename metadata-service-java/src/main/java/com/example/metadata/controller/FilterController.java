@@ -355,13 +355,13 @@ public class FilterController {
                     }
                 } else {
                     // Deploy to Confluent Cloud Flink
-                    if (!filterDeployerService.validateConnection()) {
-                        return ResponseEntity.status(HttpStatus.SERVICE_UNAVAILABLE)
-                                .body(DeployFilterResponse.builder()
-                                        .filterId(id)
-                                        .status("failed")
-                                        .error("Confluent Cloud credentials not configured")
-                                        .build());
+                if (!filterDeployerService.validateConnection()) {
+                    return ResponseEntity.status(HttpStatus.SERVICE_UNAVAILABLE)
+                            .body(DeployFilterResponse.builder()
+                                    .filterId(id)
+                                    .status("failed")
+                                    .error("Confluent Cloud credentials not configured")
+                                    .build());
                     }
                 }
                 
@@ -389,9 +389,9 @@ public class FilterController {
                         );
                     } else {
                         statementIds = filterDeployerService.deployStatements(
-                                sqlResponse.getStatements(),
-                                statementNames
-                        );
+                            sqlResponse.getStatements(),
+                            statementNames
+                    );
                     }
                     
                     // Update filter with deployment info

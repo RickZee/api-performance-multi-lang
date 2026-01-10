@@ -27,8 +27,9 @@ RUN apt-get update && apt-get install -y curl && rm -rf /var/lib/apt/lists/*
 # Create non-root user
 RUN groupadd -r spring && useradd -r -g spring spring
 
-# Copy built JAR from build stage
-COPY --from=build /app/build/libs/*.jar app.jar
+# Copy built JAR from build stage (find the non-plain JAR)
+COPY --from=build /app/build/libs/ /app/libs/
+RUN find /app/libs -name "*.jar" ! -name "*-plain.jar" -exec mv {} /app/app.jar \;
 
 # Copy entrypoint script
 COPY docker-entrypoint.sh /app/docker-entrypoint.sh

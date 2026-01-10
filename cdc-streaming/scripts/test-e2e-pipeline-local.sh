@@ -91,6 +91,30 @@ done
 COMPOSE_FILE="docker-compose-local.yml"
 cd cdc-streaming
 
+# Auto-detect and configure Colima if available
+if [ -S "$HOME/.colima/default/docker.sock" ]; then
+    # First, try to use colima context (preferred method)
+    if docker context ls 2>/dev/null | grep -q "colima"; then
+        # Unset DOCKER_HOST to allow context to work
+        unset DOCKER_HOST
+        docker context use colima 2>/dev/null || export DOCKER_HOST="unix://$HOME/.colima/default/docker.sock"
+    else
+        export DOCKER_HOST="unix://$HOME/.colima/default/docker.sock"
+    fi
+    info "Auto-configured Docker for Colima"
+fi
+
+# Verify Docker is accessible
+if ! docker ps > /dev/null 2>&1; then
+    fail "Docker is not accessible. Please ensure Docker/Colima is running."
+    echo ""
+    echo "Try:"
+    echo "  colima status"
+    echo "  colima start  # if not running"
+    echo "  docker context use colima"
+    exit 1
+fi
+
 # Pre-test cleanup
 if [ "$CLEAR_DB" = true ] || [ "$CLEAR_ALL" = true ]; then
     echo ""
@@ -138,8 +162,8 @@ if [ "$CLEAR_TOPICS" = true ] || [ "$CLEAR_ALL" = true ]; then
     # Restart stream processor after topics are deleted so it can recreate them
     info "Restarting stream processor to reconnect to topics..."
     docker-compose -f "$COMPOSE_FILE" restart stream-processor 2>&1 | grep -v "level=warning" | tail -3
-    info "Waiting 5 seconds for stream processor to restart..."
-    sleep 5
+    info "Waiting 2 seconds for stream processor to restart..."
+    sleep 2
     echo ""
 fi
 
@@ -184,8 +208,8 @@ for service in "${ALL_CONSUMER_SERVICES[@]}"; do
 done
 
 if [ $CLEARED_COUNT -gt 0 ]; then
-    info "Waiting 5 seconds for consumers to start with fresh logs..."
-    sleep 5
+    info "Waiting 2 seconds for consumers to start with fresh logs..."
+    sleep 2
     
     # Verify logs are cleared (should have minimal lines - just startup)
     VERIFIED_COUNT=0
@@ -363,8 +387,8 @@ TEST_ID="$TEST_ID_LOAN"
 echo ""
 section "Step 4: Verify Event in Raw Kafka Topic"
 check_timeout_and_exit
-info "Waiting 3 seconds for CDC propagation..."
-sleep 3
+info "Waiting 1 second for CDC propagation..."
+sleep 1
 check_timeout_and_exit
 
 # Use timeout to prevent hanging - rpk consume waits for messages by default
@@ -398,8 +422,8 @@ if docker-compose -f "$COMPOSE_FILE" ps stream-processor 2>/dev/null | grep -q "
     info "Restarting stream processor to ensure it's connected to topics..."
     docker-compose -f "$COMPOSE_FILE" restart stream-processor 2>&1 | grep -v "level=warning" | tail -3
     check_timeout_and_exit
-    info "Waiting 5 seconds for stream processor to reconnect..."
-    sleep 5
+    info "Waiting 2 seconds for stream processor to reconnect..."
+    sleep 2
     check_timeout_and_exit
 else
     info "Starting stream processor..."
@@ -407,7 +431,7 @@ else
     
     # Wait for stream processor to be healthy
     info "Waiting for stream processor to be ready..."
-    max_wait=60
+    max_wait=15  # Reduced from 60s for local testing
     elapsed=0
     while [ $elapsed -lt $max_wait ]; do
         check_timeout_and_exit
@@ -441,8 +465,8 @@ fi
 echo ""
 section "Step 6: Wait for Stream Processor to Filter Event"
 check_timeout_and_exit
-info "Waiting 5 seconds for stream processor to filter the test event..."
-sleep 5
+info "Waiting 2 seconds for stream processor to filter the test event..."
+sleep 2
 check_timeout_and_exit
 
 # Check if filtered topic exists and has the test event
@@ -508,7 +532,7 @@ else
     if docker-compose -f "$COMPOSE_FILE" up -d flink-jobmanager flink-taskmanager 2>&1 | grep -v "level=warning" | tail -5; then
         # Wait for Flink to be ready
         info "Waiting for Flink cluster to be ready..."
-        max_wait=60
+        max_wait=15  # Reduced from 60s for local testing
         elapsed=0
         while [ $elapsed -lt $max_wait ]; do
             if curl -sf http://localhost:8082/overview > /dev/null 2>&1; then
@@ -563,8 +587,8 @@ fi
 echo ""
 section "Step 9: Verify Flink Filtered Topics"
 check_timeout_and_exit
-info "Waiting 5 seconds for Flink to process events..."
-sleep 5
+info "Waiting 2 seconds for Flink to process events..."
+sleep 2
 check_timeout_and_exit
 
 FLINK_FILTERED_TOPICS=("filtered-loan-created-events-flink" "filtered-car-created-events-flink" "filtered-loan-payment-submitted-events-flink" "filtered-service-events-flink")
@@ -672,8 +696,8 @@ docker-compose -f "$COMPOSE_FILE" restart "${CONSUMERS[@]}" "${FLINK_CONSUMERS[@
 
 # Wait for consumers to start
 check_timeout_and_exit
-info "Waiting 3 seconds for consumers to initialize..."
-sleep 3
+    info "Waiting 1 second for consumers to initialize..."
+sleep 1
 check_timeout_and_exit
 
 # Check consumer status and verify they processed the test events
@@ -703,9 +727,9 @@ get_topic_for_event_id() {
 }
 
 # Wait for events to propagate through the entire pipeline (optimized timing)
-info "Waiting 5 seconds for events to propagate through CDC → Stream Processor → Consumers..."
+    info "Waiting 2 seconds for events to propagate through CDC → Stream Processor → Consumers..."
 check_timeout_and_exit
-sleep 5
+sleep 2
 check_timeout_and_exit
 
 for i in "${!CONSUMER_CONTAINERS[@]}"; do
@@ -744,14 +768,19 @@ for i in "${!CONSUMER_CONTAINERS[@]}"; do
                 
                 # Extract unique event IDs matching the specific test pattern (e.g., test-loan-1767893293-1 through test-loan-1767893293-10)
                 FOUND_EVENT_IDS=$(echo "$CONSUMER_LOGS" | grep -oE "$EVENT_PREFIX-[0-9]+" | sort -u)
-                EVENT_COUNT=$(echo "$FOUND_EVENT_IDS" | grep -cE "$EVENT_PREFIX-[0-9]+" 2>/dev/null | head -1 | tr -d ' \n' || echo "0")
+                # Count unique event IDs (use wc -l for accurate line count)
+                if [ -n "$FOUND_EVENT_IDS" ]; then
+                    EVENT_COUNT=$(echo "$FOUND_EVENT_IDS" | wc -l | tr -d ' \n' || echo "0")
+                else
+                    EVENT_COUNT=0
+                fi
                 EVENT_COUNT=${EVENT_COUNT:-0}
                 
-                MAX_RETRIES=4  # 4 retries * 5 seconds = 20 seconds max per consumer
-                RETRY_INTERVAL=5
+                MAX_RETRIES=2  # 2 retries * 2 seconds = 4 seconds max per consumer (local is fast)
+                RETRY_INTERVAL=2
                 RETRY_COUNT=0
                 START_TIME=$(date +%s)
-                MAX_TIME=$((START_TIME + 30))  # 30 seconds max per consumer
+                MAX_TIME=$((START_TIME + 10))  # 10 seconds max per consumer
                 
                 while [ "$EVENT_COUNT" -lt 10 ] && [ "$RETRY_COUNT" -lt "$MAX_RETRIES" ] && [ $(date +%s) -lt "$MAX_TIME" ]; do
                     check_timeout_and_exit
@@ -763,7 +792,12 @@ for i in "${!CONSUMER_CONTAINERS[@]}"; do
                         sleep $RETRY_INTERVAL
                         CONSUMER_LOGS=$(docker logs "$CONTAINER_NAME" 2>&1 | tail -1000)
                         FOUND_EVENT_IDS=$(echo "$CONSUMER_LOGS" | grep -oE "$EVENT_PREFIX-[0-9]+" | sort -u)
-                        EVENT_COUNT=$(echo "$FOUND_EVENT_IDS" | grep -cE "$EVENT_PREFIX-[0-9]+" 2>/dev/null | head -1 | tr -d ' \n' || echo "0")
+                        # Count unique event IDs (use wc -l for accurate line count)
+                if [ -n "$FOUND_EVENT_IDS" ]; then
+                    EVENT_COUNT=$(echo "$FOUND_EVENT_IDS" | wc -l | tr -d ' \n' || echo "0")
+                else
+                    EVENT_COUNT=0
+                fi
                         EVENT_COUNT=${EVENT_COUNT:-0}
                     fi
                 done
@@ -853,14 +887,19 @@ for i in "${!FLINK_CONSUMER_CONTAINERS[@]}"; do
                 
                 # Extract unique event IDs matching the specific test pattern (e.g., test-loan-1767893293-1 through test-loan-1767893293-10)
                 FOUND_EVENT_IDS=$(echo "$CONSUMER_LOGS" | grep -oE "$EVENT_PREFIX-[0-9]+" | sort -u)
-                EVENT_COUNT=$(echo "$FOUND_EVENT_IDS" | grep -cE "$EVENT_PREFIX-[0-9]+" 2>/dev/null | head -1 | tr -d ' \n' || echo "0")
+                # Count unique event IDs (use wc -l for accurate line count)
+                if [ -n "$FOUND_EVENT_IDS" ]; then
+                    EVENT_COUNT=$(echo "$FOUND_EVENT_IDS" | wc -l | tr -d ' \n' || echo "0")
+                else
+                    EVENT_COUNT=0
+                fi
                 EVENT_COUNT=${EVENT_COUNT:-0}
                 
-                MAX_RETRIES=4  # 4 retries * 5 seconds = 20 seconds max per consumer
-                RETRY_INTERVAL=5
+                MAX_RETRIES=2  # 2 retries * 2 seconds = 4 seconds max per consumer (local is fast)
+                RETRY_INTERVAL=2
                 RETRY_COUNT=0
                 START_TIME=$(date +%s)
-                MAX_TIME=$((START_TIME + 30))  # 30 seconds max per consumer
+                MAX_TIME=$((START_TIME + 10))  # 10 seconds max per consumer
                 
                 while [ "$EVENT_COUNT" -lt 10 ] && [ "$RETRY_COUNT" -lt "$MAX_RETRIES" ] && [ $(date +%s) -lt "$MAX_TIME" ]; do
                     check_timeout_and_exit
@@ -872,7 +911,12 @@ for i in "${!FLINK_CONSUMER_CONTAINERS[@]}"; do
                         sleep $RETRY_INTERVAL
                         CONSUMER_LOGS=$(docker logs "$CONTAINER_NAME" 2>&1 | tail -1000)
                         FOUND_EVENT_IDS=$(echo "$CONSUMER_LOGS" | grep -oE "$EVENT_PREFIX-[0-9]+" | sort -u)
-                        EVENT_COUNT=$(echo "$FOUND_EVENT_IDS" | grep -cE "$EVENT_PREFIX-[0-9]+" 2>/dev/null | head -1 | tr -d ' \n' || echo "0")
+                        # Count unique event IDs (use wc -l for accurate line count)
+                if [ -n "$FOUND_EVENT_IDS" ]; then
+                    EVENT_COUNT=$(echo "$FOUND_EVENT_IDS" | wc -l | tr -d ' \n' || echo "0")
+                else
+                    EVENT_COUNT=0
+                fi
                         EVENT_COUNT=${EVENT_COUNT:-0}
                     fi
                 done
