@@ -46,16 +46,112 @@ check_script_timeout() {
     return 0
 }
 
+# Debugging function - runs when timeout is reached
+debug_pipeline() {
+    echo ""
+    section "DEBUG: Pipeline Diagnostics (Timeout Reached)"
+    
+    echo ""
+    info "1. Infrastructure Services Status:"
+    docker-compose -f "$COMPOSE_FILE" ps postgres-large redpanda kafka-connect stream-processor 2>&1 | grep -E "(NAME|postgres|redpanda|kafka-connect|stream-processor)" | head -6
+    
+    echo ""
+    info "2. Stream Processor Status:"
+    if docker ps --filter "name=cdc-local-stream-processor" --format "{{.Status}}" | head -1; then
+        echo "Health check:"
+        curl -s http://localhost:8083/actuator/health 2>&1 | jq '.' || echo "Health check failed"
+        echo ""
+        echo "Recent logs (last 15 lines):"
+        docker logs cdc-local-stream-processor 2>&1 | tail -15
+    else
+        echo "Stream processor container not running"
+    fi
+    
+    echo ""
+    info "3. Spring Boot Filtered Topics:"
+    docker exec cdc-local-redpanda rpk topic list 2>&1 | grep -E "(filtered.*spring|NAME)" || echo "No Spring Boot filtered topics found"
+    
+    echo ""
+    info "4. Raw Topic Status:"
+    docker exec cdc-local-redpanda rpk topic list 2>&1 | grep "raw-event-headers" || echo "raw-event-headers topic not found"
+    # Use safe consume with 5-second timeout
+    RAW_OUTPUT=$(safe_rpk_consume "raw-event-headers" 10 '%v\n' 5)
+    RAW_COUNT=$(echo "$RAW_OUTPUT" | grep -v "^$" | wc -l | tr -d ' \n' || echo "0")
+    echo "Messages in raw-event-headers: $RAW_COUNT"
+    
+    echo ""
+    info "5. Spring Boot Consumers Status:"
+    for consumer in loan-consumer-spring car-consumer-spring loan-payment-consumer-spring service-consumer-spring; do
+        CONTAINER="cdc-local-${consumer}"
+        if docker ps --filter "name=${CONTAINER}" --format "{{.Names}}" | grep -q "${CONTAINER}"; then
+            echo "  ✓ ${consumer}: Running"
+            echo "    Recent errors:"
+            docker logs "$CONTAINER" 2>&1 | tail -5 | grep -iE "(error|exception|failed|warn)" | head -2 || echo "    No recent errors"
+        else
+            echo "  ✗ ${consumer}: Not running"
+        fi
+    done
+    
+    echo ""
+    info "6. Test Events in Database:"
+    DB_COUNT=$(docker exec cdc-local-postgres-large psql -U postgres -d car_entities -t -c "SELECT COUNT(*) FROM event_headers WHERE id LIKE 'test-%'" 2>&1 | tr -d ' \n' || echo "0")
+    echo "Test events in DB: $DB_COUNT"
+    
+    echo ""
+    warn "Pipeline debugging complete. Check above for issues."
+}
+
 # Check timeout and exit if reached
 check_timeout_and_exit() {
     if ! check_script_timeout; then
         echo ""
-        warn "Script timeout reached (${SCRIPT_MAX_DURATION}s). Exiting to prevent hanging."
+        warn "Script timeout reached (${SCRIPT_MAX_DURATION}s)."
         SCRIPT_END_TIME=$(date +%s)
         SCRIPT_DURATION=$((SCRIPT_END_TIME - SCRIPT_START_TIME))
         echo "Script ran for ${SCRIPT_DURATION}s before timeout"
+        debug_pipeline
         exit 1
     fi
+}
+
+# Execute command with 2-minute max timeout - if it exceeds, stop and troubleshoot
+execute_with_timeout() {
+    local CMD="$1"
+    local TIMEOUT_SEC=${2:-120}  # Default 2 minutes
+    local START_TIME=$(date +%s)
+    local END_TIME=$((START_TIME + TIMEOUT_SEC))
+    
+    # Run command in background
+    eval "$CMD" &
+    local CMD_PID=$!
+    
+    # Monitor timeout
+    while kill -0 $CMD_PID 2>/dev/null; do
+        check_timeout_and_exit  # Check script-level timeout
+        CURRENT_TIME=$(date +%s)
+        if [ $CURRENT_TIME -ge $END_TIME ]; then
+            warn "Command exceeded ${TIMEOUT_SEC}s timeout - stopping and troubleshooting"
+            kill $CMD_PID 2>/dev/null
+            wait $CMD_PID 2>/dev/null
+            return 124  # Timeout exit code
+        fi
+        sleep 0.5
+    done
+    
+    wait $CMD_PID
+    return $?
+}
+
+# Safe rpk consume with timeout (max 5 seconds for quick checks)
+safe_rpk_consume() {
+    local TOPIC="$1"
+    local NUM="${2:-10}"
+    local FORMAT="${3:-json}"
+    local TIMEOUT="${4:-5}"
+    
+    # Use background process with kill for timeout
+    local OUTPUT=$(docker exec cdc-local-redpanda rpk topic consume "$TOPIC" --offset start --num "$NUM" --format "$FORMAT" 2>/dev/null & CONSUME_PID=$!; sleep $TIMEOUT; kill $CONSUME_PID 2>/dev/null; wait $CONSUME_PID 2>/dev/null)
+    echo "$OUTPUT"
 }
 
 # Parse command line arguments
@@ -391,9 +487,8 @@ info "Waiting 1 second for CDC propagation..."
 sleep 1
 check_timeout_and_exit
 
-# Use timeout to prevent hanging - rpk consume waits for messages by default
-# Use background process with kill to implement timeout (macOS doesn't have timeout command)
-TOPIC_OUTPUT=$(docker exec cdc-local-redpanda rpk topic consume raw-event-headers --offset start --num 10 --format json 2>/dev/null & CONSUME_PID=$!; sleep 3; kill $CONSUME_PID 2>/dev/null; wait $CONSUME_PID 2>/dev/null)
+# Use safe consume with 5-second timeout
+TOPIC_OUTPUT=$(safe_rpk_consume "raw-event-headers" 10 "json" 5)
 TOPIC_MESSAGES=$(echo "$TOPIC_OUTPUT" | grep -c "$TEST_ID" 2>/dev/null || echo "0")
 TOPIC_MESSAGES=${TOPIC_MESSAGES:-0}
 
@@ -401,7 +496,7 @@ if [ "$TOPIC_MESSAGES" -gt 0 ] 2>/dev/null; then
     pass "Found test event in raw-event-headers topic"
     echo ""
     info "Sample message:"
-    SAMPLE_OUTPUT=$(docker exec cdc-local-redpanda rpk topic consume raw-event-headers --offset start --num 1 --format json 2>/dev/null & CONSUME_PID=$!; sleep 2; kill $CONSUME_PID 2>/dev/null; wait $CONSUME_PID 2>/dev/null)
+    SAMPLE_OUTPUT=$(safe_rpk_consume "raw-event-headers" 1 "json" 3)
     echo "$SAMPLE_OUTPUT" | jq -r '.value' | head -3
 else
     warn "Test event not found in raw-event-headers topic yet"
@@ -429,9 +524,9 @@ else
     info "Starting stream processor..."
     docker-compose -f "$COMPOSE_FILE" up -d stream-processor 2>&1 | grep -v "level=warning" | tail -3
     
-    # Wait for stream processor to be healthy
-    info "Waiting for stream processor to be ready..."
-    max_wait=15  # Reduced from 60s for local testing
+    # Wait for stream processor to be healthy (max 2 minutes)
+    info "Waiting for stream processor to be ready (max 120s)..."
+    max_wait=120  # 2 minutes max for troubleshooting
     elapsed=0
     while [ $elapsed -lt $max_wait ]; do
         check_timeout_and_exit
@@ -442,7 +537,7 @@ else
                 pass "Stream processor is healthy and Kafka Streams is ready"
                 break
             elif [ -n "$KAFKA_STREAMS_HEALTH" ]; then
-                info "Stream processor is up but Kafka Streams may still be initializing..."
+                info "Stream processor is up but Kafka Streams may still be initializing... (${elapsed}s/${max_wait}s)"
             else
                 pass "Stream processor is healthy"
                 break
@@ -453,11 +548,21 @@ else
     done
     
     if [ $elapsed -ge $max_wait ]; then
-        warn "Stream processor did not become healthy within ${max_wait}s (may still be starting)"
-        info "Checking container status..."
+        warn "Stream processor did not become healthy within ${max_wait}s - starting debug..."
+        echo ""
+        info "Stream Processor Debug Info:"
+        echo "Container status:"
         docker ps --filter "name=cdc-local-stream-processor" --format "{{.Status}}" | head -1
-        info "Checking stream processor logs for errors..."
-        docker logs cdc-local-stream-processor 2>&1 | tail -10 | grep -iE "(error|exception|failed)" | head -5 || echo "No recent errors in logs"
+        echo ""
+        echo "Recent logs (last 20 lines):"
+        docker logs cdc-local-stream-processor 2>&1 | tail -20
+        echo ""
+        echo "Health endpoint:"
+        curl -s http://localhost:8083/actuator/health 2>&1 | head -10
+        echo ""
+        echo "Kafka Streams state:"
+        docker logs cdc-local-stream-processor 2>&1 | grep -iE "(kafkastreams|stream.*state|error|exception)" | tail -10
+        fail "Stream processor health check failed after ${max_wait}s"
     fi
 fi
 
@@ -477,7 +582,7 @@ if docker exec cdc-local-redpanda rpk topic list 2>/dev/null | grep -q "$FILTERE
     pass "Filtered topic $FILTERED_TOPIC exists"
     
     # Check if test event is in filtered topic (with timeout to prevent hanging)
-    FILTERED_OUTPUT=$(docker exec cdc-local-redpanda rpk topic consume "$FILTERED_TOPIC" --offset start --num 20 --format json 2>/dev/null & CONSUME_PID=$!; sleep 3; kill $CONSUME_PID 2>/dev/null; wait $CONSUME_PID 2>/dev/null)
+    FILTERED_OUTPUT=$(safe_rpk_consume "$FILTERED_TOPIC" 20 "json" 5)
     FILTERED_MESSAGES=$(echo "$FILTERED_OUTPUT" | grep -c "$TEST_ID" 2>/dev/null || echo "0")
     FILTERED_MESSAGES=${FILTERED_MESSAGES:-0}
     
@@ -532,9 +637,10 @@ else
     if docker-compose -f "$COMPOSE_FILE" up -d flink-jobmanager flink-taskmanager 2>&1 | grep -v "level=warning" | tail -5; then
         # Wait for Flink to be ready
         info "Waiting for Flink cluster to be ready..."
-        max_wait=15  # Reduced from 60s for local testing
+        max_wait=120  # 2 minutes max for troubleshooting
         elapsed=0
         while [ $elapsed -lt $max_wait ]; do
+            check_timeout_and_exit
             if curl -sf http://localhost:8082/overview > /dev/null 2>&1; then
                 pass "Flink cluster is ready"
                 break
@@ -544,8 +650,17 @@ else
         done
         
         if [ $elapsed -ge $max_wait ]; then
-            warn "Flink cluster did not become ready within ${max_wait}s"
-            info "Check Flink logs: docker logs cdc-local-flink-jobmanager"
+            warn "Flink cluster did not become ready within ${max_wait}s - starting debug..."
+            echo ""
+            info "Flink Debug Info:"
+            docker-compose -f "$COMPOSE_FILE" ps flink-jobmanager flink-taskmanager 2>&1 | grep -E "(NAME|flink)"
+            echo ""
+            echo "JobManager logs (last 15 lines):"
+            docker logs cdc-local-flink-jobmanager 2>&1 | tail -15
+            echo ""
+            echo "TaskManager logs (last 15 lines):"
+            docker logs cdc-local-flink-taskmanager 2>&1 | tail -15
+            fail "Flink cluster health check failed after ${max_wait}s"
         fi
     else
         fail "Failed to start Flink cluster"
@@ -600,7 +715,7 @@ for topic in "${FLINK_FILTERED_TOPICS[@]}"; do
         FLINK_TOPICS_FOUND=$((FLINK_TOPICS_FOUND + 1))
         
         # Check if test event is in topic
-        TOPIC_OUTPUT=$(docker exec cdc-local-redpanda rpk topic consume "$topic" --offset start --num 20 --format json 2>/dev/null & CONSUME_PID=$!; sleep 3; kill $CONSUME_PID 2>/dev/null; wait $CONSUME_PID 2>/dev/null)
+        TOPIC_OUTPUT=$(safe_rpk_consume "$topic" 20 "json" 5)
         if echo "$TOPIC_OUTPUT" | grep -q "$TEST_ID"; then
             pass "Test event found in $topic"
         else
@@ -776,11 +891,11 @@ for i in "${!CONSUMER_CONTAINERS[@]}"; do
                 fi
                 EVENT_COUNT=${EVENT_COUNT:-0}
                 
-                MAX_RETRIES=2  # 2 retries * 2 seconds = 4 seconds max per consumer (local is fast)
+                MAX_RETRIES=30  # 30 retries * 2 seconds = 60 seconds max per consumer (2 min total for troubleshooting)
                 RETRY_INTERVAL=2
                 RETRY_COUNT=0
                 START_TIME=$(date +%s)
-                MAX_TIME=$((START_TIME + 10))  # 10 seconds max per consumer
+                MAX_TIME=$((START_TIME + 120))  # 2 minutes max per consumer for troubleshooting
                 
                 while [ "$EVENT_COUNT" -lt 10 ] && [ "$RETRY_COUNT" -lt "$MAX_RETRIES" ] && [ $(date +%s) -lt "$MAX_TIME" ]; do
                     check_timeout_and_exit
@@ -808,13 +923,33 @@ for i in "${!CONSUMER_CONTAINERS[@]}"; do
                     CONSUMERS_PROCESSED_TEST=$((CONSUMERS_PROCESSED_TEST + 1))
                 elif [ "$EVENT_COUNT" -gt 0 ]; then
                     ELAPSED=$(($(date +%s) - START_TIME))
-                    warn "$CONSUMER_NAME processed $EVENT_COUNT/10 test events after ${ELAPSED}s"
+                    if [ "$ELAPSED" -ge 120 ]; then
+                        warn "$CONSUMER_NAME processed $EVENT_COUNT/10 test events after ${ELAPSED}s - starting debug..."
+                        echo ""
+                        info "Consumer Debug Info for $CONSUMER_NAME:"
+                        echo "Container status:"
+                        docker ps --filter "name=${CONTAINER_NAME}" --format "{{.Status}}" | head -1
+                        echo ""
+                        echo "Recent logs (last 20 lines):"
+                        docker logs "$CONTAINER_NAME" 2>&1 | tail -20
+                        echo ""
+                        echo "Found event IDs:"
+                        echo "$FOUND_EVENT_IDS" | head -10
+                        echo ""
+                        echo "Expected topic: $TOPIC_NAME"
+                        TOPIC_OUTPUT=$(safe_rpk_consume "$TOPIC_NAME" 50 '%v\n' 5)
+                        TOPIC_COUNT=$(echo "$TOPIC_OUTPUT" | grep -v "^$" | jq -r '.id' 2>/dev/null | grep -c "$EVENT_PREFIX" 2>/dev/null || echo "0")
+                        echo "Events in topic: $TOPIC_COUNT"
+                    else
+                        warn "$CONSUMER_NAME processed $EVENT_COUNT/10 test events after ${ELAPSED}s"
+                    fi
                 else
                     ELAPSED=$(($(date +%s) - START_TIME))
                     warn "$CONSUMER_NAME did not process any test events after ${ELAPSED}s"
                     info "Checking if events are in filtered topic..."
                     EXPECTED_TOPIC=$(get_topic_for_event_id "$EXPECTED_EVENT_ID")
-                    TOPIC_CHECK_OUTPUT=$(docker exec cdc-local-redpanda rpk topic consume "$EXPECTED_TOPIC" --offset start --num 50 --format '%v\n' 2>&1 | grep -v "^$" | jq -r "select(.id != null and (.id | contains(\"$EVENT_PREFIX\"))) | .id" 2>&1 | wc -l | tr -d ' ' 2>/dev/null || echo "0")
+                        TOPIC_CHECK_OUTPUT=$(safe_rpk_consume "$EXPECTED_TOPIC" 50 '%v\n' 5)
+                        TOPIC_CHECK_OUTPUT=$(echo "$TOPIC_CHECK_OUTPUT" | grep -v "^$" | jq -r "select(.id != null and (.id | contains(\"$EVENT_PREFIX\"))) | .id" 2>&1 | wc -l | tr -d ' ' 2>/dev/null || echo "0")
                     if [ "$TOPIC_CHECK_OUTPUT" -gt 0 ]; then
                         warn "Found $TOPIC_CHECK_OUTPUT events in topic $EXPECTED_TOPIC but not yet processed by consumer"
                         info "Consumer may still be processing - check logs: docker logs $CONTAINER_NAME"
@@ -895,11 +1030,11 @@ for i in "${!FLINK_CONSUMER_CONTAINERS[@]}"; do
                 fi
                 EVENT_COUNT=${EVENT_COUNT:-0}
                 
-                MAX_RETRIES=2  # 2 retries * 2 seconds = 4 seconds max per consumer (local is fast)
+                MAX_RETRIES=30  # 30 retries * 2 seconds = 60 seconds max per consumer (2 min total for troubleshooting)
                 RETRY_INTERVAL=2
                 RETRY_COUNT=0
                 START_TIME=$(date +%s)
-                MAX_TIME=$((START_TIME + 10))  # 10 seconds max per consumer
+                MAX_TIME=$((START_TIME + 120))  # 2 minutes max per consumer for troubleshooting
                 
                 while [ "$EVENT_COUNT" -lt 10 ] && [ "$RETRY_COUNT" -lt "$MAX_RETRIES" ] && [ $(date +%s) -lt "$MAX_TIME" ]; do
                     check_timeout_and_exit
@@ -932,7 +1067,8 @@ for i in "${!FLINK_CONSUMER_CONTAINERS[@]}"; do
                     ELAPSED=$(($(date +%s) - START_TIME))
                     warn "$CONSUMER_NAME did not process any test events after ${ELAPSED}s"
                     info "Checking if events are in filtered topic..."
-                    TOPIC_CHECK_OUTPUT=$(docker exec cdc-local-redpanda rpk topic consume "$TOPIC_NAME" --offset start --num 50 --format '%v\n' 2>&1 | grep -v "^$" | jq -r "select(.id != null and (.id | contains(\"$EVENT_PREFIX\"))) | .id" 2>&1 | wc -l | tr -d ' ' 2>/dev/null || echo "0")
+                    TOPIC_CHECK_OUTPUT=$(safe_rpk_consume "$TOPIC_NAME" 50 '%v\n' 5)
+                    TOPIC_CHECK_OUTPUT=$(echo "$TOPIC_CHECK_OUTPUT" | grep -v "^$" | jq -r "select(.id != null and (.id | contains(\"$EVENT_PREFIX\"))) | .id" 2>&1 | wc -l | tr -d ' ' 2>/dev/null || echo "0")
                     if [ "$TOPIC_CHECK_OUTPUT" -gt 0 ]; then
                         warn "Found $TOPIC_CHECK_OUTPUT events in topic $TOPIC_NAME but not yet processed by consumer"
                         info "Consumer may still be processing - check logs: docker logs $CONTAINER_NAME"
