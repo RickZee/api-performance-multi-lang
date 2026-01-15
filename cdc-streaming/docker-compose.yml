@@ -64,6 +64,31 @@ services:
     networks:
       - car_network
 
+  # Producer API Java REST
+  # Event producer API that writes to Aurora PostgreSQL
+  producer-api-java-rest:
+    build:
+      context: ../producer-api-java-rest
+      dockerfile: Dockerfile
+    container_name: cdc-producer-api-java-rest
+    hostname: producer-api-java-rest
+    environment:
+      # Aurora PostgreSQL connection (R2DBC)
+      AURORA_R2DBC_URL: ${AURORA_R2DBC_URL:-r2dbc:postgresql://${AURORA_ENDPOINT}:5432/${AURORA_DB_NAME:-car_entities}}
+      AURORA_USERNAME: ${AURORA_DB_USER:-postgres}
+      AURORA_PASSWORD: ${AURORA_DB_PASSWORD}
+      JAVA_OPTS: ${JAVA_OPTS:-"-Xmx1536m -Xms768m -XX:MaxMetaspaceSize=256m"}
+    ports:
+      - "8081:8081"
+    networks:
+      - car_network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8081/api/v1/events/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
   # Spring Boot Stream Processor
   # Alternative to Flink for event filtering and routing
   stream-processor:

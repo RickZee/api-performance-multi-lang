@@ -679,36 +679,41 @@ if [ "$SKIP_TO_STEP" -le 3 ]; then
   echo ""
 fi
 
-# Step 4: Get Lambda API URL
+# Step 4: Get Producer API URL
 if [ "$SKIP_TO_STEP" -le 4 ]; then
-  step_start "Get Lambda API URL"
-  section "Step 4: Get Lambda API URL"
+  step_start "Get Producer API URL"
+  section "Step 4: Get Producer API URL"
   echo ""
 
-cd "$PROJECT_ROOT/terraform"
-# Try multiple possible output names
-LAMBDA_API_URL=$(terraform output -raw lambda_api_url 2>/dev/null || echo "")
+  # Producer API runs on EC2, so use localhost or environment variable
+  PRODUCER_API_URL="${PRODUCER_API_URL:-http://localhost:8081}"
+  
+  # If PRODUCER_API_URL is not set, try to get from environment or use default
+  if [ -z "$PRODUCER_API_URL" ] || [ "$PRODUCER_API_URL" = "" ]; then
+    # Check if running in Docker/container environment
+    if [ -n "${HOSTNAME:-}" ] && [ "$HOSTNAME" != "localhost" ]; then
+      # Try to detect EC2 public IP or use hostname
+      EC2_PUBLIC_IP=$(curl -s http://169.254.169.254/latest/meta-data/public-ipv4 2>/dev/null || echo "")
+      if [ -n "$EC2_PUBLIC_IP" ]; then
+        PRODUCER_API_URL="http://${EC2_PUBLIC_IP}:8081"
+      else
+        PRODUCER_API_URL="http://localhost:8081"
+      fi
+    else
+      PRODUCER_API_URL="http://localhost:8081"
+    fi
+  fi
 
-if [ -z "$LAMBDA_API_URL" ]; then
-    # Try PostgreSQL Lambda API URL (for producer-api-python-rest-lambda-pg)
-    LAMBDA_API_URL=$(terraform output -raw python_rest_pg_api_url 2>/dev/null || echo "")
-fi
+  # Verify Producer API is accessible
+  if curl -sf "${PRODUCER_API_URL}/api/v1/events/health" > /dev/null 2>&1; then
+    pass "Producer API is accessible at: $PRODUCER_API_URL"
+  else
+    warn "Producer API may not be running at: $PRODUCER_API_URL"
+    info "Make sure producer-api-java-rest container is running: docker-compose ps producer-api-java-rest"
+  fi
 
-if [ -z "$LAMBDA_API_URL" ]; then
-    # Try alternative output names
-    LAMBDA_API_URL=$(terraform output -json 2>/dev/null | jq -r '.api_url.value // .python_rest_pg_api_url.value // empty' || echo "")
-fi
-
-if [ -z "$LAMBDA_API_URL" ]; then
-    fail "Lambda API URL not found in Terraform outputs"
-    info "Available outputs:"
-    terraform output | grep -i "api\|lambda\|url"
-    exit 1
-fi
-cd "$PROJECT_ROOT"
-
-  pass "Lambda API URL: $LAMBDA_API_URL"
-  jq ".lambda_api_url = \"$LAMBDA_API_URL\"" "$RESULTS_FILE" > "$RESULTS_FILE.tmp" && mv "$RESULTS_FILE.tmp" "$RESULTS_FILE"
+  pass "Producer API URL: $PRODUCER_API_URL"
+  jq ".producer_api_url = \"$PRODUCER_API_URL\"" "$RESULTS_FILE" > "$RESULTS_FILE.tmp" && mv "$RESULTS_FILE.tmp" "$RESULTS_FILE"
   step_end
   save_checkpoint "4"
   echo ""
@@ -773,13 +778,18 @@ fi
 # Step 5: Submit Events
 if [ "$SKIP_TO_STEP" -le 5 ]; then
   step_start "Submit Events"
-  section "Step 5: Submit Events to Lambda API"
+  section "Step 5: Submit Events to Producer API"
   echo ""
   info "Submitting 10 events of each type (40 total: CarCreated, LoanCreated, LoanPaymentSubmitted, CarServiceDone)"
   echo ""
 
+  # Ensure PRODUCER_API_URL is set (from Step 4)
+  if [ -z "${PRODUCER_API_URL:-}" ]; then
+    PRODUCER_API_URL="${PRODUCER_API_URL:-http://localhost:8081}"
+  fi
+
   cd "$PROJECT_ROOT"
-  if "$SCRIPT_DIR/submit-test-events.sh" "$LAMBDA_API_URL" "$EVENTS_FILE"; then
+  if "$SCRIPT_DIR/submit-test-events.sh" "$PRODUCER_API_URL" "$EVENTS_FILE"; then
     pass "Events submitted successfully"
     jq '.events_submitted = true' "$RESULTS_FILE" > "$RESULTS_FILE.tmp" && mv "$RESULTS_FILE.tmp" "$RESULTS_FILE"
   else
@@ -1157,12 +1167,12 @@ if [ "$ALL_VALIDATIONS_PASSED" = true ]; then
     echo ""
     echo "Pipeline flow verified:"
     if [ "$DEPLOYMENT_OPTION" = "msk" ]; then
-      echo "  Lambda API → PostgreSQL → MSK Connect → MSK → Managed Flink → Filtered Topics (-msk) → MSK Consumers"
+      echo "  Producer API → PostgreSQL → MSK Connect → MSK → Managed Flink → Filtered Topics (-msk) → MSK Consumers"
       echo ""
       echo "Deployment: AWS MSK + Managed Flink"
       echo "Topics: filtered-*-events-msk"
     else
-      echo "  Lambda API → PostgreSQL → CDC → raw-event-headers → Stream Processor → Filtered Topics → Consumers"
+      echo "  Producer API → PostgreSQL → CDC → raw-event-headers → Stream Processor → Filtered Topics → Consumers"
       echo ""
       echo "Deployment: Confluent Cloud"
       echo "Note: Topics are processor-specific:"

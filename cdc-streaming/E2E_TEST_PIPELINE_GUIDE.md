@@ -10,7 +10,7 @@ The `test-e2e-pipeline.sh` script is a comprehensive end-to-end functional test 
 
 ```mermaid
 flowchart TD
-    A[Lambda API] -->|POST| B[PostgreSQL]
+    A[Producer API Java REST] -->|POST /api/v1/events| B[PostgreSQL]
     B -->|CDC| C[Debezium]
     C -->|Publish| D[raw-event-headers]
     
@@ -34,7 +34,7 @@ flowchart TD
 
 The pipeline validates:
 
-1. **Event Submission**: Events successfully submitted to Lambda API
+1. **Event Submission**: Events successfully submitted to Producer API Java REST
 2. **Database Persistence**: Events stored in PostgreSQL `event_headers` table
 3. **CDC Capture**: Debezium connector captures changes and publishes to Kafka
 4. **Kafka Topics**: Events appear in `raw-event-headers` topic
@@ -46,9 +46,9 @@ The pipeline validates:
 
 ### Required Tools
 
-- **Terraform**: For infrastructure outputs (Aurora endpoint, Lambda API URL)
+- **Terraform**: For infrastructure outputs (Aurora endpoint)
 - **Confluent CLI**: For Kafka topic validation (optional but recommended)
-- **Docker & Docker Compose**: For running stream processor and consumers
+- **Docker & Docker Compose**: For running producer API, stream processor, and consumers
 - **jq**: For JSON parsing
 - **Python 3**: For database validation scripts
 - **AWS CLI**: For Aurora cluster management
@@ -56,7 +56,7 @@ The pipeline validates:
 ### Required Infrastructure
 
 - **Aurora PostgreSQL Cluster**: Running and accessible
-- **Lambda API**: Deployed and accessible (for event submission)
+- **Producer API Java REST**: Running on EC2 (port 8081) for event submission
 - **Confluent Cloud**: Kafka cluster with topics configured
 - **CDC Connector**: Debezium connector running and capturing changes
 - **Flink Statements**: Deployed in Confluent Cloud (optional, for Flink validation)
